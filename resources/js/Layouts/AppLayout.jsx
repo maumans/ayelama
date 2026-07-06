@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -14,12 +14,104 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { cn } from '@/lib/utils';
 import GlobalSearch from '@/components/GlobalSearch';
 
-function SealIcon({ className }) {
+/* ── Helpers couleurs dynamiques ───────────────────────────────────── */
+
+function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+function adjustHex(hex, amt) {
+    const [r,g,b] = hexToRgb(hex);
+    const clamp = v => Math.min(255, Math.max(0, v + amt));
+    return '#' + [clamp(r),clamp(g),clamp(b)].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+function useTheme(apparence) {
+    useEffect(() => {
+        const primary = apparence?.couleur_primaire || '#0F2D60';
+        const accent  = apparence?.couleur_accent   || '#E8A520';
+        const fond    = apparence?.couleur_fond     || '#F5F5F3';
+        const pMed    = adjustHex(primary, 12);
+        const pLgt    = adjustHex(primary, 28);
+        const aHov    = adjustHex(accent, -18);
+        const [pr,pg,pb] = hexToRgb(primary);
+        const [pm0,pm1,pm2] = hexToRgb(pMed);
+        const [pl0,pl1,pl2] = hexToRgb(pLgt);
+        const [ar,ag,ab] = hexToRgb(accent);
+
+        const root = document.documentElement;
+        root.style.setProperty('--color-ink',        primary);
+        root.style.setProperty('--color-ink-medium',  pMed);
+        root.style.setProperty('--color-ink-light',   pLgt);
+        root.style.setProperty('--color-seal',        accent);
+        root.style.setProperty('--color-seal-hover',  aHov);
+        root.style.setProperty('--color-seal-light',  `rgba(${ar},${ag},${ab},0.12)`);
+        root.style.setProperty('--color-app-bg',      fond);
+
+        let el = document.getElementById('ayelama-theme');
+        if (!el) { el = document.createElement('style'); el.id = 'ayelama-theme'; document.head.appendChild(el); }
+        el.textContent = `
+.bg-ink{background-color:${primary}!important}.bg-ink-medium{background-color:${pMed}!important}.bg-ink-light{background-color:${pLgt}!important}
+.text-ink{color:${primary}!important}.border-ink{border-color:${primary}!important}.border-ink-medium{border-color:${pMed}!important}
+.ring-ink{--tw-ring-color:${primary}!important}.hover\\:bg-ink-medium:hover{background-color:${pMed}!important}
+.hover\\:bg-ink-medium\\/60:hover,.bg-ink-medium\\/60{background-color:rgba(${pm0},${pm1},${pm2},0.6)!important}
+.bg-ink\\/5{background-color:rgba(${pr},${pg},${pb},0.05)!important}.bg-ink\\/10{background-color:rgba(${pr},${pg},${pb},0.1)!important}
+.border-ink\\/20{border-color:rgba(${pr},${pg},${pb},0.2)!important}.bg-ink-light\\/30{background-color:rgba(${pl0},${pl1},${pl2},0.3)!important}
+.active\\:bg-ink:active{background-color:${primary}!important}
+.bg-seal{background-color:${accent}!important}.bg-seal-hover{background-color:${aHov}!important}
+.text-seal{color:${accent}!important}.border-seal{border-color:${accent}!important}
+.ring-seal{--tw-ring-color:${accent}!important}.focus-visible\\:ring-seal:focus-visible{--tw-ring-color:rgba(${ar},${ag},${ab},0.8)!important}
+.bg-seal\\/20{background-color:rgba(${ar},${ag},${ab},0.2)!important}.bg-seal\\/10{background-color:rgba(${ar},${ag},${ab},0.1)!important}
+.hover\\:bg-seal-hover:hover{background-color:${aHov}!important}.active\\:bg-seal:active{background-color:${accent}!important}
+.shadow-seal,.hover\\:shadow-seal:hover{box-shadow:0 2px 8px 0 rgba(${ar},${ag},${ab},0.35)!important}
+.bg-app-bg{background-color:${fond}!important}body{background-color:${fond}!important}
+.badge-step-active{border-color:${accent}!important;color:${aHov}!important}
+:focus-visible{outline-color:${accent}!important}
+        `;
+    }, [apparence?.couleur_primaire, apparence?.couleur_accent, apparence?.couleur_fond]);
+}
+
+function ScalesIcon({ className }) {
     return (
-        <svg viewBox="0 0 32 32" className={cn('shrink-0', className)} fill="none">
-            <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="1.5" />
-            <text x="16" y="22" textAnchor="middle" fontFamily="Georgia, serif" fontSize="16" fontWeight="700" fill="currentColor">A</text>
+        <svg viewBox="0 0 40 40" className={cn('shrink-0', className)} fill="none">
+            {/* Arc supérieur */}
+            <path d="M8 20 Q20 6 32 20" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+            {/* Losange central */}
+            <path d="M20 9 L22 13 L20 17 L18 13 Z" fill="#E8A520"/>
+            {/* Mât central */}
+            <line x1="20" y1="13" x2="20" y2="33" stroke="white" strokeWidth="2"/>
+            {/* Poutre horizontale */}
+            <line x1="8" y1="21" x2="32" y2="21" stroke="white" strokeWidth="2"/>
+            {/* Chaîne gauche */}
+            <line x1="10" y1="21" x2="10" y2="27" stroke="white" strokeWidth="1.5"/>
+            {/* Chaîne droite */}
+            <line x1="30" y1="21" x2="30" y2="27" stroke="white" strokeWidth="1.5"/>
+            {/* Plateau gauche */}
+            <path d="M6 27 Q10 30.5 14 27" stroke="#E8A520" strokeWidth="2" fill="none" strokeLinecap="round"/>
+            {/* Plateau droit */}
+            <path d="M26 27 Q30 30.5 34 27" stroke="#E8A520" strokeWidth="2" fill="none" strokeLinecap="round"/>
         </svg>
+    );
+}
+
+function LogoMark({ size = 'md', logoUrl, collapsed }) {
+    if (logoUrl) {
+        // Mode image : prend toute la hauteur du header, largeur auto
+        const h = collapsed ? 'h-8 w-8' : 'h-10';
+        return (
+            <div className={cn('shrink-0 flex items-center justify-center', h)}>
+                <img
+                    src={logoUrl}
+                    alt="Logo"
+                    className={cn('object-contain', collapsed ? 'h-8 w-8 rounded-lg' : 'h-10 max-w-[120px]')}
+                />
+            </div>
+        );
+    }
+    const s = size === 'sm' ? 'h-8 w-8' : 'h-9 w-9';
+    return (
+        <div className={cn('shrink-0 rounded-lg bg-ink-light/30 flex items-center justify-center overflow-hidden', s)}>
+            <ScalesIcon className="h-6 w-6" />
+        </div>
     );
 }
 
@@ -36,11 +128,13 @@ function buildNavItems(can, notifications) {
 }
 
 export default function AppLayout({ children, breadcrumbs = [] }) {
-    const { auth, notifications } = usePage().props;
+    const { auth, notifications, apparence } = usePage().props;
     const user = auth?.user;
     const can  = user?.can ?? {};
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
+
+    useTheme(apparence);
     const currentPath = usePage().url;
 
     const navItems    = buildNavItems(can, notifications);
@@ -78,8 +172,8 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                     style={{ width: collapsed ? 64 : 240 }}
                 >
                     {/* Logo */}
-                    <div className="flex items-center gap-3 px-4 py-4 border-b border-ink-medium h-14 shrink-0">
-                        <SealIcon className="h-7 w-7 text-seal shrink-0" />
+                    <div className="flex items-center gap-3 px-3 py-3 border-b border-ink-medium h-14 shrink-0">
+                        <LogoMark size={collapsed ? 'sm' : 'md'} logoUrl={apparence?.logo_url} collapsed={collapsed} />
                         <AnimatePresence>
                             {!collapsed && (
                                 <motion.div
@@ -87,10 +181,14 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                                     animate={{ opacity: 1, x: 0 }}
                                     exit={{ opacity: 0, x: -8 }}
                                     transition={{ duration: 0.15 }}
-                                    className="overflow-hidden"
+                                    className="overflow-hidden min-w-0"
                                 >
-                                    <span className="font-serif text-white font-semibold text-base leading-none block">Ayelema</span>
-                                    <span className="text-slate-400 text-[10px] tracking-widest uppercase block mt-0.5">Office Notarial</span>
+                                    <span className="font-serif text-white font-semibold text-sm leading-tight block truncate">
+                                        {apparence?.office_nom || 'Maître Ayelama Bah'}
+                                    </span>
+                                    <span className="text-seal text-[9px] tracking-[0.18em] uppercase font-medium block mt-0.5">
+                                        {apparence?.office_sous_titre || 'Notaire'}
+                                    </span>
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -221,7 +319,7 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
                     {/* Topbar */}
-                    <header className="h-14 border-b border-slate-200 bg-white flex items-center gap-3 px-4 shrink-0 z-30">
+                    <header className="h-14 border-b border-slate-200 bg-white/95 backdrop-blur-sm flex items-center gap-3 px-4 shrink-0 z-30">
                         <button
                             onClick={() => setMobileOpen(!mobileOpen)}
                             className="lg:hidden p-1.5 rounded-md text-slate-500 hover:bg-slate-100 transition-colors"
@@ -262,7 +360,7 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
 
                         {/* Nouveau dossier (clercs et notaires) */}
                         {can?.creerDossier && (
-                            <Button size="sm" asChild>
+                            <Button size="sm" variant="seal" asChild>
                                 <Link href="/dossiers/create">
                                     <Plus className="h-3.5 w-3.5" />
                                     <span className="hidden sm:inline">Nouveau dossier</span>

@@ -40,9 +40,6 @@ class DossierPolicy
             EtapeDossier::Revision       => $user->role === RoleUtilisateur::Reviseur
                 || $user->role === RoleUtilisateur::Notaire
                 || $user->role === RoleUtilisateur::Administrateur,
-            EtapeDossier::SignatureClient,
-            EtapeDossier::SignatureNotaire => $user->role === RoleUtilisateur::Notaire
-                || $user->role === RoleUtilisateur::Administrateur,
             EtapeDossier::Formalites,
             EtapeDossier::Expedition     => $user->role === RoleUtilisateur::Formaliste
                 || $user->role === RoleUtilisateur::Notaire
@@ -71,6 +68,16 @@ class DossierPolicy
             RoleUtilisateur::Notaire,
             RoleUtilisateur::Administrateur,
         ]) && $dossier->etape === EtapeDossier::Revision;
+    }
+
+    public function genererDocuments(User $user, Dossier $dossier): bool
+    {
+        return $user->actif && in_array($user->role, [
+            RoleUtilisateur::Clerc,
+            RoleUtilisateur::Reviseur,
+            RoleUtilisateur::Notaire,
+            RoleUtilisateur::Administrateur,
+        ]);
     }
 
     public function gererFormalites(User $user, Dossier $dossier): bool

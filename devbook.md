@@ -63,12 +63,18 @@ Chaque étape est bloquante : impossible de passer à la suivante sans valider l
 | UI primitifs | Radix UI | — |
 | Utilitaires CSS | clsx + tailwind-merge + cva | — |
 | API HTTP | Axios | — |
+| Génération .docx | phpoffice/phpword | ^1.3 |
 
 ### Dépendances installées (npm)
 ```
 framer-motion, lucide-react, clsx, tailwind-merge, class-variance-authority,
 @radix-ui/react-{dialog, dropdown-menu, tabs, tooltip, checkbox, progress,
 select, separator, avatar, label, slot, popover}, axios
+```
+
+### Dépendances installées (composer)
+```
+phpoffice/phpword — génération / remplissage de fichiers .docx (TemplateProcessor)
 ```
 
 > ⚠️ **Windows** : Vite 8 (rolldown) nécessite `@rolldown/binding-win32-x64-msvc@1.1.2`
@@ -87,6 +93,8 @@ resources/js/
 ├── bootstrap.js                    # Axios global
 ├── lib/
 │   └── utils.js                    # cn() = clsx + tailwind-merge
+├── data/
+│   └── questionnaires.js           # Config partagée : QUESTIONNAIRES + TYPE_ACTE_CODE_MAP
 ├── Components/                     # (capital C — Windows insensible à la casse)
 │   ├── GlobalSearch.jsx            # Palette ⌘K (fetch JSON /search)
 │   └── ui/                         # Composants shadcn/ui adaptés
@@ -114,8 +122,8 @@ resources/js/
     ├── Profile/                    # Profil utilisateur (Breeze)
     ├── Dossiers/
     │   ├── Index.jsx               # Liste paginée, recherche, filtres étape/catégorie
-    │   ├── Show.jsx                # Fiche dossier (stepper + 6 onglets + panneau latéral)
-    │   ├── Create.jsx              # Wizard 4 étapes → POST /dossiers
+    │   ├── Show.jsx                # Fiche dossier (stepper + 6 onglets + 2 modals édition)
+    │   ├── Create.jsx              # Wizard 4 étapes → POST /dossiers (questionnaire sectionné)
     │   └── Revision.jsx            # Grille de contrôle → PUT /dossiers/{ref}/revision
     ├── Revisions/
     │   └── Index.jsx               # File révisions en attente
@@ -124,7 +132,7 @@ resources/js/
     ├── Repertoire/
     │   └── Index.jsx               # Répertoire parties/clients avec filtres
     ├── Modeles/
-    │   └── Index.jsx               # Placeholder (module 4 à venir)
+    │   └── Index.jsx               # CRUD modèles .docx — upload, activer/désactiver, générer
     ├── Courriers/
     │   └── Index.jsx               # Placeholder (module futur)
     └── Parametres/
@@ -155,18 +163,24 @@ app/
 │   ├── Document.php
 │   ├── Partie.php                  # initiales (accessor calculé depuis nom)
 │   ├── JournalActivite.php         # enregistrer() static
-│   └── ModeleActe.php
+│   ├── ModeleActe.php
+│   ├── Facture.php
+│   └── LigneFacture.php            # $table = 'lignes_factures' (explicite)
 ├── Policies/
 │   ├── DossierPolicy.php           # viewAny, view, create (Clerc+Notaire+Admin), update, delete, avancer, reviser, gererFormalites
 │   └── RevisionPolicy.php          # view, update, valider, renvoyer
 ├── Services/
-│   └── DossierStepService.php      # avancer(), reculer(), verifierPrerequis()
+│   ├── DossierStepService.php      # avancer(), reculer(), verifierPrerequis()
+│   ├── ActesGeneratorService.php   # genererDocument() — PhpWord TemplateProcessor
+│   └── NombreEnLettres.php         # convertir(float, devise) → majuscules FR (milliers, millions, milliards)
 ├── Http/
 │   ├── Controllers/
 │   │   ├── DashboardController.php
-│   │   ├── DossierController.php   # index, create, store, show, edit→redirect, update, destroy, avancer
+│   │   ├── DossierController.php   # index, create, store, show, update, destroy, avancer, updateQuestionnaire
 │   │   ├── RevisionController.php  # index, show, update, valider, renvoyer
 │   │   ├── FormaliteController.php # index, store, update
+│   │   ├── ModeleActeController.php# index, store, update, destroy — upload .docx avec storeAs()
+│   │   ├── DocumentController.php  # download, preview — téléchargement avec extension correcte
 │   │   ├── SearchController.php    # index → JSON {results:[]}
 │   │   ├── RepertoireController.php# index, autocomplete → JSON
 │   │   ├── ParametresController.php# index, utilisateurs, storeUtilisateur, updateUtilisateur, typesActes, updateTypeActe
@@ -176,7 +190,7 @@ app/
 │   │   └── RoleMiddleware.php         # alias 'role:' dans bootstrap/app.php
 │   └── Requests/
 │       ├── StoreDossierRequest.php    # authorize via DossierPolicy::create
-│       └── UpdateDossierRequest.php
+│       └── UpdateDossierRequest.php   # objet, valeur, echeance, notaire_id, reviseur_id, formaliste_id
 └── Notifications/
     ├── EcheanceDossierNotification.php
     └── RevisionEnAttenteNotification.php
@@ -190,6 +204,7 @@ database/
     ├── UserSeeder.php              # 5 utilisateurs (1 par rôle + admin)
     ├── TypeActeSeeder.php          # 19 types d'actes répartis en 8 catégories
     └── DossierSeeder.php           # 5 dossiers réalistes à différentes étapes
+dictionnaire_balises.md             # Référence complète des variables ${...} des modèles .docx
 ```
 
 ---
@@ -247,7 +262,7 @@ database/
 
 - [x] 13 migrations (users, dossiers, types_actes, questionnaires, documents, revision_grilles, revisions, revision_points, formalites, formalite_pieces, parties, journal_activites, modeles_actes)
 - [x] 5 Enums PHP (RoleUtilisateur, EtapeDossier, CategorieActe, StatutRevision, StatutFormalite)
-- [x] 13 modèles Eloquent avec relations complètes et casts
+- [x] 15 modèles Eloquent avec relations complètes et casts (+ Facture, LigneFacture)
 - [x] 3 Seeders (5 utilisateurs, 19 types d'actes, 5 dossiers réalistes)
 
 ### ✅ Complété — Module 2 : Rôles & Permissions
@@ -260,25 +275,49 @@ database/
 
 ### ✅ Complété — Module 3 : Controllers + CRUD + Workflow
 
-- [x] `DossierController` (index, create, store, show, edit→redirect, update, destroy, avancer)
+- [x] `DossierController` (index, create, store, show, update, destroy, avancer, **updateQuestionnaire**)
 - [x] `RevisionController` (index, show, update, valider, renvoyer)
 - [x] `FormaliteController` (index, store, update)
 - [x] `DashboardController` (stats, file d'attente, alertes, activité, répartition catégories)
 - [x] `DossierStepService` (avancer avec prérequis, reculer)
-- [x] `StoreDossierRequest` / `UpdateDossierRequest`
+- [x] `StoreDossierRequest` / `UpdateDossierRequest` (objet, valeur, echéance, notaire_id, reviseur_id, formaliste_id)
 - [x] Génération automatique référence format `{PREFIXE}-{ANNÉE}-{XXXX}`
 - [x] Création automatique `Revision` quand dossier passe en étape Révision
+
+### ✅ Complété — Module 4 : Génération de documents
+
+- [x] `phpoffice/phpword` installé — `TemplateProcessor` pour remplissage de variables `${...}` dans `.docx`
+- [x] `ActesGeneratorService::genererDocument()` — génère un `.docx` depuis un modèle ou un placeholder si modèle absent
+- [x] Variables automatiques remplies : `${office.*}`, `${dossier.reference}`, `${dossier.objet}`, `${date_acte_jma}`, `${annee_lettres}`, `${date_acte_lettres}`
+- [x] Variables questionnaire remplies automatiquement depuis `donnees` JSON — tous les préfixes `soc.*`, `pp.*`, `ger.*`, etc.
+- [x] Auto-génération `*_lettres` depuis `*_chiffres` via `NombreEnLettres::convertir()`
+- [x] `NombreEnLettres` service — conversion montants en lettres FR majuscules (jusqu'aux milliards, Francs Guinéens par défaut)
+- [x] `datEnLettres()` — date en lettres notariale : "PREMIER JUILLET DEUX MILLE VINGT-SIX" (jour 1 = "PREMIER", pas "UN")
+- [x] `ModeleActeController` — CRUD complet, upload `.docx` avec `storeAs()` dans `storage/app/private/modeles/`
+- [x] `DocumentController` — téléchargement et prévisualisation avec extension `.docx` correcte
+- [x] `Modeles/Index.jsx` — page fonctionnelle (upload, liste, activer/désactiver, générer par dossier)
+- [x] `dictionnaire_balises.md` — référence complète de toutes les variables `${...}` utilisables dans les modèles
+- [x] Fichier partagé `resources/js/data/questionnaires.js` — `QUESTIONNAIRES` (config champs) + `TYPE_ACTE_CODE_MAP` (code DB → clé questionnaire)
+
+### ✅ Complété — Module 4b : Édition dossier
+
+- [x] `ModalEditDossier` dans `Show.jsx` — modifier objet, valeur, échéance, notaire, réviseur, formaliste
+- [x] `ModalEditQuestionnaire` dans `Show.jsx` — modifier tous les champs du questionnaire par sections
+- [x] `InformationsTab` — affichage questionnaire groupé par sections avec labels lisibles, valeurs vides masquées
+- [x] Route `PATCH /dossiers/{ref}/questionnaire` → `DossierController::updateQuestionnaire()`
+- [x] `useEffect` sur `open` pour reset des formulaires modals à l'ouverture
+- [x] `reviseurs`, `formalistes`, `notaires` passés en props Inertia sur `DossierController::show()`
 
 ### ✅ Complété — Pages connectées aux vraies données
 
 - [x] **Dashboard** — stats réelles (enCours, enRevision, echeancesProches, formalitesUrgentes), file d'attente, alertes urgentes, activité récente, répartition par catégorie
 - [x] **Dossiers/Index** — liste paginée (25/page), recherche texte, filtres étape + catégorie, pagination avec `prev_page_url` / `next_page_url`
-- [x] **Dossiers/Show** — en-tête dossier, stepper workflow, 6 onglets (informations, documents, révision, formalités, parties, journal) tous avec données réelles, panneau latéral droit
-- [x] **Dossiers/Create** — wizard 4 étapes, `findTypeActeId()` pour mapper vers la DB, `router.post('/dossiers', {...})`, champs objet + notaire + réviseur + formaliste
+- [x] **Dossiers/Show** — en-tête dossier, stepper workflow, 6 onglets (informations, documents, révision, formalités, parties, journal) tous avec données réelles, panneau latéral droit, 2 modals d'édition (dossier + questionnaire)
+- [x] **Dossiers/Create** — wizard 4 étapes, `findTypeActeId()` pour mapper vers la DB, `router.post('/dossiers', {...})`, champs objet + notaire + réviseur + formaliste, questionnaire affiché par sections (Société / Associé unique / Gérant)
 - [x] **Dossiers/Revision** — grille de contrôle, sauvegarde partielle (`PUT`), valider (`POST`), renvoyer avec motif (`POST`), dialog de confirmation, DEFAULT_GROUPES si pas de grille en DB
 - [x] **Formalites/Index** — groupé par dossier, `PATCH` pour marquer déposé/retour reçu/toggle pièce
 - [x] **Revisions/Index** — file révisions en attente avec liens directs
-- [x] **Modeles/Index** — placeholder (module 4 à venir)
+- [x] **Modeles/Index** — CRUD modèles .docx, upload, activation, génération de documents par dossier
 - [x] **Courriers/Index** — placeholder (module futur)
 - [x] **Parametres/Baremes** — placeholder (module 6 à venir)
 - [x] **Parametres/Index, Utilisateurs, TypesActes** — fonctionnel (admin only)
@@ -313,11 +352,10 @@ database/
 
 ### 🔲 Reste à faire
 
-#### Module 4 — Génération de documents
-- [ ] Modèles Word (`.docx`) avec variables (PhpWord)
-- [ ] Service de génération + prévisualisation PDF
-- [ ] Gestion des versions de modèles
-- [ ] Page `Modeles/Index` à implémenter (actuellement placeholder)
+#### Module 4 — Génération de documents (suite)
+- [ ] Prévisualisation PDF dans le navigateur (conversion .docx → PDF côté serveur)
+- [ ] Gestion des versions de modèles (historique, rollback)
+- [ ] Signature électronique intégrée (module futur)
 
 #### Module 5 — Grilles de révision dynamiques
 - [ ] Interface admin pour configurer les grilles par type d'acte (table `revision_grilles`)
@@ -339,11 +377,17 @@ database/
 
 ## 6. Modules à développer (détail)
 
-### Module 4 — Génération de documents
-- Modèles Word (`.docx`) avec variables à remplir
-- Service de génération (PhpWord ou API externe)
-- Prévisualisation PDF dans le navigateur
-- Gestion des versions de modèles
+### Module 4 — Génération de documents (noyau complété)
+
+Le noyau est opérationnel :
+- Modèles Word (`.docx`) uploadés via `ModeleActeController`, stockés dans `storage/app/private/modeles/`
+- `ActesGeneratorService::genererDocument()` — `TemplateProcessor` remplace toutes les variables `${...}`
+- Variables disponibles documentées dans `dictionnaire_balises.md` (office, dossier, date, questionnaire)
+- `NombreEnLettres::convertir()` + `datEnLettres()` — montants et dates en lettres notariales
+
+Reste à implémenter :
+- Prévisualisation PDF (LibreOffice headless ou service tiers)
+- Versionnage des modèles
 
 ### Module 5 — Révision (grille de contrôle dynamique)
 - Table `revision_grilles` par type d'acte (configurable admin) — **déjà en DB**
@@ -417,6 +461,14 @@ scopeEnRevision()       // where('etape', 'revision')
 scopeEcheanceUrgente()  // echeance <= now()+72h, non clôturé
 ```
 
+### Conventions questionnaire
+Les clés du champ `donnees` (JSON) sont préfixées par entité :
+- `soc.*` — données société (ex. `soc.denomination`, `soc.capital_chiffres`, `soc.siege`)
+- `pp.*` — personne physique / associé unique (ex. `pp.nom_complet`, `pp.cni`)
+- `ger.*` — gérant (ex. `ger.nom_complet`, `ger.adresse`)
+
+Les clés suffixées `_chiffres` génèrent automatiquement la variante `_lettres` via `NombreEnLettres::convertir()`.
+
 ---
 
 ## 8. Décisions techniques
@@ -435,6 +487,12 @@ scopeEcheanceUrgente()  // echeance <= now()+72h, non clôturé
 | 10 | `DEFAULT_GROUPES` dans `Revision.jsx` | Si aucune `RevisionGrille` n'est configurée pour ce type d'acte, la page utilise 3 groupes / 7 points par défaut. Les IDs sont `p1`…`p7` — cohérents avec ce que le contrôleur sauvegarde |
 | 11 | pail supprimé du script dev | `php artisan pail` requiert l'extension `pcntl` absente sous Windows. Le script `composer run dev` lance maintenant uniquement : server, queue, vite |
 | 12 | `DossierPolicy::create` inclut Notaire | `RoleUtilisateur::peutOuvrir()` n'inclut PAS Notaire, mais la policy oui. `HandleInertiaRequests` utilise `$user->can('create', Dossier::class)` pour être cohérent |
+| 13 | `TemplateProcessor` via `DIRECTORY_SEPARATOR` | Sur Windows, PhpWord échoue à écrire si le répertoire de sortie n'existe pas. `mkdir()` natif avec `DIRECTORY_SEPARATOR` résout le problème (pas `Storage::makeDirectory()`) |
+| 14 | `Storage::disk('local')->path()` pour les modèles | Les modèles `.docx` sont dans `storage/app/private/` (disque `local`). `public_path()` ou `storage_path('app/public/')` pointent ailleurs — utiliser `Storage::disk('local')->path($chemin)` |
+| 15 | `TYPE_ACTE_CODE_MAP` dans `questionnaires.js` | Les codes DB (`SOC-SARL`, `VTE-IMM`…) ne correspondent pas aux clés frontend (`creation_sarl`, `vente_immeuble`…). La map sert de pont sans modifier la DB ni les modèles |
+| 16 | `NombreEnLettres::convertir(montant, '')` | Passer une chaîne vide comme devise produit le nombre en lettres sans suffixe, utile pour les dates (années, jours). Passer `'Francs Guinéens'` (défaut) pour les montants |
+| 17 | `datEnLettres()` — jour 1 = "PREMIER" | Convention notariale française : le 1er du mois s'écrit "PREMIER", pas "UN". Les autres jours passent par `NombreEnLettres::convertir()` |
+| 18 | Champs questionnaire préfixés (`soc.*`, `ger.*`) | Les variables dans les modèles `.docx` utilisent la notation pointée `${soc.denomination}`. Les IDs des champs React DOIVENT correspondre exactement pour que `TemplateProcessor::setValue()` les remplace |
 
 ---
 
@@ -459,6 +517,14 @@ scopeEcheanceUrgente()  // echeance <= now()+72h, non clôturé
 | Sauvegarde grille partielle → 422 | `etat` validé comme `required` mais les points non évalués ont `null` → changé en `nullable` + `continue` si null |
 | Toutes les pages affichaient des données factices | Réécriture complète de 6 pages pour utiliser `usePage().props` |
 | Boutons d'action sans handler (Create, Revision, Formalites) | Ajout de `router.post/put/patch` dans les composants |
+| PhpWord `RuntimeException: Failed to create` sur Windows | `mkdir()` natif PHP avec `DIRECTORY_SEPARATOR` au lieu de `Storage::makeDirectory()` — PhpWord requiert un chemin absolu avec séparateurs natifs |
+| `SQLSTATE: Table 'lignes_factures' doesn't exist` | `LigneFacture` model utilisait la convention `ligne_factures` — ajouté `protected $table = 'lignes_factures'` explicitement |
+| Téléchargement `.docx` renvoie un fichier `.htm` | Double préfixe `public/public/` dans le chemin — corrigé en utilisant `storage_path('app/public/' . $doc->chemin)` |
+| Téléchargement sans extension de fichier | `response()->download()` avec paramètre `$filename` explicite incluant `.docx` |
+| `TemplateProcessor` "File not found" | Modèle cherché dans `public/` au lieu de `storage/app/private/` — corrigé avec `Storage::disk('local')->path($storagePath)` |
+| Variables `${soc.denomination}` non remplacées | Champs questionnaire utilisaient des IDs courts (`denomination`) sans préfixe (`soc.denomination`) — mis à jour dans `questionnaires.js` |
+| `${date_acte_lettres}` non remplacée dans les modèles | Variable non générée dans `ActesGeneratorService` — ajout de `datEnLettres()` private method + appel dans `remplirInfosDossier()` |
+| Sections Société/Associé/Gérant absentes dans Create.jsx | Boucle `.map((field) =>` sans gestion du prop `section` — corrigé avec `React.Fragment` + détection `field.section` par comparaison d'index |
 
 ### ⚠️ À surveiller
 
@@ -469,7 +535,8 @@ scopeEcheanceUrgente()  // echeance <= now()+72h, non clôturé
 | Pages Auth (Login/Register) | Utilisent encore `GuestLayout` de Breeze — design non unifié, fonctionnel |
 | `recharts` installé | Non encore utilisé — prévu pour graphiques dashboard (module futur) |
 | Importation `@/components/*` vs `@/Components/*` | Windows insensible à la casse : les deux fonctionnent. Sur Linux (déploiement) : vérifier la cohérence de la casse |
+| PDF preview non implémentée | Génération `.docx` OK, mais pas de prévisualisation navigateur. Nécessite LibreOffice headless ou service tiers |
 
 ---
 
-*Dernière mise à jour : 23/06/2026 — Modules 1–3, 7–10 complétés. Toutes les pages connectées aux données réelles. Bugs navigation/routing/permissions corrigés.*
+*Dernière mise à jour : 01/07/2026 — Modules 1–4, 4b, 7–10 complétés. Génération de documents .docx opérationnelle (PhpWord TemplateProcessor). Édition dossier + questionnaire depuis Show.jsx. Dictionnaire des balises documenté.*

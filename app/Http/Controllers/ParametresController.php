@@ -6,10 +6,12 @@ use App\Enums\CategorieActe;
 use App\Enums\RoleUtilisateur;
 use App\Models\Bareme;
 use App\Models\RevisionGrille;
+use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -105,6 +107,14 @@ class ParametresController extends Controller
                 'points'        => $g->points ?? [],
             ]);
 
+        $settings = array_merge(
+            $this->apparenceDefaults(),
+            Setting::all()->toArray()
+        );
+        $settings['logo_url'] = $settings['logo_path']
+            ? url('storage/' . $settings['logo_path'])
+            : null;
+
         return Inertia::render('Parametres/Index', [
             'stats' => [
                 'utilisateurs'       => User::count(),
@@ -125,6 +135,7 @@ class ParametresController extends Controller
             'categories'        => $categories,
             'organismes'        => ['APIP', 'Impots', 'Conservation', 'CNSS', 'Notaire', 'Autre'],
             'grilles'           => $grilles,
+            'apparence'         => $settings,
         ]);
     }
 
@@ -422,5 +433,91 @@ class ParametresController extends Controller
         $grille->delete();
 
         return back()->with('success', 'Grille supprimée.');
+    }
+
+    // ── Apparence ─────────────────────────────────────────────────────────
+
+    private function apparenceDefaults(): array
+    {
+        return [
+            'office_nom'        => 'Maître Ayelama Bah',
+            'office_sous_titre' => 'Notaire',
+            'couleur_primaire'  => '#0F2D60',
+            'couleur_accent'    => '#E8A520',
+            'couleur_fond'      => '#F5F5F3',
+            'logo_path'         => null,
+        ];
+    }
+
+    public function apparence()
+    {
+        $settings = array_merge(
+            $this->apparenceDefaults(),
+            Setting::all()->toArray()
+        );
+
+        $settings['logo_url'] = $settings['logo_path']
+            ? url('storage/' . $settings['logo_path'])
+            : null;
+
+        return Inertia::render('Parametres/Index', $this->buildIndexData([
+            'apparence' => $settings,
+        ]));
+    }
+
+    public function updateApparence(Request $request)
+    {
+        $data = $request->validate([
+            'office_nom'        => ['required', 'string', 'max:100'],
+            'office_sous_titre' => ['required', 'string', 'max:60'],
+            'couleur_primaire'  => ['required', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'couleur_accent'    => ['required', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'couleur_fond'      => ['required', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+        ]);
+
+        Setting::setMany($data);
+
+        return back()->with('success', 'Apparence mise à jour.');
+    }
+
+    public function uploadLogo(Request $request)
+    {
+        $request->validate([
+            'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,svg', 'max:2048'],
+        ]);
+
+        $old = Setting::get('logo_path');
+        if ($old) Storage::disk('public')->delete($old);
+
+        $path = $request->file('logo')->store('logos', 'public');
+        Setting::set('logo_path', $path);
+
+        return back()->with('success', 'Logo mis à jour.');
+    }
+
+    public function deleteLogo()
+    {
+        $path = Setting::get('logo_path');
+        if ($path) Storage::disk('public')->delete($path);
+        Setting::set('logo_path', null);
+
+        return back()->with('success', 'Logo supprimé.');
+    }
+
+    // ── Helper commun pour index() et apparence() ─────────────────────────
+
+    private function buildIndexData(array $extra = []): array
+    {
+        $settings = array_merge(
+            $this->apparenceDefaults(),
+            Setting::all()->toArray()
+        );
+        $settings['logo_url'] = $settings['logo_path']
+            ? url('storage/' . $settings['logo_path'])
+            : null;
+
+        return array_merge([
+            'apparence' => $settings,
+        ], $extra);
     }
 }

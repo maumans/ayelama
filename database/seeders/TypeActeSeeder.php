@@ -12,13 +12,19 @@ class TypeActeSeeder extends Seeder
     {
         $types = [
             // Société
-            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SARL',  'label' => 'Constitution SARL',              'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => 'Acte de constitution de société à responsabilité limitée'],
-            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SA',    'label' => 'Constitution SA',                'prefixe_reference' => 'SOC', 'delai_jours' => 45, 'description' => 'Acte de constitution de société anonyme'],
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SARLU', 'label' => 'Constitution SARLU',             'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => 'Acte de constitution de SARLU (associé unique)'],
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SARL',  'label' => 'Constitution SARL',              'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => 'Acte de constitution de société à responsabilité limitée (multi-associés)'],
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SA',    'label' => 'Constitution SA',                'prefixe_reference' => 'SOC', 'delai_jours' => 45, 'description' => 'Acte de constitution de société anonyme (capital min. 140 000 000 GNF)'],
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SAS',   'label' => 'Constitution SAS',               'prefixe_reference' => 'SOC', 'delai_jours' => 45, 'description' => 'Acte de constitution de société par actions simplifiées (multi-associés)'],
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SASU',  'label' => 'Constitution SASU',              'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => 'Acte de constitution de SASU (associé unique)'],
             ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SNC',   'label' => 'Constitution SNC',               'prefixe_reference' => 'SOC', 'delai_jours' => 20, 'description' => 'Acte de constitution de société en nom collectif'],
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-GIE',   'label' => 'Constitution GIE',               'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => "Acte de constitution de groupement d'intérêt économique"],
             ['categorie' => CategorieActe::Societe, 'code' => 'SOC-DIS',   'label' => 'Dissolution de société',         'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => 'Acte de dissolution et liquidation de société'],
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-MOD',   'label' => 'Modification de statuts',        'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => "Modification des statuts d'une société existante (capital, gérant, siège, objet…)", 'fiche_modification_obligatoire' => true],
 
             // Vente
-            ['categorie' => CategorieActe::Vente, 'code' => 'VTE-IMM',   'label' => 'Vente immobilière',              'prefixe_reference' => 'VTE', 'delai_jours' => 21, 'description' => 'Acte authentique de vente de bien immobilier'],
+            ['categorie' => CategorieActe::Vente, 'code' => 'VTE-IMM',   'label' => 'Vente immobilière (avec TF)',     'prefixe_reference' => 'VTE', 'delai_jours' => 21, 'description' => 'Acte authentique de vente immobilière avec titre foncier'],
+            ['categorie' => CategorieActe::Vente, 'code' => 'VTE-SAN',   'label' => 'Vente immobilière (sans TF)',     'prefixe_reference' => 'VTE', 'delai_jours' => 21, 'description' => 'Acte authentique de vente immobilière sans titre foncier'],
             ['categorie' => CategorieActe::Vente, 'code' => 'VTE-FDS',   'label' => 'Cession fonds de commerce',      'prefixe_reference' => 'VTE', 'delai_jours' => 30, 'description' => 'Cession de fonds de commerce et éléments incorporels'],
             ['categorie' => CategorieActe::Vente, 'code' => 'VTE-VEH',   'label' => 'Vente de véhicule',              'prefixe_reference' => 'VTE', 'delai_jours' => 7,  'description' => 'Acte notarié de vente de véhicule'],
 
@@ -27,6 +33,7 @@ class TypeActeSeeder extends Seeder
             ['categorie' => CategorieActe::Hypotheque, 'code' => 'HYP-MAI', 'label' => 'Mainlevée hypothèque',        'prefixe_reference' => 'HYP', 'delai_jours' => 10, 'description' => 'Mainlevée et radiation d\'hypothèque'],
 
             // Bail
+            ['categorie' => CategorieActe::Bail, 'code' => 'BAI-CON', 'label' => 'Bail à construction',               'prefixe_reference' => 'BAI', 'delai_jours' => 14, 'description' => 'Bail à construction notarié'],
             ['categorie' => CategorieActe::Bail, 'code' => 'BAI-COM', 'label' => 'Bail commercial',                   'prefixe_reference' => 'BAI', 'delai_jours' => 14, 'description' => 'Bail commercial notarié'],
             ['categorie' => CategorieActe::Bail, 'code' => 'BAI-HAB', 'label' => 'Bail d\'habitation',               'prefixe_reference' => 'BAI', 'delai_jours' => 7,  'description' => 'Bail d\'habitation notarié'],
 
@@ -57,7 +64,7 @@ class TypeActeSeeder extends Seeder
         ];
 
         foreach ($types as $data) {
-            TypeActe::firstOrCreate(
+            TypeActe::updateOrCreate(
                 ['code' => $data['code']],
                 array_merge($data, ['actif' => true])
             );

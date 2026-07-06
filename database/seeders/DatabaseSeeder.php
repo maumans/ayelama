@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             TypeActeSeeder::class,
             DossierSeeder::class,
             ModeleActeSeeder::class,
+            BaremeSeeder::class,
         ]);
     }
 }

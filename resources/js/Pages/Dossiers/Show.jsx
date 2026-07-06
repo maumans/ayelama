@@ -3,11 +3,12 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion } from 'framer-motion';
 import {
     Check, Clock, AlertTriangle, FileText, Download, Eye,
-    Building, User, Calendar, ChevronRight, Send, ClipboardCheck,
-    PenLine, Truck, Archive, Phone, MapPin,
+    Building, Send, ClipboardCheck, Phone, MapPin,
     ArrowRight, CheckCircle2, Plus, Trash2, Upload, PenSquare, X,
-    MailCheck, CheckCheck, Square,
+    MailCheck, CheckCheck, Square, Pencil, RefreshCw,
 } from 'lucide-react';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
+import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
@@ -24,38 +25,35 @@ import { cn } from '@/lib/utils';
 
 const STEPS = [
     { id: 'initialisation', label: 'Initialisation', short: 'Init.' },
-    { id: 'edition', label: 'Édition actes', short: 'Édition' },
-    { id: 'revision', label: 'Révision', short: 'Révision' },
-    { id: 'signature_client', label: 'Signature client', short: 'Sig. client' },
-    { id: 'signature_notaire', label: 'Signature notaire', short: 'Sig. notaire' },
-    { id: 'formalites', label: 'Formalités', short: 'Formalités' },
-    { id: 'expedition', label: 'Expédition', short: 'Expédition' },
-    { id: 'cloture', label: 'Clôturé', short: 'Clôturé' },
+    { id: 'edition',        label: 'Édition actes',  short: 'Édition' },
+    { id: 'revision',       label: 'Révision',        short: 'Révision' },
+    { id: 'formalites',     label: 'Formalités',      short: 'Formalités' },
+    { id: 'expedition',     label: 'Expédition',       short: 'Expédition' },
+    { id: 'cloture',        label: 'Clôturé',          short: 'Clôturé' },
 ];
 
 const docStatutConfig = {
     a_editer: { label: 'À éditer', color: 'text-slate-500 bg-slate-50 border-slate-200' },
-    edite: { label: 'Édité', color: 'text-blue-600 bg-blue-50 border-blue-200' },
-    signe_client: { label: 'Signé client', color: 'text-purple-600 bg-purple-50 border-purple-200' },
-    signe_notaire: { label: 'Signé notaire', color: 'text-success bg-success-bg border-green-200' },
+    edite:    { label: 'Édité',    color: 'text-blue-600 bg-blue-50 border-blue-200' },
 };
 
 const TYPE_DOC_LABELS = {
     acte_principal: 'Acte principal',
+    page_garde:     'Page de garde',
+    attestation:    'Attestation',
+    declaration:    'Déclaration',
+    dnsv:           'DNSV',
+    insertion:      'Insertion au JORG',
+    rccm:           'RCCM',
+    note_frais:     'Note de frais',
+    bordereau:      'Bordereau / Tableau',
     annexe:         'Annexe',
     procedure:      'Procédure',
-    lettre:         'Lettre',
+    lettre:         'Lettre / Transmission',
     recepisse:      'Récépissé',
 };
 
-const DOC_STATUT_NEXT = {
-    a_editer:      { label: 'Marquer édité',            nextStatut: 'edite' },
-    edite:         { label: 'Signature client obtenue', nextStatut: 'signe_client' },
-    signe_client:  { label: 'Signature notaire obtenue',nextStatut: 'signe_notaire' },
-    signe_notaire: null,
-};
-
-const EMPTY_DOC_FORM = { nom: '', type_document: 'acte_principal', version: '1.0', signature_client_requise: true };
+const EMPTY_DOC_FORM = { nom: '', type_document: 'acte_principal', version: '1.0' };
 
 function ModalAjouterDocument({ open, onClose, reference }) {
     const [form, setForm] = useState(EMPTY_DOC_FORM);
@@ -68,7 +66,6 @@ function ModalAjouterDocument({ open, onClose, reference }) {
         fd.append('nom', form.nom);
         fd.append('type_document', form.type_document);
         fd.append('version', form.version);
-        fd.append('signature_client_requise', form.signature_client_requise ? '1' : '0');
         if (fichier) fd.append('fichier', fichier);
         router.post(`/dossiers/${reference}/documents`, fd, {
             onSuccess: () => { onClose(); setForm(EMPTY_DOC_FORM); setFichier(null); },
@@ -208,15 +205,357 @@ function ModalPreviewDocument({ doc, onClose }) {
     );
 }
 
+// ── Modal : modifier les infos générales du dossier ─────────────────────────
+
+function ModalEditDossier({ open, onClose, dossier, reviseurs, formalistes, notaires }) {
+    const [form, setForm] = useState({
+        objet:        dossier.objet ?? '',
+        valeur:       dossier.valeur ?? '',
+        echeance:     dossier.echeance ?? '',
+        notaire_id:   dossier.notaire?.id   ?? '',
+        reviseur_id:  dossier.reviseur?.id  ?? '',
+        formaliste_id: dossier.formaliste?.id ?? '',
+    });
+
+    useEffect(() => {
+        if (open) setForm({
+            objet:        dossier.objet ?? '',
+            valeur:       dossier.valeur ?? '',
+            echeance:     dossier.echeance ?? '',
+            notaire_id:   dossier.notaire?.id   ?? '',
+            reviseur_id:  dossier.reviseur?.id  ?? '',
+            formaliste_id: dossier.formaliste?.id ?? '',
+        });
+    }, [open]);
+
+    const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
+
+    const submit = (e) => {
+        e.preventDefault();
+        router.patch(`/dossiers/${dossier.reference}`, {
+            objet:         form.objet,
+            valeur:        form.valeur        || null,
+            echeance:      form.echeance      || null,
+            notaire_id:    form.notaire_id    || null,
+            reviseur_id:   form.reviseur_id   || null,
+            formaliste_id: form.formaliste_id || null,
+        }, { onSuccess: () => onClose() });
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-md">
+                <DialogHeader><DialogTitle>Modifier le dossier</DialogTitle></DialogHeader>
+                <form onSubmit={submit} className="space-y-4 pt-1">
+                    <div className="space-y-1.5">
+                        <Label>Objet du dossier <span className="text-danger">*</span></Label>
+                        <textarea
+                            value={form.objet}
+                            onChange={f('objet')}
+                            required
+                            rows={2}
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                            <Label>Valeur (GNF)</Label>
+                            <Input type="number" min="0" value={form.valeur} onChange={f('valeur')} placeholder="0" />
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label>Échéance</Label>
+                            <Input type="date" value={form.echeance} onChange={f('echeance')} />
+                        </div>
+                    </div>
+                    <div className="space-y-1.5">
+                        <Label>Notaire</Label>
+                        <select value={form.notaire_id} onChange={f('notaire_id')}
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
+                            <option value="">Aucun</option>
+                            {(notaires ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                    </div>
+                    <div className="space-y-1.5">
+                        <Label>Réviseur</Label>
+                        <select value={form.reviseur_id} onChange={f('reviseur_id')}
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
+                            <option value="">Aucun</option>
+                            {(reviseurs ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                    </div>
+                    <div className="space-y-1.5">
+                        <Label>Formaliste</Label>
+                        <select value={form.formaliste_id} onChange={f('formaliste_id')}
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
+                            <option value="">Aucun</option>
+                            {(formalistes ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
+                        <Button type="submit">Enregistrer</Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// ── Modal : modifier le questionnaire ───────────────────────────────────────
+
+function ModalEditQuestionnaire({ open, onClose, dossier }) {
+    const questKey  = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
+    const fields    = QUESTIONNAIRES[questKey] ?? [];
+    const [formValues, setFormValues] = useState(dossier.questionnaire ?? {});
+
+    useEffect(() => {
+        if (open) setFormValues(dossier.questionnaire ?? {});
+    }, [open]);
+
+    const submit = (e) => {
+        e.preventDefault();
+        router.patch(`/dossiers/${dossier.reference}/questionnaire`, {
+            donnees: formValues,
+        }, { onSuccess: () => onClose() });
+    };
+
+    // Si aucun schéma connu, afficher les champs existants en mode générique
+    const genericFields = fields.length === 0
+        ? Object.keys(dossier.questionnaire ?? {}).map(k => ({ id: k, label: k, type: 'text' }))
+        : [];
+
+    const allFields = fields.length > 0 ? fields : genericFields;
+    const visibleFields = getVisibleFields(allFields, formValues);
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-2xl">
+                <DialogHeader><DialogTitle>Modifier le questionnaire</DialogTitle></DialogHeader>
+                <form onSubmit={submit}>
+                    <div className="max-h-[62vh] overflow-y-auto space-y-4 py-2 pr-1">
+                        {visibleFields.map((field, idx) => {
+                            const showSection = field.section && (idx === 0 || visibleFields[idx - 1]?.section !== field.section);
+                            return (
+                                <React.Fragment key={field.id}>
+                                    {showSection && (
+                                        <div className={cn('pb-1', idx > 0 && 'pt-4 border-t border-slate-100')}>
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{field.section}</h4>
+                                        </div>
+                                    )}
+                                    <div className="space-y-1.5">
+                                        {field.type !== 'repeatable' && field.type !== 'checkbox' && field.type !== 'checkbox_required' && (
+                                            <Label htmlFor={`qedit-${field.id}`}>
+                                                {field.label}
+                                                {field.required && <span className="text-danger ml-1">*</span>}
+                                            </Label>
+                                        )}
+                                        {field.type === 'repeatable' ? (
+                                            <>
+                                                <p className="text-sm font-medium text-slate-700 mb-1">
+                                                    {field.label}
+                                                    {field.required && <span className="text-danger ml-1">*</span>}
+                                                </p>
+                                                <RepeatableGroup
+                                                    fieldDef={field}
+                                                    value={formValues[field.id] ?? []}
+                                                    onChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                                />
+                                            </>
+                                        ) : field.type === 'textarea' ? (
+                                            <textarea
+                                                id={`qedit-${field.id}`}
+                                                rows={3}
+                                                placeholder={field.placeholder}
+                                                value={formValues[field.id] || ''}
+                                                onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.value }))}
+                                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                            />
+                                        ) : field.type === 'select' ? (
+                                            <select
+                                                id={`qedit-${field.id}`}
+                                                value={formValues[field.id] || ''}
+                                                onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.value }))}
+                                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                            >
+                                                <option value="">— Choisir —</option>
+                                                {(field.options ?? []).map(opt => (
+                                                    <option key={opt} value={opt}>{opt}</option>
+                                                ))}
+                                            </select>
+                                        ) : (field.type === 'checkbox' || field.type === 'checkbox_required') ? (
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id={`qedit-${field.id}`}
+                                                    checked={!!formValues[field.id]}
+                                                    onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.checked }))}
+                                                    className="h-4 w-4 rounded border-slate-300 text-seal focus:ring-seal"
+                                                />
+                                                <label htmlFor={`qedit-${field.id}`} className="text-sm text-slate-700 cursor-pointer">
+                                                    {field.label}
+                                                    {field.required && <span className="text-danger ml-1">*</span>}
+                                                </label>
+                                            </div>
+                                        ) : (
+                                            <Input
+                                                id={`qedit-${field.id}`}
+                                                placeholder={field.placeholder}
+                                                value={formValues[field.id] || ''}
+                                                onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.value }))}
+                                                className={cn(field.mono && 'font-ref')}
+                                            />
+                                        )}
+                                    </div>
+                                </React.Fragment>
+                            );
+                        })}
+                        {allFields.length === 0 && (
+                            <p className="text-sm text-slate-400 italic py-4 text-center">Aucun champ de questionnaire trouvé.</p>
+                        )}
+                    </div>
+                    <DialogFooter className="pt-4 mt-2 border-t border-slate-100">
+                        <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
+                        <Button type="submit">Enregistrer le questionnaire</Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// ── Composant : onglet Informations ─────────────────────────────────────────
+
+function InformationsTab({ dossier, can, onEditQuest }) {
+    const questKey    = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
+    const questFields = QUESTIONNAIRES[questKey] ?? [];
+    const hasQuestData = dossier.questionnaire && Object.keys(dossier.questionnaire).length > 0;
+
+    // Sections ordonnées (les champs repeatable ont leur propre section)
+    const sections = questFields.length > 0
+        ? [...new Set(questFields.map(f => f.section ?? ''))].map(sec => ({
+            name: sec,
+            fields: questFields.filter(f => (f.section ?? '') === sec),
+        }))
+        : [];
+
+    const renderQuestContent = () => {
+        if (questFields.length > 0 && hasQuestData) {
+            return (
+                <div className="space-y-6">
+                    {sections.map(sec => {
+                        const filled = sec.fields.filter(f => {
+                            const v = dossier.questionnaire[f.id];
+                            if (f.type === 'repeatable') return Array.isArray(v) && v.length > 0;
+                            return v !== undefined && v !== null && v !== '';
+                        });
+                        if (!filled.length) return null;
+                        return (
+                            <div key={sec.name || '_'} className="space-y-3">
+                                {sec.name && (
+                                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-100 pb-1.5">
+                                        {sec.name}
+                                    </h4>
+                                )}
+                                {/* Champs scalaires */}
+                                {(() => {
+                                    const scalars = filled.filter(f => f.type !== 'repeatable');
+                                    if (!scalars.length) return null;
+                                    return (
+                                        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+                                            {scalars.map(field => (
+                                                <div key={field.id} className="space-y-0.5">
+                                                    <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">{field.label}</dt>
+                                                    <dd className={cn('text-sm text-slate-800', field.mono && 'font-ref')}>
+                                                        {typeof dossier.questionnaire[field.id] === 'boolean'
+                                                            ? (dossier.questionnaire[field.id] ? 'Oui' : 'Non')
+                                                            : String(dossier.questionnaire[field.id])}
+                                                    </dd>
+                                                </div>
+                                            ))}
+                                        </dl>
+                                    );
+                                })()}
+                                {/* Blocs répétables */}
+                                {filled.filter(f => f.type === 'repeatable').map(field => (
+                                    <div key={field.id} className="pt-1">
+                                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">{field.label}</p>
+                                        <RepeatableGroup
+                                            fieldDef={field}
+                                            value={dossier.questionnaire[field.id] ?? []}
+                                            onChange={() => {}}
+                                            readOnly
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        }
+
+        if (hasQuestData) {
+            // Affichage brut quand aucun schéma n'est trouvé
+            return (
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                    {Object.entries(dossier.questionnaire)
+                        .filter(([, v]) => !Array.isArray(v))
+                        .map(([key, value]) => (
+                            <div key={key} className="space-y-0.5">
+                                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">{key}</dt>
+                                <dd className="text-sm text-slate-800">
+                                    {typeof value === 'boolean' ? (value ? 'Oui' : 'Non') : String(value)}
+                                </dd>
+                            </div>
+                        ))}
+                </dl>
+            );
+        }
+
+        return <p className="text-sm text-slate-400 italic">Questionnaire non renseigné — cliquez sur « Modifier » pour saisir les informations.</p>;
+    };
+
+    return (
+        <Card>
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                <CardTitle>Fiche dossier — {dossier.typeActe?.label}</CardTitle>
+                {can?.update && (
+                    <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onEditQuest}>
+                        <PenSquare className="h-3.5 w-3.5" />
+                        Modifier le questionnaire
+                    </Button>
+                )}
+            </CardHeader>
+            <CardContent>
+                {renderQuestContent()}
+            </CardContent>
+        </Card>
+    );
+}
+
 function DocumentsTab({ dossier, reference, etape, can }) {
     const [addOpen, setAddOpen] = useState(false);
     const [previewDoc, setPreviewDoc] = useState(null);
     const [confirmState, setConfirmState] = useState(null);
+    const [generating, setGenerating] = useState(false);
+    const [regenerating, setRegenerating] = useState(new Set());
 
-    const avancerStatut = (doc) => {
-        const next = DOC_STATUT_NEXT[doc.statut];
-        if (!next) return;
-        router.post(`/documents/${doc.id}/update`, { statut: next.nextStatut }, { preserveState: true });
+    const handleGenererModeles = () => {
+        setGenerating(true);
+        router.post(`/dossiers/${reference}/generer-documents`, {}, {
+            onFinish: () => setGenerating(false),
+        });
+    };
+
+    const handleRegenerer = (doc) => {
+        setRegenerating(prev => new Set(prev).add(doc.id));
+        router.post(`/documents/${doc.id}/regenerer`, {}, {
+            onFinish: () => setRegenerating(prev => {
+                const next = new Set(prev);
+                next.delete(doc.id);
+                return next;
+            }),
+        });
     };
 
     const supprimer = (doc) => {
@@ -233,9 +572,15 @@ function DocumentsTab({ dossier, reference, etape, can }) {
         <Card>
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
                 <CardTitle>Actes &amp; documents</CardTitle>
-                <Button size="sm" variant="outline" className="h-8" onClick={() => setAddOpen(true)}>
-                    <Plus className="h-3.5 w-3.5" /> Nouveau document
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="h-8 gap-1" onClick={handleGenererModeles} disabled={generating}>
+                        <RefreshCw className={cn('h-3.5 w-3.5', generating && 'animate-spin')} />
+                        {generating ? 'Génération…' : 'Générer depuis les modèles'}
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => setAddOpen(true)}>
+                        <Plus className="h-3.5 w-3.5" /> Nouveau document
+                    </Button>
+                </div>
             </CardHeader>
             <CardContent className="px-0 pb-0">
                 {!dossier.documents?.length ? (
@@ -252,14 +597,11 @@ function DocumentsTab({ dossier, reference, etape, can }) {
                             <tr>
                                 <th className="pl-5">Document</th>
                                 <th>Type</th>
-                                <th>Statut</th>
                                 <th className="pr-5">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {dossier.documents.map((doc) => {
-                                const statut = docStatutConfig[doc.statut] || docStatutConfig.a_editer;
-                                const nextAction = DOC_STATUT_NEXT[doc.statut];
                                 return (
                                     <tr key={doc.id}>
                                         <td className="pl-5">
@@ -272,11 +614,6 @@ function DocumentsTab({ dossier, reference, etape, can }) {
                                             </div>
                                         </td>
                                         <td className="text-xs text-slate-500">{TYPE_DOC_LABELS[doc.type_document] ?? doc.type_document}</td>
-                                        <td>
-                                            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', statut.color)}>
-                                                {statut.label}
-                                            </span>
-                                        </td>
                                         <td className="pr-5">
                                             <div className="flex items-center gap-1">
                                                 {doc.chemin_fichier && (
@@ -292,13 +629,14 @@ function DocumentsTab({ dossier, reference, etape, can }) {
                                                         </Button>
                                                     </>
                                                 )}
-                                                {nextAction && (
-                                                    <Button variant="ghost" size="sm" className="h-7 text-xs px-2 text-seal hover:text-seal"
-                                                        onClick={() => avancerStatut(doc)} title={nextAction.label}>
-                                                        <PenSquare className="h-3 w-3 mr-1" />
-                                                        {nextAction.label}
-                                                    </Button>
-                                                )}
+                                                <Button
+                                                    variant="ghost" size="icon-sm"
+                                                    title="Régénérer depuis le modèle (écrase la version actuelle)"
+                                                    onClick={() => handleRegenerer(doc)}
+                                                    disabled={regenerating.has(doc.id)}
+                                                >
+                                                    <RefreshCw className={cn('h-3.5 w-3.5 text-slate-400', regenerating.has(doc.id) && 'animate-spin text-blue-500')} />
+                                                </Button>
                                                 <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-red-500"
                                                     onClick={() => supprimer(doc)} title="Supprimer">
                                                     <Trash2 className="h-3.5 w-3.5" />
@@ -658,7 +996,7 @@ function FormaliteCardDossier({ f, peutGerer }) {
     );
 }
 
-function FormalitesTab({ dossier, reference, etape, can }) {
+function FormalitesTab({ dossier, reference, can }) {
     const [addOpen, setAddOpen] = useState(false);
     const peutGerer = can?.gererFormalites;
     const cloturees = dossier.formalites?.filter(f => f.statut === 'cloture').length ?? 0;
@@ -722,8 +1060,6 @@ function getStepBlockers(dossier) {
         }
         case 'edition': {
             if (docs.length === 0) return ["Aucun document n'a été ajouté — au moins un acte est requis"];
-            const nonEdites = docs.filter(d => d.statut === 'a_editer');
-            if (nonEdites.length > 0) return [`${nonEdites.length} document(s) pas encore édité(s) : ${nonEdites.map(d => d.nom).join(', ')}`];
             return [];
         }
         case 'revision': {
@@ -732,17 +1068,7 @@ function getStepBlockers(dossier) {
                 renvoye:     "Révision renvoyée en correction — les points signalés doivent être corrigés",
                 en_attente:  "Révision en attente — elle doit être évaluée par le réviseur",
                 en_cours:    "Révision en cours — elle doit être validée pour continuer",
-            }[revision?.statut] ?? "La révision doit être validée avant de passer à la signature client"];
-        }
-        case 'signature_client': {
-            const nonSignes = docs.filter(d => d.signature_client_requise && !['signe_client', 'signe_notaire'].includes(d.statut));
-            if (nonSignes.length > 0) return [`${nonSignes.length} document(s) en attente de signature client : ${nonSignes.map(d => d.nom).join(', ')}`];
-            return [];
-        }
-        case 'signature_notaire': {
-            const nonSignes = docs.filter(d => d.statut !== 'signe_notaire');
-            if (nonSignes.length > 0) return [`${nonSignes.length} document(s) sans signature notaire : ${nonSignes.map(d => d.nom).join(', ')}`];
-            return [];
+            }[revision?.statut] ?? "La révision doit être validée avant de passer aux formalités"];
         }
         case 'formalites': {
             const nonClos = formalites.filter(f => f.statut !== 'cloture');
@@ -752,6 +1078,88 @@ function getStepBlockers(dossier) {
         default:
             return [];
     }
+}
+
+function FacturationTab({ dossier }) {
+    if (!dossier.factures?.length) {
+        return (
+            <Card>
+                <CardContent className="p-6 text-center py-12">
+                    <FileText className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+                    <p className="text-slate-500 text-sm font-medium">Aucune facture générée</p>
+                    <p className="text-xs text-slate-400 mt-1">La facture sera calculée selon les barèmes configurés.</p>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    const facture = dossier.factures[0];
+
+    return (
+        <Card>
+            <CardHeader className="pb-3 border-b border-slate-100 flex flex-row justify-between items-center">
+                <div>
+                    <CardTitle>Note de frais / Facture</CardTitle>
+                    <p className="text-xs text-slate-500 mt-1">Générée automatiquement d'après les barèmes</p>
+                </div>
+                <div className="flex gap-2">
+                    {/* Placeholder for future print/download actions */}
+                    <Button variant="outline" size="sm" className="h-8 gap-1" title="Bientôt disponible">
+                        <Download className="h-3.5 w-3.5" /> Exporter PDF
+                    </Button>
+                </div>
+            </CardHeader>
+            <CardContent className="pt-5 space-y-6">
+                {/* En-tête facture */}
+                <div className="flex justify-between items-start">
+                    <div>
+                        <div className="font-medium text-slate-800 text-sm">{facture.objet}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">Assiette de calcul : {Number(facture.assiette_chiffres).toLocaleString('fr-GN')} GNF</div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-sm font-semibold text-seal">N° {facture.note_numero}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">{new Date(facture.note_date).toLocaleDateString('fr-FR')}</div>
+                    </div>
+                </div>
+
+                {/* Tableau des lignes */}
+                <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs text-left">
+                            <tr>
+                                <th className="px-4 py-2 font-medium">Désignation</th>
+                                <th className="px-4 py-2 font-medium text-right w-24">Qté</th>
+                                <th className="px-4 py-2 font-medium text-right w-36">Montant (GNF)</th>
+                                <th className="px-4 py-2 font-medium text-right w-36">Total (GNF)</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {facture.lignes?.map((ligne, i) => (
+                                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-4 py-3 text-slate-700">{ligne.designation}</td>
+                                    <td className="px-4 py-3 text-slate-500 text-right">{ligne.quantite}</td>
+                                    <td className="px-4 py-3 text-slate-600 text-right font-ref">
+                                        {Number(ligne.montant).toLocaleString('fr-GN')}
+                                    </td>
+                                    <td className="px-4 py-3 text-slate-800 font-medium text-right font-ref">
+                                        {(ligne.quantite * ligne.montant).toLocaleString('fr-GN')}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                        <tfoot className="bg-slate-50 border-t border-slate-200">
+                            <tr>
+                                <td colSpan={3} className="px-4 py-3 text-right font-semibold text-slate-700">TOTAL À PAYER</td>
+                                <td className="px-4 py-3 text-right font-bold text-seal font-ref text-base">
+                                    {Number(facture.total_chiffres).toLocaleString('fr-GN')} GNF
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </CardContent>
+        </Card>
+    );
 }
 
 function WorkflowStepper({ currentStep }) {
@@ -797,10 +1205,12 @@ function WorkflowStepper({ currentStep }) {
 }
 
 export default function DossierShow() {
-    const { dossier, can } = usePage().props;
+    const { dossier, can, reviseurs, formalistes, notaires } = usePage().props;
     const [activeTab, setActiveTab] = useState('informations');
     const [avancing, setAvancing] = useState(false);
     const [avancerErrors, setAvancerErrors] = useState([]);
+    const [editDossierOpen, setEditDossierOpen] = useState(false);
+    const [editQuestOpen, setEditQuestOpen] = useState(false);
 
     const etape = dossier?.etape?.value ?? '';
     const reference = dossier?.reference ?? '';
@@ -808,9 +1218,8 @@ export default function DossierShow() {
     const blockers = can?.avancer ? getStepBlockers(dossier) : [];
 
     const actionContextuel = {
-        revision: { label: 'Voir la révision', href: `/dossiers/${reference}/revision`, variant: 'seal', icon: ClipboardCheck },
-        signature_notaire: { label: 'Voir signature', href: '#', variant: 'default', icon: PenLine },
-        formalites: { label: 'Voir les formalités', tab: 'formalites', variant: 'default', icon: Building },
+        revision:  { label: 'Voir la révision',   href: `/dossiers/${reference}/revision`, variant: 'seal',    icon: ClipboardCheck },
+        formalites:{ label: 'Voir les formalités', tab: 'formalites',                       variant: 'default', icon: Building },
     };
     const action = actionContextuel[etape];
 
@@ -879,6 +1288,13 @@ export default function DossierShow() {
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                                            {can?.update && (
+                                                <Button variant="outline" size="sm" className="h-8 gap-1.5"
+                                                    onClick={() => setEditDossierOpen(true)} title="Modifier le dossier">
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                    Modifier
+                                                </Button>
+                                            )}
                                             {action && (
                                                 action.tab ? (
                                                     <Button variant={action.variant} onClick={() => setActiveTab(action.tab)}>
@@ -1028,52 +1444,25 @@ export default function DossierShow() {
                                             </span>
                                         )}
                                     </TabsTrigger>
+                                    <TabsTrigger value="facturation">
+                                        Facturation
+                                        {dossier.factures?.length > 0 && (
+                                            <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
+                                                {dossier.factures.length}
+                                            </span>
+                                        )}
+                                    </TabsTrigger>
                                     <TabsTrigger value="journal">Journal</TabsTrigger>
                                 </TabsList>
 
                                 {/* Onglet Informations */}
                                 <TabsContent value="informations">
-                                    <Card>
-                                        <CardHeader className="pb-3">
-                                            <CardTitle>Fiche dossier — {dossier.typeActe?.label}</CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            {dossier.questionnaire && Object.keys(dossier.questionnaire).length > 0 ? (
-                                                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-                                                    {Object.entries(dossier.questionnaire).map(([key, value]) => (
-                                                        <div key={key} className="space-y-0.5">
-                                                            <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">{key}</dt>
-                                                            <dd className="text-sm text-slate-800">
-                                                                {typeof value === 'boolean' ? (value ? 'Oui' : 'Non') : String(value)}
-                                                            </dd>
-                                                        </div>
-                                                    ))}
-                                                </dl>
-                                            ) : (
-                                                <div className="space-y-4">
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-                                                        <div className="space-y-0.5">
-                                                            <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">Objet</dt>
-                                                            <dd className="text-sm text-slate-800">{dossier.objet}</dd>
-                                                        </div>
-                                                        {dossier.valeur > 0 && (
-                                                            <div className="space-y-0.5">
-                                                                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">Valeur</dt>
-                                                                <dd className="text-sm text-slate-800 font-ref">{Number(dossier.valeur).toLocaleString('fr-GN')} GNF</dd>
-                                                            </div>
-                                                        )}
-                                                        {dossier.echeance && (
-                                                            <div className="space-y-0.5">
-                                                                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">Échéance</dt>
-                                                                <dd className="text-sm text-slate-800">{dossier.echeance}</dd>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <p className="text-sm text-slate-400 italic">Aucun questionnaire renseigné.</p>
-                                                </div>
-                                            )}
-                                        </CardContent>
-                                    </Card>
+                                    {/* Bloc questionnaire */}
+                                    <InformationsTab
+                                        dossier={dossier}
+                                        can={can}
+                                        onEditQuest={() => setEditQuestOpen(true)}
+                                    />
                                 </TabsContent>
 
                                 {/* Onglet Actes & Documents */}
@@ -1099,7 +1488,7 @@ export default function DossierShow() {
                                             <CardContent className="p-5">
                                                 <div className="flex items-center justify-between gap-4 mb-4">
                                                     <div>
-                                                        <h3 className="font-serif text-heading text-ink">Grille de contrôle</h3>
+                                                        <h3 className="font-serif text-heading text-ink">Révision des documents</h3>
                                                         {dossier.revision.reviseur && (
                                                             <p className="text-sm text-slate-500 mt-0.5">Réviseur : {dossier.revision.reviseur.name}</p>
                                                         )}
@@ -1120,7 +1509,7 @@ export default function DossierShow() {
                                                     <Button variant="seal" asChild>
                                                         <Link href={`/dossiers/${reference}/revision`}>
                                                             <ClipboardCheck className="h-4 w-4" />
-                                                            Accéder à la grille
+                                                            Accéder à la révision
                                                         </Link>
                                                     </Button>
                                                 </div>
@@ -1212,6 +1601,11 @@ export default function DossierShow() {
                                     )}
                                 </TabsContent>
 
+                                {/* Onglet Facturation */}
+                                <TabsContent value="facturation">
+                                    <FacturationTab dossier={dossier} />
+                                </TabsContent>
+
                                 {/* Onglet Journal */}
                                 <TabsContent value="journal">
                                     <Card>
@@ -1293,6 +1687,24 @@ export default function DossierShow() {
                 </div>
 
             </div>
+            {/* Modals d'édition */}
+            {can?.update && (
+                <>
+                    <ModalEditDossier
+                        open={editDossierOpen}
+                        onClose={() => setEditDossierOpen(false)}
+                        dossier={dossier}
+                        reviseurs={reviseurs}
+                        formalistes={formalistes}
+                        notaires={notaires}
+                    />
+                    <ModalEditQuestionnaire
+                        open={editQuestOpen}
+                        onClose={() => setEditQuestOpen(false)}
+                        dossier={dossier}
+                    />
+                </>
+            )}
         </AppLayout>
     );
 }

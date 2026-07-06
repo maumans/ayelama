@@ -26,13 +26,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Dossiers (CRUD + actions workflow)
     Route::resource('dossiers', DossierController::class)->parameters(['dossiers' => 'dossier:reference']);
     Route::post('/dossiers/{dossier:reference}/avancer', [DossierController::class, 'avancer'])->name('dossiers.avancer');
+    Route::post('/dossiers/{dossier:reference}/generer-documents', [DossierController::class, 'genererDocuments'])->name('dossiers.generer_documents');
+    Route::patch('/dossiers/{dossier:reference}/questionnaire', [DossierController::class, 'updateQuestionnaire'])->name('dossiers.questionnaire.update');
 
     // Documents
     Route::post('/dossiers/{dossier:reference}/documents', [DocumentController::class, 'store'])->name('dossiers.documents.store');
     Route::post('/documents/{document}/update', [DocumentController::class, 'update'])->name('documents.update');
     Route::delete('/documents/{document}', [DocumentController::class, 'destroy'])->name('documents.destroy');
-    Route::get('/documents/{document}/download', [DocumentController::class, 'download'])->name('documents.download');
-    Route::get('/documents/{document}/preview',  [DocumentController::class, 'preview'])->name('documents.preview');
+    Route::get('/documents/{document}/download',   [DocumentController::class, 'download'])->name('documents.download');
+    Route::get('/documents/{document}/preview',    [DocumentController::class, 'preview'])->name('documents.preview');
+    Route::post('/documents/{document}/regenerer', [DocumentController::class, 'regenerer'])->name('documents.regenerer');
 
     // Révisions
     Route::get('/revisions', [RevisionController::class, 'index'])->name('revisions.index');
@@ -84,6 +87,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/baremes', [ParametresController::class, 'storeBareme'])->name('baremes.store');
         Route::patch('/baremes/{bareme}', [ParametresController::class, 'updateBareme'])->name('baremes.update');
         Route::delete('/baremes/{bareme}', [ParametresController::class, 'destroyBareme'])->name('baremes.destroy');
+        Route::get('/apparence', [ParametresController::class, 'apparence'])->name('apparence');
+        Route::post('/apparence', [ParametresController::class, 'updateApparence'])->name('apparence.update');
+        Route::post('/apparence/logo', [ParametresController::class, 'uploadLogo'])->name('apparence.logo');
+        Route::delete('/apparence/logo', [ParametresController::class, 'deleteLogo'])->name('apparence.logo.delete');
     });
 
     // Profil

@@ -29,13 +29,17 @@ class DossierStepService
 
         // Créer la révision automatiquement si on arrive en révision
         if ($etapeSuivante === EtapeDossier::Revision) {
-            Revision::firstOrCreate(
+            $revision = Revision::firstOrCreate(
                 ['dossier_id' => $dossier->id],
                 [
                     'reviseur_id' => $dossier->reviseur_id,
                     'statut'      => \App\Enums\StatutRevision::EnAttente,
                 ]
             );
+            // Nouveau round (re-entry après renvoi en édition) : table rase des verdicts précédents
+            if (!$revision->wasRecentlyCreated) {
+                $revision->resetPoints();
+            }
         }
 
         JournalActivite::enregistrer(
@@ -76,13 +80,11 @@ class DossierStepService
     private function verifierPrerequis(Dossier $dossier): void
     {
         match ($dossier->etape) {
-            EtapeDossier::Initialisation   => $this->verifierInitialisation($dossier),
-            EtapeDossier::Edition          => $this->verifierEdition($dossier),
-            EtapeDossier::Revision         => $this->verifierRevisionValidee($dossier),
-            EtapeDossier::SignatureClient  => $this->verifierSignatureClient($dossier),
-            EtapeDossier::SignatureNotaire => $this->verifierSignatureNotaire($dossier),
-            EtapeDossier::Formalites       => $this->verifierFormalites($dossier),
-            default                        => null,
+            EtapeDossier::Initialisation => $this->verifierInitialisation($dossier),
+            EtapeDossier::Edition        => $this->verifierEdition($dossier),
+            EtapeDossier::Revision       => $this->verifierRevisionValidee($dossier),
+            EtapeDossier::Formalites     => $this->verifierFormalites($dossier),
+            default                      => null,
         };
     }
 
@@ -108,17 +110,11 @@ class DossierStepService
     private function verifierEdition(Dossier $dossier): void
     {
         $dossier->loadMissing('documents');
-        $errors = [];
 
         if ($dossier->documents->isEmpty()) {
-            $errors['documents'] = ['Au moins un document doit être ajouté avant de passer en révision.'];
-        } elseif ($dossier->documents->contains('statut', 'a_editer')) {
-            $noms = $dossier->documents->where('statut', 'a_editer')->pluck('nom')->join(', ');
-            $errors['documents'] = ["Les documents suivants ne sont pas encore édités : {$noms}."];
-        }
-
-        if (!empty($errors)) {
-            throw ValidationException::withMessages($errors);
+            throw ValidationException::withMessages([
+                'documents' => ['Au moins un document doit être ajouté avant de passer en révision.'],
+            ]);
         }
     }
 
@@ -130,39 +126,9 @@ class DossierStepService
                 'renvoye'    => 'La révision a été renvoyée en correction. Corrigez les points signalés puis soumettez à nouveau.',
                 'en_attente' => 'La révision est en attente. Elle doit être évaluée et validée par le réviseur.',
                 'en_cours'   => 'La révision est en cours. Elle doit être validée avant de continuer.',
-                default      => 'La révision doit être validée avant de passer à la signature client.',
+                default      => 'La révision doit être validée avant de passer aux formalités.',
             };
             throw ValidationException::withMessages(['revision' => [$msg]]);
-        }
-    }
-
-    private function verifierSignatureClient(Dossier $dossier): void
-    {
-        $dossier->loadMissing('documents');
-
-        $blocking = $dossier->documents
-            ->where('signature_client_requise', true)
-            ->filter(fn ($d) => !in_array($d->statut, ['signe_client', 'signe_notaire']));
-
-        if ($blocking->isNotEmpty()) {
-            $noms = $blocking->pluck('nom')->join(', ');
-            throw ValidationException::withMessages([
-                'documents' => ["Les documents suivants attendent la signature client : {$noms}."],
-            ]);
-        }
-    }
-
-    private function verifierSignatureNotaire(Dossier $dossier): void
-    {
-        $dossier->loadMissing('documents');
-
-        $blocking = $dossier->documents->filter(fn ($d) => $d->statut !== 'signe_notaire');
-
-        if ($blocking->isNotEmpty()) {
-            $noms = $blocking->pluck('nom')->join(', ');
-            throw ValidationException::withMessages([
-                'documents' => ["Les documents suivants n'ont pas encore la signature du notaire : {$noms}."],
-            ]);
         }
     }
 

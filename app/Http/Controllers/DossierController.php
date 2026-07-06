@@ -8,6 +8,7 @@ use App\Http\Requests\StoreDossierRequest;
 use App\Http\Requests\UpdateDossierRequest;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
+use App\Models\ModeleActe;
 use App\Models\Partie;
 use App\Models\Questionnaire;
 use App\Models\TypeActe;
@@ -15,6 +16,7 @@ use App\Models\User;
 use App\Services\DossierStepService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class DossierController extends Controller
@@ -31,10 +33,7 @@ class DossierController extends Controller
         $query = Dossier::with(['typeActe', 'redacteur', 'notaire', 'revision:id,dossier_id,statut'])
             ->withCount([
                 'documents',
-                'documents as docs_a_editer_count'      => fn ($q) => $q->where('statut', 'a_editer'),
-                'documents as docs_sans_sig_client'     => fn ($q) => $q->where('signature_client_requise', true)->whereNotIn('statut', ['signe_client', 'signe_notaire']),
-                'documents as docs_sans_sig_notaire'    => fn ($q) => $q->where('statut', '!=', 'signe_notaire'),
-                'formalites as formalites_non_clos'     => fn ($q) => $q->where('statut', '!=', 'cloture'),
+                'formalites as formalites_non_clos' => fn ($q) => $q->where('statut', '!=', 'cloture'),
             ])
             ->when($request->q, fn ($q, $s) => $q->where(fn ($qq) =>
                 $qq->where('reference', 'like', "%{$s}%")
@@ -81,13 +80,11 @@ class DossierController extends Controller
                 'etapeOrdre'  => $d->etapeOrdre(),
                 'canAvancer'  => $user->can('avancer', $d),
                 'peutAvancer' => match ($d->etape) {
-                    EtapeDossier::Initialisation   => !empty(trim($d->objet ?? '')) && $d->notaire_id && $d->reviseur_id,
-                    EtapeDossier::Edition          => $d->documents_count > 0 && $d->docs_a_editer_count === 0,
-                    EtapeDossier::Revision         => $d->revision?->statut?->value === 'valide',
-                    EtapeDossier::SignatureClient  => $d->docs_sans_sig_client === 0,
-                    EtapeDossier::SignatureNotaire => $d->docs_sans_sig_notaire === 0,
-                    EtapeDossier::Formalites       => $d->formalites_non_clos === 0,
-                    default                        => true,
+                    EtapeDossier::Initialisation => !empty(trim($d->objet ?? '')) && $d->notaire_id && $d->reviseur_id,
+                    EtapeDossier::Edition        => $d->documents_count > 0,
+                    EtapeDossier::Revision       => $d->revision?->statut?->value === 'valide',
+                    EtapeDossier::Formalites     => $d->formalites_non_clos === 0,
+                    default                      => true,
                 },
             ]),
             'filters'    => [
@@ -122,11 +119,14 @@ class DossierController extends Controller
         ]);
     }
 
-    public function store(StoreDossierRequest $request)
-    {
+    public function store(
+        StoreDossierRequest $request,
+        \App\Services\ActesGeneratorService $generatorService,
+        \App\Services\FacturationService $facturationService
+    ) {
         $typeActe = TypeActe::findOrFail($request->type_acte_id);
 
-        $dossier = DB::transaction(function () use ($request, $typeActe) {
+        $dossier = DB::transaction(function () use ($request, $typeActe, $generatorService, $facturationService) {
             $reference = $this->genererReference($typeActe);
 
             $dossier = Dossier::create([
@@ -151,6 +151,35 @@ class DossierController extends Controller
                 Partie::create(array_merge(['dossier_id' => $dossier->id], $partieData));
             }
 
+            // Génération automatique des documents depuis les ModèlesActes actifs
+            $modeles = ModeleActe::where('type_acte_id', $typeActe->id)
+                ->where('est_actif', true)
+                ->orderBy('type_document')
+                ->get();
+
+            foreach ($modeles as $modele) {
+                $chemin = $generatorService->genererDocument(
+                    $dossier,
+                    $modele->chemin_fichier,
+                    Str::slug($modele->nom)
+                );
+
+                \App\Models\Document::create([
+                    'dossier_id'     => $dossier->id,
+                    'nom'            => $modele->nom,
+                    'type_document'  => $modele->type_document,
+                    'statut'         => 'a_editer',
+                    'chemin_fichier' => $chemin,
+                    'version'        => $modele->version ?? 'v1',
+                ]);
+            }
+
+            // Génération automatique de la facture (note de frais)
+            // Le service déduit l'assiette du questionnaire (capital, prix, loyers…)
+            // et applique les barèmes configurés en base
+            $dossier->load('questionnaire');
+            $facturationService->genererFacture($dossier);
+
             JournalActivite::enregistrer($dossier, 'Dossier créé', 'creation', [
                 'type_acte' => $typeActe->label,
             ]);
@@ -159,7 +188,7 @@ class DossierController extends Controller
         });
 
         return redirect()->route('dossiers.show', $dossier->reference)
-            ->with('success', "Dossier {$dossier->reference} créé avec succès.");
+            ->with('success', "Dossier {$dossier->reference} créé et documents générés avec succès.");
     }
 
     public function edit(Dossier $dossier)
@@ -172,7 +201,7 @@ class DossierController extends Controller
         $dossier->load([
             'typeActe', 'redacteur', 'reviseur', 'notaire', 'formaliste',
             'questionnaire', 'documents', 'revision.reviseur', 'revision.points',
-            'formalites.pieces', 'parties', 'journal.user',
+            'formalites.pieces', 'parties', 'journal.user', 'factures.lignes'
         ]);
 
         $this->authorize('view', $dossier);
@@ -186,6 +215,9 @@ class DossierController extends Controller
                 'gererFormalites' => auth()->user()->can('gererFormalites', $dossier),
                 'delete'          => auth()->user()->can('delete', $dossier),
             ],
+            'reviseurs'   => User::where('role', 'reviseur')->where('actif', true)->get(['id', 'name']),
+            'formalistes' => User::where('role', 'formaliste')->where('actif', true)->get(['id', 'name']),
+            'notaires'    => User::where('role', 'notaire')->where('actif', true)->get(['id', 'name']),
         ]);
     }
 
@@ -195,7 +227,26 @@ class DossierController extends Controller
 
         $dossier->update($request->validated());
 
+        JournalActivite::enregistrer($dossier, 'Informations du dossier mises à jour', 'modification', []);
+
         return back()->with('success', 'Dossier mis à jour.');
+    }
+
+    public function updateQuestionnaire(Request $request, Dossier $dossier)
+    {
+        $this->authorize('update', $dossier);
+
+        $validated = $request->validate(['donnees' => ['required', 'array']]);
+
+        if ($dossier->questionnaire) {
+            $dossier->questionnaire->update(['donnees' => $validated['donnees']]);
+        } else {
+            Questionnaire::create(['dossier_id' => $dossier->id, 'donnees' => $validated['donnees']]);
+        }
+
+        JournalActivite::enregistrer($dossier, 'Questionnaire mis à jour', 'modification', []);
+
+        return back()->with('success', 'Questionnaire mis à jour.');
     }
 
     public function destroy(Dossier $dossier)
@@ -216,6 +267,58 @@ class DossierController extends Controller
         $dossier = $this->stepService->avancer($dossier, auth()->user());
 
         return back()->with('success', "Dossier avancé à l'étape : {$dossier->etape->label()}.");
+    }
+
+    public function genererDocuments(
+        Dossier $dossier,
+        \App\Services\ActesGeneratorService $generatorService
+    ) {
+        $this->authorize('genererDocuments', $dossier);
+
+        $dossier->load(['typeActe', 'questionnaire']);
+
+        $modeles = ModeleActe::where('type_acte_id', $dossier->type_acte_id)
+            ->where('est_actif', true)
+            ->orderBy('type_document')
+            ->get();
+
+        if ($modeles->isEmpty()) {
+            return back()->with('error', "Aucun modèle actif pour ce type de dossier. Configurez les modèles d'actes avant de générer.");
+        }
+
+        $existingNoms = $dossier->documents()->pluck('nom')->toArray();
+        $count = 0;
+
+        foreach ($modeles as $modele) {
+            if (in_array($modele->nom, $existingNoms)) {
+                continue;
+            }
+
+            $chemin = $generatorService->genererDocument(
+                $dossier,
+                $modele->chemin_fichier,
+                Str::slug($modele->nom)
+            );
+
+            \App\Models\Document::create([
+                'dossier_id'     => $dossier->id,
+                'nom'            => $modele->nom,
+                'type_document'  => $modele->type_document,
+                'statut'         => 'a_editer',
+                'chemin_fichier' => $chemin,
+                'version'        => $modele->version ?? 'v1',
+            ]);
+
+            $count++;
+        }
+
+        JournalActivite::enregistrer($dossier, "{$count} document(s) généré(s) depuis les modèles", 'creation', []);
+
+        $msg = $count > 0
+            ? "{$count} document(s) généré(s) avec succès depuis les modèles."
+            : 'Tous les documents de ce modèle sont déjà présents dans le dossier.';
+
+        return back()->with('success', $msg);
     }
 
     private function genererReference(TypeActe $typeActe): string
@@ -242,7 +345,7 @@ class DossierController extends Controller
             'reference'  => $d->reference,
             'objet'      => $d->objet,
             'etape'      => ['value' => $d->etape->value, 'label' => $d->etape->label()],
-            'typeActe'   => $d->typeActe ? ['label' => $d->typeActe->label, 'categorie' => $d->typeActe->categorie?->value] : null,
+            'typeActe'   => $d->typeActe ? ['label' => $d->typeActe->label, 'categorie' => $d->typeActe->categorie?->value, 'code' => $d->typeActe->code] : null,
             'redacteur'  => $d->redacteur ? ['name' => $d->redacteur->name, 'initiales' => $d->redacteur->initiales] : null,
             'notaire'    => $d->notaire   ? ['name' => $d->notaire->name,   'initiales' => $d->notaire->initiales]   : null,
             'valeur'     => $d->valeur,
@@ -261,13 +364,12 @@ class DossierController extends Controller
             'etapeOrdre'  => $d->etapeOrdre(),
             'questionnaire' => $d->questionnaire?->donnees,
             'documents'   => $d->documents->map(fn ($doc) => [
-                'id'                       => $doc->id,
-                'nom'                      => $doc->nom,
-                'type_document'            => $doc->type_document,
-                'version'                  => $doc->version,
-                'statut'                   => $doc->statut,
-                'chemin_fichier'           => $doc->chemin_fichier,
-                'signature_client_requise' => (bool) $doc->signature_client_requise,
+                'id'             => $doc->id,
+                'nom'            => $doc->nom,
+                'type_document'  => $doc->type_document,
+                'version'        => $doc->version,
+                'statut'         => $doc->statut,
+                'chemin_fichier' => $doc->chemin_fichier,
             ]),
             'revision'    => $d->revision ? [
                 'id'         => $d->revision->id,
@@ -314,6 +416,19 @@ class DossierController extends Controller
                 'type'       => $j->type,
                 'user'       => $j->user ? ['name' => $j->user->name, 'initiales' => $j->user->initiales] : null,
                 'created_at' => $j->created_at->diffForHumans(),
+            ]),
+            'factures' => $d->factures->map(fn ($f) => [
+                'id'                => $f->id,
+                'note_numero'       => $f->note_numero,
+                'note_date'         => $f->note_date ? $f->note_date->toIso8601String() : null,
+                'objet'             => $f->objet,
+                'assiette_chiffres' => (float) $f->assiette_chiffres,
+                'total_chiffres'    => (float) $f->total_chiffres,
+                'lignes'            => $f->lignes->map(fn ($l) => [
+                    'designation' => $l->designation,
+                    'quantite'    => $l->quantite,
+                    'montant'     => (float) $l->montant,
+                ]),
             ]),
         ];
     }

@@ -3,7 +3,9 @@
 namespace App\Http\Middleware;
 
 use App\Models\Dossier;
+use App\Models\Setting;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -13,6 +15,37 @@ class HandleInertiaRequests extends Middleware
     public function version(Request $request): ?string
     {
         return parent::version($request);
+    }
+
+    private function loadApparence(): array
+    {
+        try {
+            $defaults = [
+                'office_nom'        => 'Maître Ayelama Bah',
+                'office_sous_titre' => 'Notaire',
+                'couleur_primaire'  => '#0F2D60',
+                'couleur_accent'    => '#E8A520',
+                'couleur_fond'      => '#F5F5F3',
+                'logo_path'         => null,
+                'logo_url'          => null,
+            ];
+            $settings = array_merge($defaults, Setting::all()->toArray());
+            $settings['logo_url'] = $settings['logo_path']
+                ? url('storage/' . $settings['logo_path'])
+                : null;
+            return $settings;
+        } catch (\Throwable) {
+            // Table pas encore créée (avant la migration)
+            return [
+                'office_nom'        => 'Maître Ayelama Bah',
+                'office_sous_titre' => 'Notaire',
+                'couleur_primaire'  => '#0F2D60',
+                'couleur_accent'    => '#E8A520',
+                'couleur_fond'      => '#F5F5F3',
+                'logo_path'         => null,
+                'logo_url'          => null,
+            ];
+        }
     }
 
     public function share(Request $request): array
@@ -56,6 +89,7 @@ class HandleInertiaRequests extends Middleware
                 'success' => fn () => $request->session()->get('success'),
                 'error'   => fn () => $request->session()->get('error'),
             ],
+            'apparence' => fn () => $this->loadApparence(),
         ];
     }
 }

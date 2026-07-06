@@ -7,6 +7,7 @@ use App\Models\ModeleActe;
 use App\Models\TypeActe;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class ModeleActeController extends Controller
@@ -80,13 +81,28 @@ class ModeleActeController extends Controller
 
     public function store(Request $request)
     {
-        $data = $request->validate([
+        $rules = [
             'nom'            => ['required', 'string', 'max:200'],
             'type_acte_id'   => ['required', 'exists:types_actes,id'],
-            'type_document'  => ['required', 'in:acte_principal,annexe,procedure,lettre,recepisse'],
+            'type_document'  => ['required', 'in:acte_principal,page_garde,attestation,declaration,dnsv,insertion,rccm,note_frais,bordereau,annexe,procedure,lettre,recepisse'],
             'version'        => ['required', 'string', 'max:10'],
-            'chemin_fichier' => ['required', 'string', 'max:500'],
-        ]);
+        ];
+
+        if ($request->hasFile('fichier')) {
+            $rules['fichier'] = ['required', 'file', 'mimes:docx', 'max:20480'];
+        } else {
+            $rules['chemin_fichier'] = ['required', 'string', 'max:500'];
+        }
+
+        $data = $request->validate($rules);
+
+        if ($request->hasFile('fichier')) {
+            $file     = $request->file('fichier');
+            $filename = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) . '.docx';
+            $file->storeAs('modeles', $filename, 'local');
+            $data['chemin_fichier'] = $filename;
+            unset($data['fichier']);
+        }
 
         ModeleActe::create(array_merge($data, [
             'est_actif'  => true,
@@ -98,14 +114,33 @@ class ModeleActeController extends Controller
 
     public function update(Request $request, ModeleActe $modele)
     {
-        $data = $request->validate([
+        $rules = [
             'nom'            => ['sometimes', 'string', 'max:200'],
             'type_acte_id'   => ['sometimes', 'exists:types_actes,id'],
-            'type_document'  => ['sometimes', 'in:acte_principal,annexe,procedure,lettre,recepisse'],
+            'type_document'  => ['sometimes', 'in:acte_principal,page_garde,attestation,declaration,dnsv,insertion,rccm,note_frais,bordereau,annexe,procedure,lettre,recepisse'],
             'version'        => ['sometimes', 'string', 'max:10'],
-            'chemin_fichier' => ['sometimes', 'string', 'max:500'],
             'est_actif'      => ['sometimes', 'boolean'],
-        ]);
+        ];
+
+        if ($request->hasFile('fichier')) {
+            $rules['fichier'] = ['required', 'file', 'mimes:docx', 'max:20480'];
+        } else {
+            $rules['chemin_fichier'] = ['sometimes', 'string', 'max:500'];
+        }
+
+        $data = $request->validate($rules);
+
+        if ($request->hasFile('fichier')) {
+            $file     = $request->file('fichier');
+            $filename = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) . '.docx';
+            $file->storeAs('modeles', $filename, 'local');
+            $data['chemin_fichier'] = $filename;
+            unset($data['fichier']);
+
+            if ($modele->chemin_fichier && \Illuminate\Support\Facades\Storage::disk('local')->exists('modeles/' . $modele->chemin_fichier)) {
+                \Illuminate\Support\Facades\Storage::disk('local')->delete('modeles/' . $modele->chemin_fichier);
+            }
+        }
 
         $modele->update(array_merge($data, ['updated_by' => Auth::id()]));
 

@@ -4,15 +4,16 @@
 
 @layer base {
     :root {
-        --color-app-bg: #FBFAF7;
-        --color-ink: #15263F;
-        --color-ink-medium: #1F3A5F;
-        --color-ink-light: #2C4A75;
-        --color-seal: #B0863C;
-        --color-seal-hover: #9A7331;
-        --color-seal-light: #F5EDD8;
+        /* Palette extraite du logo Maître Ayelama Bah — Notaire */
+        --color-app-bg: #F5F5F3;
+        --color-ink: #0F2D60;
+        --color-ink-medium: #163A7A;
+        --color-ink-light: #1E52A6;
+        --color-seal: #E8A520;
+        --color-seal-hover: #CC9118;
+        --color-seal-light: #FEF6DC;
         --color-border: #E2E8F0;
-        --color-text-strong: #0F172A;
+        --color-text-strong: #0A1628;
         --color-text-muted: #64748B;
         --color-surface: #F1F5F9;
         --sidebar-width: 240px;
@@ -52,7 +53,7 @@
     .badge-step-active {
         background-color: var(--color-seal-light);
         color: var(--color-seal-hover);
-        border: 1px solid #D4A85A;
+        border: 1px solid #E8A520;
     }
 
     .badge-step-done {

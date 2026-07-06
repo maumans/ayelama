@@ -84,6 +84,26 @@ class Dossier extends Model
         return $this->hasMany(JournalActivite::class)->orderByDesc('created_at');
     }
 
+    public function factures()
+    {
+        return $this->hasMany(Facture::class);
+    }
+
+    public function societe()
+    {
+        return $this->hasOne(Societe::class);
+    }
+
+    public function bienImmobilier()
+    {
+        return $this->hasOne(BienImmobilier::class);
+    }
+
+    public function banque()
+    {
+        return $this->hasOne(Banque::class);
+    }
+
     // Scopes
     public function scopeEnCours($query)
     {

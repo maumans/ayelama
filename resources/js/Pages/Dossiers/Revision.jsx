@@ -2,9 +2,8 @@ import React, { useState } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    CheckCircle2, XCircle, Minus, ChevronLeft, Send,
-    AlertTriangle, Check, Shield, FileText,
-    ClipboardCheck, Users, DollarSign, Scale
+    FileText, Download, Eye, CheckCircle2, AlertTriangle,
+    XCircle, ChevronLeft, Send, Shield, ClipboardList,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,96 +13,66 @@ import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
 const STATUTS = {
-    en_attente: { label: 'En attente', color: 'text-slate-400 bg-slate-50 border-slate-200' },
-    en_cours: { label: 'En cours', color: 'text-warning-text bg-warning-bg border-amber-200' },
-    valide: { label: 'Validé', color: 'text-success bg-success-bg border-green-200' },
-    renvoye: { label: 'Renvoyé', color: 'text-danger-text bg-danger-bg border-red-200' },
+    en_attente: { label: 'En attente',          color: 'text-slate-500 bg-slate-50 border-slate-200' },
+    en_cours:   { label: 'En cours',            color: 'text-warning-text bg-warning-bg border-amber-200' },
+    valide:     { label: 'Validé',              color: 'text-success bg-success-bg border-green-200' },
+    renvoye:    { label: 'Renvoyé en correction', color: 'text-danger-text bg-danger-bg border-red-200' },
 };
 
-// Default grille if no server grille configured
-const DEFAULT_GROUPES = [
-    {
-        id: 'identite',
-        icon: Users,
-        label: 'Identité et parties',
-        points: [
-            { id: 'p1', label: 'Identité et pièces des parties complètes', requis: true },
-            { id: 'p2', label: 'Adresse cohérente entre les documents', requis: true },
-        ],
-    },
-    {
-        id: 'contenu',
-        icon: FileText,
-        label: 'Contenu et mentions légales',
-        points: [
-            { id: 'p3', label: 'Mentions obligatoires présentes', requis: true },
-            { id: 'p4', label: 'Cohérence des montants en chiffres et en lettres', requis: true },
-            { id: 'p5', label: 'Dates et références conformes', requis: true },
-        ],
-    },
-    {
-        id: 'conformite',
-        icon: Scale,
-        label: 'Conformité légale',
-        points: [
-            { id: 'p6', label: 'Acte conforme au droit applicable', requis: true },
-            { id: 'p7', label: 'Signatures et paraphes requis identifiés', requis: false },
-        ],
-    },
-];
+const TYPE_DOC_LABELS = {
+    acte_principal: 'Acte principal',
+    annexe:         'Annexe',
+    procedure:      'Procédure',
+    lettre:         'Lettre',
+    recepisse:      'Récépissé',
+};
 
-function buildGroupes(grilleFromServer) {
-    if (!grilleFromServer) return DEFAULT_GROUPES;
-    const GROUPE_ICONS = { identite: Users, denomination: FileText, capital: DollarSign, conformite: Scale };
-    return Object.entries(grilleFromServer).map(([groupLabel, points]) => ({
-        id: groupLabel.toLowerCase().replace(/\s+/g, '_'),
-        icon: GROUPE_ICONS[groupLabel.toLowerCase().replace(/\s+/g, '_')] ?? FileText,
-        label: groupLabel,
-        points: (Array.isArray(points) ? points : Object.values(points)).map(p => ({
-            id: p.id ?? p,
-            label: p.label ?? p,
-            requis: p.requis !== false,
-        })),
-    }));
+const TYPE_DOC_COLORS = {
+    acte_principal: 'bg-seal/10 text-seal border-seal/20',
+    annexe:         'bg-slate-100 text-slate-600 border-slate-200',
+    procedure:      'bg-violet-50 text-violet-600 border-violet-200',
+    lettre:         'bg-amber-50 text-amber-700 border-amber-200',
+    recepisse:      'bg-emerald-50 text-emerald-700 border-emerald-200',
+};
+
+function buildInitialEtats(documents, savedPoints) {
+    const init = {};
+    (documents ?? []).forEach(doc => {
+        const saved = savedPoints?.[String(doc.id)];
+        init[String(doc.id)] = {
+            etat:        saved?.etat        ?? null,
+            commentaire: saved?.commentaire ?? '',
+        };
+    });
+    return init;
 }
 
 export default function Revision() {
-    const { dossier, revision, grille, can } = usePage().props;
+    const { dossier, documents, revision, can } = usePage().props;
 
-    const groupes = buildGroupes(grille);
-
-    const buildInitialEtats = () => {
-        const initial = {};
-        groupes.forEach(g => g.points.forEach(p => {
-            const existing = revision?.points?.[p.id];
-            initial[p.id] = { etat: existing?.etat ?? null, commentaire: existing?.commentaire ?? '' };
-        }));
-        return initial;
-    };
-
-    const [etats, setEtats] = useState(buildInitialEtats);
-    const [commentaireGeneral, setCommentaireGeneral] = useState(revision?.commentaire ?? '');
+    const [etats, setEtats] = useState(() => buildInitialEtats(documents, revision?.points));
     const [showRenvoyerDialog, setShowRenvoyerDialog] = useState(false);
     const [motifRenvoyer, setMotifRenvoyer] = useState('');
     const [saving, setSaving] = useState(false);
     const [validating, setValidating] = useState(false);
     const [renvoyant, setRenvoyant] = useState(false);
 
-    const allPoints = groupes.flatMap(g => g.points);
-    const totalPoints = allPoints.length;
-    const pointsEvalues = Object.values(etats).filter(e => e.etat !== null).length;
-    const pointsConformes = Object.values(etats).filter(e => e.etat === 'conforme').length;
-    const pointsNonConformes = Object.values(etats).filter(e => e.etat === 'non_conforme').length;
-    const pctProgress = totalPoints > 0 ? Math.round((pointsEvalues / totalPoints) * 100) : 0;
-    const canValidate = pointsNonConformes === 0 && pointsEvalues === totalPoints;
     const revisionStatut = revision?.statut ?? 'en_attente';
-    const statutConf = STATUTS[revisionStatut] ?? STATUTS.en_attente;
+    const statutConf     = STATUTS[revisionStatut] ?? STATUTS.en_attente;
 
-    const setEtat = (pointId, etat) => {
-        setEtats(prev => ({ ...prev, [pointId]: { ...prev[pointId], etat } }));
+    const docList      = documents ?? [];
+    const docEvalues   = Object.values(etats).filter(e => e.etat !== null).length;
+    const docOk        = Object.values(etats).filter(e => e.etat === 'ok').length;
+    const docACorriger = Object.values(etats).filter(e => e.etat === 'a_corriger').length;
+    const pctProgress  = docList.length > 0 ? Math.round((docEvalues / docList.length) * 100) : 0;
+    const canValidate  = docACorriger === 0 && docEvalues === docList.length && docList.length > 0;
+    const canRenvoyer  = docACorriger > 0;
+
+    const setVerdict = (docId, etat) => {
+        setEtats(prev => ({ ...prev, [docId]: { ...prev[docId], etat } }));
     };
-    const setCommentaire = (pointId, commentaire) => {
-        setEtats(prev => ({ ...prev, [pointId]: { ...prev[pointId], commentaire } }));
+    const setCommentaire = (docId, commentaire) => {
+        setEtats(prev => ({ ...prev, [docId]: { ...prev[docId], commentaire } }));
     };
 
     const handleSave = () => {
@@ -126,14 +95,6 @@ export default function Revision() {
             onFinish: () => { setRenvoyant(false); setShowRenvoyerDialog(false); },
         });
     };
-
-    if (!dossier) {
-        return (
-            <AppLayout breadcrumbs={[{ label: 'Dossiers', href: '/dossiers' }]}>
-                <div className="p-6 text-center text-slate-400">Chargement…</div>
-            </AppLayout>
-        );
-    }
 
     return (
         <AppLayout breadcrumbs={[
@@ -163,13 +124,13 @@ export default function Revision() {
                             >
                                 <h3 className="font-serif text-heading text-ink mb-1">Renvoyer en correction</h3>
                                 <p className="text-sm text-slate-500 mb-4">
-                                    Indiquez le motif du renvoi (optionnel). Le rédacteur recevra ce commentaire.
+                                    Décrivez le motif général du renvoi (optionnel). Le rédacteur le recevra en plus des commentaires par document.
                                 </p>
                                 <textarea
                                     rows={3}
                                     value={motifRenvoyer}
                                     onChange={e => setMotifRenvoyer(e.target.value)}
-                                    placeholder="Motif du renvoi en correction…"
+                                    placeholder="Motif général du renvoi en correction…"
                                     className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-seal resize-none mb-4"
                                 />
                                 <div className="flex items-center gap-2 justify-end">
@@ -188,25 +149,28 @@ export default function Revision() {
                 <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
                     <Card className={cn(
                         'border-l-4',
-                        revisionStatut === 'valide' && 'border-l-success',
-                        revisionStatut === 'en_cours' && 'border-l-seal',
-                        revisionStatut === 'renvoye' && 'border-l-danger',
+                        revisionStatut === 'valide'     && 'border-l-success',
+                        revisionStatut === 'en_cours'   && 'border-l-seal',
+                        revisionStatut === 'renvoye'    && 'border-l-danger',
                         revisionStatut === 'en_attente' && 'border-l-slate-300',
                     )}>
                         <CardContent className="p-5">
                             <div className="flex items-start justify-between gap-4">
                                 <div>
                                     <div className="flex items-center gap-2 mb-1">
-                                        <ClipboardCheck className="h-4 w-4 text-slate-400" />
-                                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Contrôle qualité avant signature</span>
+                                        <ClipboardList className="h-4 w-4 text-slate-400" />
+                                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Révision des actes</span>
                                     </div>
-                                    <h1 className="font-serif text-display text-ink">Grille de contrôle</h1>
+                                    <h1 className="font-serif text-display text-ink">Évaluation des documents</h1>
                                     <p className="text-slate-500 text-sm mt-1">
                                         <span className="font-ref text-seal">{dossier.reference}</span>
                                         {' — '}
                                         {dossier.objet}
                                         {dossier.typeActe && ` · ${dossier.typeActe}`}
                                     </p>
+                                    {dossier.redacteur && (
+                                        <p className="text-xs text-slate-400 mt-0.5">Rédacteur : {dossier.redacteur}</p>
+                                    )}
                                 </div>
                                 <span className={cn(
                                     'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold border shrink-0',
@@ -217,155 +181,182 @@ export default function Revision() {
                             </div>
 
                             {/* Barre de progression */}
-                            <div className="mt-5 space-y-2">
-                                <div className="flex items-center justify-between text-xs">
-                                    <span className="text-slate-500">{pointsEvalues}/{totalPoints} points évalués</span>
-                                    <div className="flex items-center gap-3">
-                                        {pointsConformes > 0 && (
-                                            <span className="flex items-center gap-1 text-success">
-                                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                                {pointsConformes} conforme{pointsConformes > 1 ? 's' : ''}
-                                            </span>
-                                        )}
-                                        {pointsNonConformes > 0 && (
-                                            <span className="flex items-center gap-1 text-danger">
-                                                <XCircle className="h-3.5 w-3.5" />
-                                                {pointsNonConformes} non conforme{pointsNonConformes > 1 ? 's' : ''}
-                                            </span>
-                                        )}
+                            {docList.length > 0 && (
+                                <div className="mt-5 space-y-2">
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="text-slate-500">{docEvalues}/{docList.length} document{docList.length > 1 ? 's' : ''} évalué{docEvalues > 1 ? 's' : ''}</span>
+                                        <div className="flex items-center gap-3">
+                                            {docOk > 0 && (
+                                                <span className="flex items-center gap-1 text-success">
+                                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                                    {docOk} OK
+                                                </span>
+                                            )}
+                                            {docACorriger > 0 && (
+                                                <span className="flex items-center gap-1 text-danger">
+                                                    <XCircle className="h-3.5 w-3.5" />
+                                                    {docACorriger} à corriger
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
+                                    <Progress
+                                        value={pctProgress}
+                                        indicatorClassName={docACorriger > 0 ? 'bg-danger' : docEvalues === docList.length ? 'bg-success' : 'bg-seal'}
+                                    />
                                 </div>
-                                <Progress
-                                    value={pctProgress}
-                                    indicatorClassName={pointsNonConformes > 0 ? 'bg-danger' : pointsEvalues === totalPoints ? 'bg-success' : 'bg-seal'}
-                                />
-                            </div>
+                            )}
                         </CardContent>
                     </Card>
                 </motion.div>
 
-                {/* Grille de contrôle */}
-                <div className="space-y-4">
-                    {groupes.map((groupe, gi) => {
-                        const GroupIcon = groupe.icon;
+                {/* Aucun document */}
+                {docList.length === 0 && (
+                    <Card>
+                        <CardContent className="p-10 flex flex-col items-center gap-3 text-center">
+                            <FileText className="h-10 w-10 text-slate-200" />
+                            <p className="text-slate-500 text-sm">Aucun document n'a encore été ajouté à ce dossier.</p>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {/* Liste des documents */}
+                <div className="space-y-3">
+                    {docList.map((doc, idx) => {
+                        const docId    = String(doc.id);
+                        const etatDoc  = etats[docId] ?? { etat: null, commentaire: '' };
+                        const isOk     = etatDoc.etat === 'ok';
+                        const isNok    = etatDoc.etat === 'a_corriger';
+
                         return (
                             <motion.div
-                                key={groupe.id}
+                                key={doc.id}
                                 initial={{ opacity: 0, y: 8 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: gi * 0.06 }}
+                                transition={{ delay: idx * 0.05 }}
                             >
-                                <Card>
-                                    <CardHeader className="pb-2">
-                                        <div className="flex items-center gap-2">
-                                            <div className="h-7 w-7 rounded-lg bg-ink/5 flex items-center justify-center">
-                                                <GroupIcon className="h-4 w-4 text-ink" />
-                                            </div>
-                                            <CardTitle className="text-base">{groupe.label}</CardTitle>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="px-0 pb-0">
-                                        {groupe.points.map((point, pi) => {
-                                            const etatPoint = etats[point.id] ?? { etat: null, commentaire: '' };
-                                            const isConforme = etatPoint.etat === 'conforme';
-                                            const isNonConforme = etatPoint.etat === 'non_conforme';
-                                            const isNA = etatPoint.etat === 'na';
-
-                                            return (
-                                                <div
-                                                    key={point.id}
-                                                    className={cn(
-                                                        'px-5 py-3.5 border-b border-slate-50 last:border-0 transition-colors',
-                                                        isConforme && 'bg-success-bg/30',
-                                                        isNonConforme && 'bg-danger-bg/40',
+                                <Card className={cn(
+                                    'transition-colors border',
+                                    isOk  && 'border-success/40 bg-success-bg/20',
+                                    isNok && 'border-danger/30 bg-danger-bg/30',
+                                    !isOk && !isNok && 'border-slate-200',
+                                )}>
+                                    <CardContent className="p-5">
+                                        {/* En-tête document */}
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex items-start gap-3 min-w-0">
+                                                <div className={cn(
+                                                    'h-9 w-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5',
+                                                    isOk  ? 'bg-success/10' : isNok ? 'bg-danger/10' : 'bg-slate-100'
+                                                )}>
+                                                    {isOk ? (
+                                                        <CheckCircle2 className="h-4.5 w-4.5 text-success" />
+                                                    ) : isNok ? (
+                                                        <XCircle className="h-4.5 w-4.5 text-danger" />
+                                                    ) : (
+                                                        <FileText className="h-4.5 w-4.5 text-slate-400" />
                                                     )}
-                                                >
-                                                    <div className="flex items-start gap-4">
-                                                        <div className="shrink-0 mt-0.5">
-                                                            {isConforme ? (
-                                                                <CheckCircle2 className="h-5 w-5 text-success" />
-                                                            ) : isNonConforme ? (
-                                                                <XCircle className="h-5 w-5 text-danger" />
-                                                            ) : isNA ? (
-                                                                <Minus className="h-5 w-5 text-slate-300" />
-                                                            ) : (
-                                                                <div className="h-5 w-5 rounded-full border-2 border-slate-200" />
-                                                            )}
-                                                        </div>
-
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-start justify-between gap-3">
-                                                                <div>
-                                                                    <p className="text-sm font-medium text-slate-800">{point.label}</p>
-                                                                    {!point.requis && <span className="text-xs text-slate-400 italic">(optionnel)</span>}
-                                                                </div>
-                                                                {can?.update && (
-                                                                    <div className="flex items-center gap-1.5 shrink-0">
-                                                                        <button
-                                                                            onClick={() => setEtat(point.id, isConforme ? null : 'conforme')}
-                                                                            className={cn(
-                                                                                'flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-all',
-                                                                                isConforme
-                                                                                    ? 'bg-success text-white border-success'
-                                                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-success hover:text-success'
-                                                                            )}
-                                                                        >
-                                                                            <Check className="h-3 w-3" />
-                                                                            Conforme
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => setEtat(point.id, isNonConforme ? null : 'non_conforme')}
-                                                                            className={cn(
-                                                                                'flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-all',
-                                                                                isNonConforme
-                                                                                    ? 'bg-danger text-white border-danger'
-                                                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-danger hover:text-danger'
-                                                                            )}
-                                                                        >
-                                                                            <XCircle className="h-3 w-3" />
-                                                                            Non conforme
-                                                                        </button>
-                                                                        {!point.requis && (
-                                                                            <button
-                                                                                onClick={() => setEtat(point.id, isNA ? null : 'na')}
-                                                                                className={cn(
-                                                                                    'px-2.5 py-1 rounded-md text-xs font-medium border transition-all',
-                                                                                    isNA
-                                                                                        ? 'bg-slate-400 text-white border-slate-400'
-                                                                                        : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400'
-                                                                                )}
-                                                                            >
-                                                                                N/A
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-
-                                                            <AnimatePresence>
-                                                                {(isNonConforme || etatPoint.commentaire) && (
-                                                                    <motion.div
-                                                                        initial={{ height: 0, opacity: 0 }}
-                                                                        animate={{ height: 'auto', opacity: 1 }}
-                                                                        exit={{ height: 0, opacity: 0 }}
-                                                                        className="overflow-hidden"
-                                                                    >
-                                                                        <textarea
-                                                                            value={etatPoint.commentaire}
-                                                                            onChange={e => setCommentaire(point.id, e.target.value)}
-                                                                            placeholder="Commentaire du réviseur…"
-                                                                            rows={2}
-                                                                            readOnly={!can?.update}
-                                                                            className="mt-2 w-full text-xs rounded-md border border-slate-200 px-3 py-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-seal focus:border-transparent resize-none"
-                                                                        />
-                                                                    </motion.div>
-                                                                )}
-                                                            </AnimatePresence>
-                                                        </div>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="font-medium text-slate-800 leading-snug">{doc.nom}</p>
+                                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                                        <span className={cn(
+                                                            'inline-flex items-center text-xs px-2 py-0.5 rounded-full border',
+                                                            TYPE_DOC_COLORS[doc.type_document] ?? 'bg-slate-100 text-slate-500 border-slate-200'
+                                                        )}>
+                                                            {TYPE_DOC_LABELS[doc.type_document] ?? doc.type_document}
+                                                        </span>
                                                     </div>
                                                 </div>
-                                            );
-                                        })}
+                                            </div>
+
+                                            {/* Liens télécharger / aperçu */}
+                                            {doc.has_file && (
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    <a
+                                                        href={doc.url_download}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all"
+                                                    >
+                                                        <Download className="h-3.5 w-3.5" />
+                                                        Télécharger
+                                                    </a>
+                                                    <a
+                                                        href={doc.url_preview}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all"
+                                                    >
+                                                        <Eye className="h-3.5 w-3.5" />
+                                                        Aperçu
+                                                    </a>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Boutons verdict */}
+                                        {can?.update && (
+                                            <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
+                                                <span className="text-xs text-slate-400 mr-1">Verdict :</span>
+                                                <button
+                                                    onClick={() => setVerdict(docId, isOk ? null : 'ok')}
+                                                    className={cn(
+                                                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all',
+                                                        isOk
+                                                            ? 'bg-success text-white border-success shadow-sm'
+                                                            : 'bg-white text-slate-500 border-slate-200 hover:border-success hover:text-success'
+                                                    )}
+                                                >
+                                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                                    OK
+                                                </button>
+                                                <button
+                                                    onClick={() => setVerdict(docId, isNok ? null : 'a_corriger')}
+                                                    className={cn(
+                                                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all',
+                                                        isNok
+                                                            ? 'bg-danger text-white border-danger shadow-sm'
+                                                            : 'bg-white text-slate-500 border-slate-200 hover:border-danger hover:text-danger'
+                                                    )}
+                                                >
+                                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                                    À corriger
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* Commentaire (visible si à corriger ou déjà rempli) */}
+                                        <AnimatePresence>
+                                            {(isNok || etatDoc.commentaire) && (
+                                                <motion.div
+                                                    initial={{ height: 0, opacity: 0 }}
+                                                    animate={{ height: 'auto', opacity: 1 }}
+                                                    exit={{ height: 0, opacity: 0 }}
+                                                    className="overflow-hidden"
+                                                >
+                                                    <textarea
+                                                        value={etatDoc.commentaire}
+                                                        onChange={e => setCommentaire(docId, e.target.value)}
+                                                        placeholder="Décrivez les corrections à apporter…"
+                                                        rows={2}
+                                                        readOnly={!can?.update}
+                                                        className="mt-3 w-full text-sm rounded-lg border border-slate-200 px-3 py-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                    />
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+
+                                        {/* Lecture seule : affichage verdict */}
+                                        {!can?.update && etatDoc.etat && (
+                                            <div className={cn(
+                                                'mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium',
+                                                isOk  ? 'text-success' : 'text-danger-text'
+                                            )}>
+                                                {isOk ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                                                {isOk ? 'Document validé' : 'À corriger'}
+                                            </div>
+                                        )}
                                     </CardContent>
                                 </Card>
                             </motion.div>
@@ -373,28 +364,27 @@ export default function Revision() {
                     })}
                 </div>
 
-                {/* Commentaire général */}
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Commentaire général du réviseur</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <textarea
-                            value={commentaireGeneral}
-                            onChange={e => setCommentaireGeneral(e.target.value)}
-                            placeholder="Observations générales sur le dossier…"
-                            rows={3}
-                            readOnly={!can?.update}
-                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2.5 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-seal focus:border-transparent resize-none"
-                        />
-                    </CardContent>
-                </Card>
+                {/* Avertissement si documents à corriger */}
+                {docACorriger > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="flex items-start gap-3 p-4 rounded-lg bg-danger-bg border border-red-200 text-danger-text text-sm"
+                    >
+                        <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                        <div>
+                            <span className="font-medium">Validation bloquée — </span>
+                            {docACorriger} document{docACorriger > 1 ? 's' : ''} à corriger.
+                            Renvoyez le dossier en édition pour que le rédacteur effectue les corrections.
+                        </div>
+                    </motion.div>
+                )}
 
                 {/* Actions finales */}
                 <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
+                    transition={{ delay: 0.2 }}
                     className="flex flex-col sm:flex-row items-center gap-3 pt-2"
                 >
                     <Button variant="outline" size="lg" asChild>
@@ -417,14 +407,14 @@ export default function Revision() {
                         <Button
                             variant="warning"
                             size="lg"
-                            disabled={pointsNonConformes === 0}
+                            disabled={!canRenvoyer}
                             onClick={() => setShowRenvoyerDialog(true)}
                         >
                             <AlertTriangle className="h-4 w-4" />
                             Renvoyer en correction
-                            {pointsNonConformes > 0 && (
+                            {docACorriger > 0 && (
                                 <span className="ml-1 text-xs bg-warning-text/20 px-1.5 py-0.5 rounded-full">
-                                    {pointsNonConformes}
+                                    {docACorriger}
                                 </span>
                             )}
                         </Button>
@@ -439,30 +429,14 @@ export default function Revision() {
                         >
                             <Shield className="h-4 w-4" />
                             {validating ? 'Validation…' : revisionStatut === 'valide' ? 'Révision validée ✓' : 'Valider la révision'}
-                            {!canValidate && pointsEvalues < totalPoints && (
+                            {!canValidate && docEvalues < docList.length && revisionStatut !== 'valide' && (
                                 <span className="text-xs opacity-70 ml-1">
-                                    ({totalPoints - pointsEvalues} restant{totalPoints - pointsEvalues > 1 ? 's' : ''})
+                                    ({docList.length - docEvalues} restant{docList.length - docEvalues > 1 ? 's' : ''})
                                 </span>
                             )}
                         </Button>
                     )}
                 </motion.div>
-
-                {/* Avertissement si non conforme */}
-                {pointsNonConformes > 0 && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="flex items-start gap-3 p-4 rounded-lg bg-danger-bg border border-red-200 text-danger-text text-sm"
-                    >
-                        <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                        <div>
-                            <span className="font-medium">Validation bloquée.</span>
-                            {' '}{pointsNonConformes} point{pointsNonConformes > 1 ? 's' : ''} non conforme{pointsNonConformes > 1 ? 's' : ''} détecté{pointsNonConformes > 1 ? 's' : ''}.
-                            Corrigez ou renvoyez le dossier en correction.
-                        </div>
-                    </motion.div>
-                )}
 
             </div>
         </AppLayout>

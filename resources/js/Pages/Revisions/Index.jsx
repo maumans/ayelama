@@ -35,7 +35,7 @@ function RevisionProgress({ revision }) {
     const total = conformes + nonConformes;
 
     if (evalues === 0) {
-        return <span className="text-[10px] text-slate-400">Aucun point évalué</span>;
+        return <span className="text-[10px] text-slate-400">Aucun document évalué</span>;
     }
 
     return (
@@ -60,13 +60,13 @@ function RevisionProgress({ revision }) {
             {nonConformes > 0 && (
                 <span className="inline-flex items-center gap-0.5 text-[10px] text-danger font-medium">
                     <XCircle className="h-2.5 w-2.5" />
-                    {nonConformes} non-conforme{nonConformes > 1 ? 's' : ''}
+                    {nonConformes} à corriger
                 </span>
             )}
             {nonConformes === 0 && conformes > 0 && (
                 <span className="inline-flex items-center gap-0.5 text-[10px] text-success font-medium">
                     <CheckCircle2 className="h-2.5 w-2.5" />
-                    {conformes} conforme{conformes > 1 ? 's' : ''}
+                    {conformes} OK
                 </span>
             )}
         </div>

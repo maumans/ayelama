@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Partie extends Model
 {
     protected $fillable = [
-        'dossier_id', 'nom', 'role', 'cni',
+        'dossier_id', 'client_id', 'nom', 'role', 'cni',
         'telephone', 'adresse', 'email',
         'photo_chemin', 'pieces',
     ];
@@ -20,6 +20,11 @@ class Partie extends Model
     public function dossier()
     {
         return $this->belongsTo(Dossier::class);
+    }
+
+    public function client()
+    {
+        return $this->belongsTo(Client::class);
     }
 
     public function getInitialesAttribute(): string

@@ -13,21 +13,21 @@ export default {
     theme: {
         extend: {
             colors: {
-                // Fond application
-                'app-bg': '#FBFAF7',
+                // Fond application — gris chaud très clair (comme le fond du logo)
+                'app-bg': '#F5F5F3',
 
-                // Primaire — Encre / Bleu Notaire
+                // Primaire — Bleu Royal (extrait du logo Ayelama Bah)
                 ink: {
-                    DEFAULT: '#15263F',
-                    medium: '#1F3A5F',
-                    light: '#2C4A75',
+                    DEFAULT: '#0F2D60',   // navy profond, version sombre du bleu logo
+                    medium: '#163A7A',    // bleu moyen pour survols sidebar
+                    light: '#1E52A6',    // bleu vif du logo — icônes actives, accents
                 },
 
-                // Accent — Sceau (laiton/or feutré)
+                // Accent — Or Notarial (extrait du logo — or vif et chaud)
                 seal: {
-                    DEFAULT: '#B0863C',
-                    hover: '#9A7331',
-                    light: '#F5EDD8',
+                    DEFAULT: '#E8A520',   // or logo, lumineux et chaud
+                    hover: '#CC9118',     // or foncé hover
+                    light: '#FEF6DC',    // fond or pâle
                 },
 
                 // Neutres
@@ -76,9 +76,10 @@ export default {
             },
 
             boxShadow: {
-                card: '0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px -1px rgba(0,0,0,0.04)',
-                'card-hover': '0 4px 12px 0 rgba(0,0,0,0.08), 0 2px 4px -1px rgba(0,0,0,0.06)',
-                'dialog': '0 20px 60px 0 rgba(0,0,0,0.15)',
+                card: '0 1px 3px 0 rgba(15,45,96,0.06), 0 1px 2px -1px rgba(15,45,96,0.04)',
+                'card-hover': '0 4px 16px 0 rgba(15,45,96,0.10), 0 2px 4px -1px rgba(15,45,96,0.06)',
+                'dialog': '0 20px 60px 0 rgba(15,45,96,0.18)',
+                'seal': '0 2px 8px 0 rgba(232,165,32,0.35)',
             },
 
             borderRadius: {

@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Document;
 use App\Models\Dossier;
+use App\Models\JournalActivite;
+use App\Models\ModeleActe;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -13,11 +15,10 @@ class DocumentController extends Controller
     public function store(Request $request, Dossier $dossier)
     {
         $data = $request->validate([
-            'nom'                      => ['required', 'string', 'max:200'],
-            'type_document'            => ['required', 'in:acte_principal,annexe,procedure,lettre,recepisse'],
-            'version'                  => ['nullable', 'string', 'max:10'],
-            'signature_client_requise' => ['boolean'],
-            'fichier'                  => ['nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt'],
+            'nom'          => ['required', 'string', 'max:200'],
+            'type_document'=> ['required', 'in:acte_principal,annexe,procedure,lettre,recepisse'],
+            'version'      => ['nullable', 'string', 'max:10'],
+            'fichier'      => ['nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt'],
         ]);
 
         $cheminFichier = null;
@@ -31,12 +32,11 @@ class DocumentController extends Controller
         }
 
         $dossier->documents()->create([
-            'nom'                      => $data['nom'],
-            'type_document'            => $data['type_document'],
-            'version'                  => $data['version'] ?? '1.0',
-            'statut'                   => 'a_editer',
-            'signature_client_requise' => $data['signature_client_requise'] ?? true,
-            'chemin_fichier'           => $cheminFichier,
+            'nom'           => $data['nom'],
+            'type_document' => $data['type_document'],
+            'version'       => $data['version'] ?? '1.0',
+            'statut'        => 'a_editer',
+            'chemin_fichier'=> $cheminFichier,
         ]);
 
         return back()->with('success', 'Document ajouté.');
@@ -45,7 +45,7 @@ class DocumentController extends Controller
     public function update(Request $request, Document $document)
     {
         $data = $request->validate([
-            'statut'        => ['sometimes', 'in:a_editer,edite,signe_client,signe_notaire'],
+            'statut'        => ['sometimes', 'in:a_editer,edite'],
             'nom'           => ['sometimes', 'string', 'max:200'],
             'version'       => ['sometimes', 'string', 'max:10'],
             'fichier'       => ['sometimes', 'nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt'],
@@ -64,19 +64,55 @@ class DocumentController extends Controller
             $data['chemin_fichier'] = $path;
         }
 
-        if (isset($data['statut'])) {
-            $now = now();
-            match ($data['statut']) {
-                'edite'          => $data += ['edite_at' => $now, 'edite_par' => auth()->id()],
-                'signe_client'   => $data += ['signe_client_at' => $now],
-                'signe_notaire'  => $data += ['signe_notaire_at' => $now],
-                default          => null,
-            };
+        if (isset($data['statut']) && $data['statut'] === 'edite') {
+            $data += ['edite_at' => now(), 'edite_par' => auth()->id()];
         }
 
         $document->update($data);
 
         return back()->with('success', 'Document mis à jour.');
+    }
+
+    public function regenerer(Document $document, \App\Services\ActesGeneratorService $generatorService)
+    {
+        $dossier = $document->dossier;
+        $this->authorize('genererDocuments', $dossier);
+
+        $modele = ModeleActe::where('type_acte_id', $dossier->type_acte_id)
+            ->where('nom', $document->nom)
+            ->where('est_actif', true)
+            ->first();
+
+        if (! $modele) {
+            return back()->with('error', "Aucun modèle actif trouvé pour « {$document->nom} ».");
+        }
+
+        $dossier->load('questionnaire');
+
+        // Supprime l'ancien fichier généré
+        if ($document->chemin_fichier) {
+            Storage::disk('public')->delete($document->chemin_fichier);
+        }
+
+        $chemin = $generatorService->genererDocument(
+            $dossier,
+            $modele->chemin_fichier,
+            Str::slug($document->nom)
+        );
+
+        $document->update([
+            'chemin_fichier' => $chemin,
+            'statut'         => 'a_editer',
+        ]);
+
+        JournalActivite::enregistrer(
+            $dossier,
+            "Document « {$document->nom} » régénéré depuis le modèle",
+            'etape',
+            []
+        );
+
+        return back()->with('success', "« {$document->nom} » régénéré avec succès.");
     }
 
     public function destroy(Document $document)
@@ -96,7 +132,10 @@ class DocumentController extends Controller
             abort(404, 'Fichier introuvable.');
         }
 
-        return Storage::disk('public')->download($document->chemin_fichier, $document->nom);
+        $ext      = pathinfo($document->chemin_fichier, PATHINFO_EXTENSION);
+        $filename = $document->nom . ($ext ? '.' . $ext : '');
+
+        return Storage::disk('public')->download($document->chemin_fichier, $filename);
     }
 
     public function preview(Document $document)

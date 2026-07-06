@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
+import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Building2, Home, Scale, Briefcase, Heart, GitBranch,
     FileText, Mail, ChevronLeft, ChevronRight, Check,
-    Users, ArrowRight, AlertCircle
+    Users, ArrowRight, AlertCircle, PlusCircle, Edit2, Archive
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,6 +21,36 @@ const WIZARD_STEPS = [
     { id: 'type', label: 'Type précis', short: '2' },
     { id: 'questionnaire', label: 'Questionnaire', short: '3' },
     { id: 'recapitulatif', label: 'Récapitulatif', short: '4' },
+];
+
+const SOCIETE_GROUPES = [
+    {
+        id: 'creation',
+        label: 'Création',
+        icon: PlusCircle,
+        color: 'border-blue-200 hover:border-blue-400 hover:bg-blue-50/40',
+        iconBg: 'bg-blue-50',
+        iconColor: 'text-blue-600',
+        desc: "Constitution d'une nouvelle société (SARLU, SARL, SA, SAS, SASU, SNC, GIE)",
+    },
+    {
+        id: 'modification',
+        label: 'Modification',
+        icon: Edit2,
+        color: 'border-amber-200 hover:border-amber-400 hover:bg-amber-50/40',
+        iconBg: 'bg-amber-50',
+        iconColor: 'text-amber-600',
+        desc: "Modification des statuts d'une société existante (capital, gérant, siège, objet…)",
+    },
+    {
+        id: 'dissolution',
+        label: 'Dissolution / Liquidation',
+        icon: Archive,
+        color: 'border-slate-200 hover:border-slate-400 hover:bg-slate-50/40',
+        iconBg: 'bg-slate-50',
+        iconColor: 'text-slate-500',
+        desc: 'Dissolution amiable ou judiciaire et liquidation',
+    },
 ];
 
 const categories = [
@@ -82,69 +114,64 @@ const categories = [
 
 const typesByCategorie = {
     societe: [
-        { id: 'creation_sarl', label: 'Création de SARL', actes: ['Statuts', 'DNSV', "Déclaration sur l'honneur", 'Casier judiciaire', 'RCCM'] },
-        { id: 'creation_sa', label: 'Création de SA', actes: ['Statuts', 'DNSV', "Procès-verbal AG constitutive", 'RCCM'] },
-        { id: 'modification', label: 'Modification de statuts', actes: ['Fiche de modification (obligatoire)', "PV d'AGE", 'Statuts modifiés'] },
-        { id: 'dissolution', label: 'Dissolution / Liquidation', actes: ["PV d'AGE de dissolution", 'Acte de clôture de liquidation'] },
+        { id: 'creation_sarlu', groupe: 'creation',    label: 'Constitution SARLU', desc: 'Société à responsabilité limitée unipersonnelle', actes: ['Statuts SARLU', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
+        { id: 'creation_sarl',  groupe: 'creation',    label: 'Constitution SARL',  desc: 'Société à responsabilité limitée (multi-associés)', actes: ['Statuts SARL', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
+        { id: 'creation_sa',    groupe: 'creation',    label: 'Constitution SA',    desc: 'Société anonyme — capital min. 140 000 000 GNF', actes: ['Statuts SA', "PV AG constitutive", 'Attestation dépôt capital', 'DNSV', 'Insertion journal légal', 'RCCM'] },
+        { id: 'creation_sas',   groupe: 'creation',    label: 'Constitution SAS',   desc: 'Société par actions simplifiées (multi-associés)', actes: ['Statuts SAS', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
+        { id: 'creation_sasu',  groupe: 'creation',    label: 'Constitution SASU',  desc: 'SAS unipersonnelle', actes: ['Statuts SASU', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
+        { id: 'creation_snc',   groupe: 'creation',    label: 'Constitution SNC',   desc: 'Société en nom collectif', actes: ['Statuts SNC', 'Déclaration sur l\'honneur', 'RCCM'] },
+        { id: 'creation_gie',   groupe: 'creation',    label: 'Constitution GIE',   desc: "Groupement d'intérêt économique", actes: ['Statuts GIE', 'DNSV', 'RCCM'] },
+        { id: 'modification',   groupe: 'modification', label: 'Modification de statuts', desc: 'Changement de capital, gérant, siège, objet…', actes: ['Fiche de modification (obligatoire)', "PV d'AGE", 'Statuts modifiés'] },
+        { id: 'dissolution',    groupe: 'dissolution',  label: 'Dissolution / Liquidation', desc: 'Dissolution amiable ou judiciaire', actes: ["PV d'AGE de dissolution", 'Acte de liquidation', 'Publication journal légal'] },
     ],
     vente: [
-        { id: 'vente_immeuble', label: "Vente d'immeuble", actes: ['Acte de vente', 'Titre foncier'] },
-        { id: 'promesse_vente', label: 'Promesse de vente', actes: ['Promesse de vente', 'Clause résolutoire'] },
-        { id: 'cession_parts', label: 'Cession de parts sociales', actes: ["Acte de cession de parts", 'PV de cession'] },
+        { id: 'vente_immeuble',   label: "Vente immobilière (avec TF)",  desc: 'Vente avec titre foncier',          actes: ['Contrat de vente', 'Page de garde', 'Tableau de bordereau', 'Facture', 'Facture plus-value'] },
+        { id: 'vente_sans_titre', label: "Vente immobilière (sans TF)",  desc: 'Vente sans titre foncier',          actes: ['Contrat de vente', 'Page de garde', 'Facture', 'Facture plus-value'] },
+        { id: 'vente_immeuble',   label: 'Cession fonds de commerce',    desc: 'Cession commerciale',               actes: ['Acte de cession', 'Bordereau'] },
     ],
     hypotheque: [
-        { id: 'hypotheque_conv', label: 'Hypothèque conventionnelle', actes: ["Contrat d'hypothèque", 'Lettre de crédit', 'Bordereau CF'] },
-        { id: 'mainlevee', label: "Mainlevée d'hypothèque", actes: ['Acte de mainlevée'] },
+        { id: 'hypotheque_conv', label: 'Hypothèque conventionnelle', desc: "Constitution de garantie hypothécaire en faveur d'une banque", actes: ["Contrat d'hypothèque", 'Bordereau de la Conservation Foncière', 'Page de garde', 'Facture'] },
+        { id: 'mainlevee',       label: "Mainlevée d'hypothèque",      desc: 'Radiation et mainlevée après remboursement du crédit',        actes: ["Acte de mainlevée", 'Bordereau de la Conservation Foncière', 'Facture'] },
     ],
     bail: [
-        { id: 'bail_construire', label: 'Bail à construire', actes: ['Contrat de bail à construire'] },
-        { id: 'bail_habitation', label: "Bail d'habitation", actes: ["Contrat de bail d'habitation"] },
-        { id: 'bail_professionnel', label: 'Bail professionnel', actes: ['Contrat de bail professionnel'] },
+        { id: 'bail_habitation',   label: "Bail d'habitation",   desc: 'Location de logement à usage résidentiel',                   actes: ["Contrat de bail d'habitation", 'Page de garde', 'Facture'] },
+        { id: 'bail_commercial',   label: 'Bail commercial',     desc: 'Location de local à usage commercial ou professionnel',      actes: ['Contrat de bail commercial', 'Page de garde', 'Facture'] },
+        { id: 'bail_construction', label: 'Bail à construction', desc: 'Bail longue durée avec obligation de construire sur terrain', actes: ['Contrat de bail à construction', 'Page de garde', 'Facture'] },
     ],
     donation: [
-        { id: 'donation_entre_vifs', label: 'Donation entre vifs', actes: ['Acte de donation', 'Acceptation du donataire'] },
+        { id: 'donation_entre_vifs', label: 'Donation entre vifs', desc: '', actes: ['Acte de donation', 'Acceptation du donataire'] },
     ],
     succession: [
-        { id: 'partage_amiable', label: 'Partage amiable', actes: ['Acte de partage', "État des héritiers", "Attestation d'héritiers"] },
-        { id: 'partage_judiciaire', label: 'Partage judiciaire', actes: ['Acte de partage judiciaire', 'Décision de justice'] },
+        { id: 'partage_amiable',    label: 'Partage amiable',    desc: '', actes: ['Acte de partage', "État des héritiers", "Attestation d'héritiers"] },
+        { id: 'partage_judiciaire', label: 'Partage judiciaire', desc: '', actes: ['Acte de partage judiciaire', 'Décision de justice'] },
     ],
     procuration: [
-        { id: 'procuration_speciale', label: 'Procuration spéciale', actes: ['Acte de procuration'] },
+        { id: 'procuration_speciale', label: 'Procuration spéciale',  desc: '', actes: ['Acte de procuration'] },
+        { id: 'procuration_generale', label: 'Procuration générale',  desc: '', actes: ['Acte de procuration générale'] },
     ],
     courrier: [
-        { id: 'courrier_transmission', label: 'Courrier de transmission', actes: ['Lettre de transmission'] },
-    ],
-};
-
-const questionnaires = {
-    creation_sarl: [
-        { id: 'denomination', label: 'Dénomination sociale', type: 'text', placeholder: 'Ex : Faya Distribution', required: true },
-        { id: 'capital', label: 'Capital social (en GNF)', type: 'text', placeholder: '50 000 000', required: true, mono: true },
-        { id: 'siege', label: 'Siège social', type: 'text', placeholder: 'Kaloum, Conakry', required: true },
-        { id: 'objet', label: 'Objet social', type: 'textarea', placeholder: 'Commerce général, distribution…', required: true },
-        { id: 'gerant', label: 'Nom du gérant', type: 'text', placeholder: 'M. Ibrahim Diallo', required: true },
-        { id: 'date_debut', label: "Date de début d'activité", type: 'text', placeholder: '01/07/2026', required: false },
-    ],
-    vente_immeuble: [
-        { id: 'vendeur', label: 'Vendeur', type: 'text', placeholder: 'Nom complet du vendeur', required: true },
-        { id: 'acquereur', label: 'Acquéreur', type: 'text', placeholder: "Nom complet de l'acquéreur", required: true },
-        { id: 'bien', label: 'Description du bien', type: 'textarea', placeholder: 'Immeuble sis à…', required: true },
-        { id: 'prix', label: 'Prix de vente (GNF)', type: 'text', placeholder: '250 000 000', required: true, mono: true },
-        { id: 'titre_foncier', label: 'Numéro titre foncier', type: 'text', placeholder: 'TF-2018-KAL-004521', required: true, mono: true },
-    ],
-    modification: [
-        { id: 'denomination', label: 'Dénomination de la société', type: 'text', placeholder: 'Raison sociale exacte', required: true },
-        { id: 'rccm', label: 'Numéro RCCM actuel', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true },
-        { id: 'objet_modification', label: 'Objet de la modification', type: 'textarea', placeholder: 'Décrire les changements apportés (capital, gérant, siège…)', required: true },
-        { id: 'fiche_modification', label: 'Fiche de modification rédigée', type: 'checkbox_required', placeholder: '', required: true, note: 'Obligatoire — la procédure écrite l\'exige' },
+        { id: 'courrier_transmission', label: 'Courrier de transmission', desc: '', actes: ['Lettre de transmission'] },
     ],
 };
 
 function getQuestionnaire(typeId) {
-    return questionnaires[typeId] || [
+    return QUESTIONNAIRES[typeId] || [
         { id: 'client', label: 'Nom du client / partie', type: 'text', placeholder: 'Nom complet', required: true },
         { id: 'details', label: 'Détails', type: 'textarea', placeholder: 'Informations complémentaires', required: false },
     ];
+}
+
+
+// Initialise uniquement les champs répétables (pures valeurs par défaut).
+function initRepeatableFields(fields) {
+    const init = {};
+    fields.forEach(f => {
+        if (f.type === 'repeatable') {
+            const emptyItem = Object.fromEntries((f.fields ?? []).map(sf => [sf.id, '']));
+            init[f.id] = Array.from({ length: f.min ?? 1 }, () => ({ ...emptyItem }));
+        }
+    });
+    return init;
 }
 
 export default function DossierCreate() {
@@ -152,6 +179,7 @@ export default function DossierCreate() {
 
     const [step, setStep] = useState(0);
     const [categorie, setCategorie] = useState(null);
+    const [sousGroupe, setSousGroupe] = useState(null);
     const [typeActe, setTypeActe] = useState(null);
     const [formValues, setFormValues] = useState({});
     const [objet, setObjet] = useState('');
@@ -161,21 +189,34 @@ export default function DossierCreate() {
     const [submitting, setSubmitting] = useState(false);
     const [errors, setErrors] = useState({});
 
-    // Find matching server type by category + label
+    // Trouve le TypeActe serveur à partir de la clé questionnaire via TYPE_ACTE_CODE_MAP (inversé).
     const findTypeActeId = () => {
-        if (!categorie || !typeActe || !typesActes) return null;
-        const catKey = categorie.id;
-        const serverTypes = typesActes[catKey] ?? Object.values(typesActes).flat();
-        const match = serverTypes.find(t =>
-            t.label.toLowerCase().includes(typeActe.label.toLowerCase().split(' ')[0]) ||
-            typeActe.label.toLowerCase().includes(t.label.toLowerCase().split(' ')[0])
+        if (!typeActe || !typesActes) return null;
+        const allTypes = Object.values(typesActes).flat();
+        // Codes DB associés à cette clé questionnaire
+        const codes = Object.entries(TYPE_ACTE_CODE_MAP)
+            .filter(([, qKey]) => qKey === typeActe.id)
+            .map(([code]) => code);
+        if (codes.length > 0) {
+            const match = allTypes.find(t => codes.includes(t.code));
+            if (match) return match.id;
+        }
+        // Fallback label matching
+        const match = allTypes.find(t =>
+            t.label.toLowerCase().includes(typeActe.label.toLowerCase().split(' ')[0])
         );
-        return match?.id ?? serverTypes[0]?.id ?? null;
+        return match?.id ?? null;
     };
 
     const stepName = WIZARD_STEPS[step].id;
-    const typesDisponibles = categorie ? (typesByCategorie[categorie.id] || []) : [];
+    const typesDisponibles = categorie
+        ? sousGroupe
+            ? (typesByCategorie[categorie.id] || []).filter(t => t.groupe === sousGroupe)
+            : (typesByCategorie[categorie.id] || [])
+        : [];
     const questionnaire = typeActe ? getQuestionnaire(typeActe.id) : [];
+    // Champs filtrés selon les valeurs actuelles (showIf)
+    const visibleFields = getVisibleFields(questionnaire, formValues);
     const categorieSelected = categories.find(c => c.id === categorie?.id);
     const typeSelected = typeActe;
 
@@ -183,14 +224,26 @@ export default function DossierCreate() {
         if (step === 0) return !!categorie;
         if (step === 1) return !!typeActe;
         if (step === 2) {
-            const required = questionnaire.filter(q => q.required);
-            return required.every(q => formValues[q.id]) && objet.trim().length >= 10 && !!notaireId;
+            const required = visibleFields.filter(q => q.required && q.type !== 'repeatable');
+            const scalarOk = required.every(q => formValues[q.id]);
+            const repeatableOk = visibleFields
+                .filter(q => q.type === 'repeatable')
+                .every(q => (formValues[q.id]?.length ?? 0) >= (q.min ?? 1));
+            return scalarOk && repeatableOk && objet.trim().length >= 10 && !!notaireId;
         }
         return false;
     };
 
     const next = () => { if (canNext() && step < 3) setStep(s => s + 1); };
-    const prev = () => { if (step > 0) setStep(s => s - 1); };
+    const prev = () => {
+        if (step === 1 && sousGroupe !== null) {
+            setSousGroupe(null);
+            setTypeActe(null);
+        } else if (step > 0) {
+            setStep(s => s - 1);
+            if (step === 1) { setSousGroupe(null); setTypeActe(null); }
+        }
+    };
 
     const handleSubmit = () => {
         const typeActeId = findTypeActeId();
@@ -262,7 +315,7 @@ export default function DossierCreate() {
                 {/* Contenu */}
                 <AnimatePresence mode="wait">
                     <motion.div
-                        key={step}
+                        key={step === 1 ? `${step}-${sousGroupe ?? 'root'}` : step}
                         initial={{ opacity: 0, x: 12 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -12 }}
@@ -280,7 +333,7 @@ export default function DossierCreate() {
                                         return (
                                             <button
                                                 key={cat.id}
-                                                onClick={() => setCategorie(cat)}
+                                                onClick={() => { setCategorie(cat); setSousGroupe(null); setTypeActe(null); }}
                                                 className={cn(
                                                     'flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center',
                                                     isSelected ? cat.activeColor : `bg-white ${cat.color}`
@@ -300,49 +353,147 @@ export default function DossierCreate() {
 
                         {/* Étape 2 : Type précis */}
                         {step === 1 && (
-                            <div className="space-y-3">
-                                <h2 className="font-serif text-heading text-ink">
-                                    Type d'acte — <span className="text-slate-500">{categorieSelected?.label}</span>
-                                </h2>
-                                <div className="space-y-2">
-                                    {typesDisponibles.map((type) => {
-                                        const isSelected = typeActe?.id === type.id;
-                                        return (
-                                            <button
-                                                key={type.id}
-                                                onClick={() => setTypeActe(type)}
-                                                className={cn(
-                                                    'w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all',
-                                                    isSelected
-                                                        ? 'border-ink bg-ink/5'
-                                                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                                                )}
-                                            >
-                                                <div className={cn(
-                                                    'h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
-                                                    isSelected ? 'border-ink bg-ink' : 'border-slate-300'
-                                                )}>
-                                                    {isSelected && <div className="h-2 w-2 rounded-full bg-white" />}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="font-medium text-slate-800">{type.label}</div>
-                                                    {type.id === 'modification' && (
-                                                        <div className="flex items-center gap-1.5 mt-1 text-xs text-warning-text">
-                                                            <AlertCircle className="h-3 w-3" />
-                                                            Fiche de modification obligatoire
+                            <>
+                                {/* Société sans procédure choisie → 3 grandes cartes */}
+                                {categorie?.id === 'societe' && sousGroupe === null && (
+                                    <div className="space-y-3">
+                                        <h2 className="font-serif text-heading text-ink">
+                                            Procédure — <span className="text-slate-500">Société</span>
+                                        </h2>
+                                        <div className="space-y-3">
+                                            {SOCIETE_GROUPES.map((groupe) => {
+                                                const Icon = groupe.icon;
+                                                const count = typesByCategorie.societe.filter(t => t.groupe === groupe.id).length;
+                                                return (
+                                                    <button
+                                                        key={groupe.id}
+                                                        onClick={() => setSousGroupe(groupe.id)}
+                                                        className={cn(
+                                                            'w-full flex items-center gap-4 p-5 rounded-xl border-2 text-left transition-all bg-white',
+                                                            groupe.color
+                                                        )}
+                                                    >
+                                                        <div className={cn('h-12 w-12 rounded-xl flex items-center justify-center shrink-0', groupe.iconBg)}>
+                                                            <Icon className={cn('h-6 w-6', groupe.iconColor)} />
                                                         </div>
-                                                    )}
-                                                    <div className="flex flex-wrap gap-1.5 mt-2">
-                                                        {type.actes.map(a => (
-                                                            <span key={a} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{a}</span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="font-semibold text-slate-800 text-base">{groupe.label}</div>
+                                                            <div className="text-sm text-slate-500 mt-0.5 leading-snug">{groupe.desc}</div>
+                                                        </div>
+                                                        {groupe.id === 'creation' && (
+                                                            <Badge variant="secondary" className="shrink-0">{count} types</Badge>
+                                                        )}
+                                                        <ChevronRight className="h-5 w-5 text-slate-400 shrink-0" />
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Société avec procédure choisie → breadcrumb + liste filtrée */}
+                                {categorie?.id === 'societe' && sousGroupe !== null && (
+                                    <div className="space-y-3">
+                                        <button
+                                            onClick={() => { setSousGroupe(null); setTypeActe(null); }}
+                                            className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+                                        >
+                                            <ChevronLeft className="h-3.5 w-3.5" />
+                                            Retour aux procédures
+                                        </button>
+                                        <h2 className="font-serif text-heading text-ink">
+                                            Type d'acte — <span className="text-slate-500">{SOCIETE_GROUPES.find(g => g.id === sousGroupe)?.label}</span>
+                                        </h2>
+                                        <div className="space-y-2">
+                                            {typesDisponibles.map((type) => {
+                                                const isSelected = typeActe?.id === type.id;
+                                                return (
+                                                    <button
+                                                        key={type.id + type.label}
+                                                        onClick={() => {
+                                                            setTypeActe(type);
+                                                            const q = QUESTIONNAIRES[type.id] ?? [];
+                                                            setFormValues(initRepeatableFields(q));
+                                                        }}
+                                                        className={cn(
+                                                            'w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all',
+                                                            isSelected
+                                                                ? 'border-ink bg-ink/5'
+                                                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                                                        )}
+                                                    >
+                                                        <div className={cn(
+                                                            'h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
+                                                            isSelected ? 'border-ink bg-ink' : 'border-slate-300'
+                                                        )}>
+                                                            {isSelected && <div className="h-2 w-2 rounded-full bg-white" />}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="font-medium text-slate-800">{type.label}</div>
+                                                            {type.id === 'modification' && (
+                                                                <div className="flex items-center gap-1.5 mt-1 text-xs text-warning-text">
+                                                                    <AlertCircle className="h-3 w-3" />
+                                                                    Fiche de modification obligatoire
+                                                                </div>
+                                                            )}
+                                                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                                                {type.actes.map(a => (
+                                                                    <span key={a} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{a}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Autre catégorie → liste plate */}
+                                {categorie?.id !== 'societe' && (
+                                    <div className="space-y-3">
+                                        <h2 className="font-serif text-heading text-ink">
+                                            Type d'acte — <span className="text-slate-500">{categorieSelected?.label}</span>
+                                        </h2>
+                                        <div className="space-y-2">
+                                            {typesDisponibles.map((type) => {
+                                                const isSelected = typeActe?.id === type.id;
+                                                return (
+                                                    <button
+                                                        key={type.id + type.label}
+                                                        onClick={() => {
+                                                            setTypeActe(type);
+                                                            const q = QUESTIONNAIRES[type.id] ?? [];
+                                                            setFormValues(initRepeatableFields(q));
+                                                        }}
+                                                        className={cn(
+                                                            'w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all',
+                                                            isSelected
+                                                                ? 'border-ink bg-ink/5'
+                                                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                                                        )}
+                                                    >
+                                                        <div className={cn(
+                                                            'h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
+                                                            isSelected ? 'border-ink bg-ink' : 'border-slate-300'
+                                                        )}>
+                                                            {isSelected && <div className="h-2 w-2 rounded-full bg-white" />}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="font-medium text-slate-800">{type.label}</div>
+                                                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                                                {type.actes.map(a => (
+                                                                    <span key={a} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{a}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
 
                         {/* Étape 3 : Questionnaire */}
@@ -420,54 +571,86 @@ export default function DossierCreate() {
                                 </Card>
 
                                 {/* Questionnaire spécifique */}
-                                {questionnaire.length > 0 && (
+                                {visibleFields.length > 0 && (
                                     <Card>
                                         <CardContent className="p-5 space-y-4">
-                                            {questionnaire.map((field) => (
-                                                <div key={field.id} className="space-y-1.5">
-                                                    <Label htmlFor={field.id}>
-                                                        {field.label}
-                                                        {field.required && <span className="text-danger ml-1">*</span>}
-                                                    </Label>
-                                                    {field.note && (
-                                                        <p className="text-xs text-warning-text flex items-center gap-1">
-                                                            <AlertCircle className="h-3 w-3" />
-                                                            {field.note}
-                                                        </p>
-                                                    )}
-                                                    {field.type === 'textarea' ? (
-                                                        <textarea
-                                                            id={field.id}
-                                                            rows={3}
-                                                            placeholder={field.placeholder}
-                                                            value={formValues[field.id] || ''}
-                                                            onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-                                                        />
-                                                    ) : field.type === 'checkbox_required' ? (
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="checkbox"
-                                                                id={field.id}
-                                                                checked={!!formValues[field.id]}
-                                                                onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.checked }))}
-                                                                className="h-4 w-4 rounded border-slate-300 text-seal focus:ring-seal"
-                                                            />
-                                                            <label htmlFor={field.id} className="text-sm text-slate-700 cursor-pointer">
-                                                                Fiche de modification rédigée et jointe
-                                                            </label>
-                                                        </div>
-                                                    ) : (
-                                                        <Input
-                                                            id={field.id}
-                                                            placeholder={field.placeholder}
-                                                            value={formValues[field.id] || ''}
-                                                            onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                            className={cn(field.mono && 'font-ref')}
-                                                        />
-                                                    )}
-                                                </div>
-                                            ))}
+                                            {visibleFields.map((field, idx) => {
+                                                const showSection = field.section && (idx === 0 || visibleFields[idx - 1]?.section !== field.section);
+                                                const isCheckbox = field.type === 'checkbox' || field.type === 'checkbox_required';
+                                                return (
+                                                    <React.Fragment key={field.id}>
+                                                        {showSection && (
+                                                            <div className={cn('pb-1', idx > 0 && 'pt-4 border-t border-slate-100 mt-2')}>
+                                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{field.section}</h4>
+                                                            </div>
+                                                        )}
+                                                        {isCheckbox ? (
+                                                            <div className="flex items-center gap-2.5 py-0.5">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    id={field.id}
+                                                                    checked={!!formValues[field.id]}
+                                                                    onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.checked }))}
+                                                                    className="h-4 w-4 rounded border-slate-300 text-seal focus:ring-seal"
+                                                                />
+                                                                <label htmlFor={field.id} className="text-sm text-slate-700 cursor-pointer leading-snug">
+                                                                    {field.label}
+                                                                    {field.required && <span className="text-danger ml-1">*</span>}
+                                                                </label>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="space-y-1.5">
+                                                                <Label htmlFor={field.id}>
+                                                                    {field.label}
+                                                                    {field.required && <span className="text-danger ml-1">*</span>}
+                                                                </Label>
+                                                                {field.note && (
+                                                                    <p className="text-xs text-warning-text flex items-center gap-1">
+                                                                        <AlertCircle className="h-3 w-3" />
+                                                                        {field.note}
+                                                                    </p>
+                                                                )}
+                                                                {field.type === 'repeatable' ? (
+                                                                    <RepeatableGroup
+                                                                        fieldDef={field}
+                                                                        value={formValues[field.id] ?? []}
+                                                                        onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                                                                    />
+                                                                ) : field.type === 'textarea' ? (
+                                                                    <textarea
+                                                                        id={field.id}
+                                                                        rows={3}
+                                                                        placeholder={field.placeholder}
+                                                                        value={formValues[field.id] || ''}
+                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                                    />
+                                                                ) : field.type === 'select' ? (
+                                                                    <select
+                                                                        id={field.id}
+                                                                        value={formValues[field.id] || ''}
+                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                                    >
+                                                                        <option value="">— Choisir —</option>
+                                                                        {(field.options ?? []).map(opt => (
+                                                                            <option key={opt} value={opt}>{opt}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                ) : (
+                                                                    <Input
+                                                                        id={field.id}
+                                                                        placeholder={field.placeholder}
+                                                                        value={formValues[field.id] || ''}
+                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                                                        className={cn(field.mono && 'font-ref')}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </React.Fragment>
+                                                );
+                                            })}
                                         </CardContent>
                                     </Card>
                                 )}
@@ -499,12 +682,23 @@ export default function DossierCreate() {
                                             </div>
                                         </div>
 
-                                        {Object.entries(formValues).filter(([_, v]) => v).map(([key, value]) => {
-                                            const field = questionnaire.find(q => q.id === key);
+                                        {visibleFields.map(field => {
+                                            const value = formValues[field.id];
+                                            if (field.type === 'checkbox' && !value) return null;
+                                            if (!value && value !== false && value !== true) return null;
+                                            if (field.type === 'repeatable') {
+                                                return (
+                                                    <div key={field.id} className="pt-1">
+                                                        <p className="text-xs font-semibold text-seal uppercase tracking-wide mb-1">{field.label}</p>
+                                                        <RepeatableGroup fieldDef={field} value={value ?? []} onChange={() => {}} readOnly />
+                                                    </div>
+                                                );
+                                            }
+                                            if (field.type === 'checkbox') return null;
                                             return (
-                                                <div key={key} className="flex gap-3 text-sm">
-                                                    <span className="text-slate-500 min-w-[140px] shrink-0">{field?.label || key}</span>
-                                                    <span className={cn('text-slate-800 font-medium', field?.mono && 'font-ref')}>
+                                                <div key={field.id} className="flex gap-3 text-sm">
+                                                    <span className="text-slate-500 min-w-[140px] shrink-0">{field.label}</span>
+                                                    <span className={cn('text-slate-800 font-medium', field.mono && 'font-ref')}>
                                                         {typeof value === 'boolean' ? (value ? 'Oui' : 'Non') : value}
                                                     </span>
                                                 </div>

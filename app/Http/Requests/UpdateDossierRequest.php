@@ -14,11 +14,16 @@ class UpdateDossierRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'objet'         => ['sometimes', 'string', 'min:10', 'max:500'],
-            'valeur'        => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'echeance'      => ['sometimes', 'nullable', 'date'],
-            'reviseur_id'   => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
-            'formaliste_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'objet'           => ['sometimes', 'string', 'min:10', 'max:500'],
+            'valeur'          => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'echeance'        => ['sometimes', 'nullable', 'date'],
+            'notaire_id'      => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'reviseur_id'     => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'formaliste_id'   => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            // Questionnaire — champs scalaires et blocs répétables (associés, gérants…)
+            'donnees'         => ['sometimes', 'nullable', 'array'],
+            'donnees.*'       => ['nullable'],
+            'donnees.*.*.* '  => ['nullable', 'string', 'max:1000'],
         ];
     }
 }

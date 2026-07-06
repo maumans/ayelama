@@ -80,11 +80,9 @@ class RevisionController extends Controller
 
     public function show(Dossier $dossier)
     {
-        $dossier->load(['typeActe', 'redacteur', 'revision.reviseur', 'revision.points']);
+        $dossier->load(['typeActe', 'redacteur', 'documents', 'revision.reviseur', 'revision.points']);
 
         $this->authorize('view', $dossier);
-
-        $grille = $dossier->typeActe?->grilleActive;
 
         return Inertia::render('Dossiers/Revision', [
             'dossier' => [
@@ -95,18 +93,26 @@ class RevisionController extends Controller
                 'typeActe'  => $dossier->typeActe?->label,
                 'redacteur' => $dossier->redacteur?->name,
             ],
+            'documents' => $dossier->documents->map(fn ($doc) => [
+                'id'            => $doc->id,
+                'nom'           => $doc->nom,
+                'type_document' => $doc->type_document,
+                'statut'        => $doc->statut,
+                'url_download'  => route('documents.download', $doc),
+                'url_preview'   => route('documents.preview', $doc),
+                'has_file'      => (bool) $doc->chemin_fichier,
+            ]),
             'revision' => $dossier->revision ? [
-                'id'         => $dossier->revision->id,
-                'statut'     => $dossier->revision->statut?->value,
-                'commentaire' => $dossier->revision->commentaire,
-                'points'     => $dossier->revision->points->keyBy('point_id')->map(fn ($p) => [
+                'id'           => $dossier->revision->id,
+                'statut'       => $dossier->revision->statut?->value,
+                'commentaire'  => $dossier->revision->commentaire,
+                'points'       => $dossier->revision->points->keyBy('point_id')->map(fn ($p) => [
                     'etat'        => $p->etat,
                     'commentaire' => $p->commentaire,
                 ]),
                 'estValidable' => $dossier->revision->estValidable(),
             ] : null,
-            'grille'  => $grille?->groupes(),
-            'can'     => [
+            'can' => [
                 'update'   => auth()->user()->can('reviser', $dossier),
                 'valider'  => $dossier->revision && auth()->user()->can('valider', $dossier->revision),
                 'renvoyer' => $dossier->revision && auth()->user()->can('renvoyer', $dossier->revision),
@@ -130,7 +136,7 @@ class RevisionController extends Controller
         $points = $request->validate([
             'points'   => ['required', 'array'],
             'points.*' => ['required', 'array'],
-            'points.*.etat'        => ['nullable', 'string', 'in:conforme,non_conforme,na'],
+            'points.*.etat'        => ['nullable', 'string', 'in:ok,a_corriger'],
             'points.*.commentaire' => ['nullable', 'string', 'max:500'],
         ])['points'];
 

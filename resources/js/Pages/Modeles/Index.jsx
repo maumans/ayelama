@@ -5,7 +5,9 @@ import {
     FileText, Plus, Search, Trash2, Copy,
     CheckCircle2, XCircle, X, LayoutGrid, List,
     Pencil, ClipboardCopy, Check, ChevronDown, ChevronUp,
-    ArrowUpDown, FileCheck, Paperclip, PenLine, Mail, Receipt
+    ArrowUpDown, FileCheck, Paperclip, PenLine, Mail, Receipt,
+    BookOpen, ShieldCheck, ClipboardList, Fingerprint,
+    Newspaper, Building2, Calculator, LayoutList,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,11 +29,19 @@ import { cn } from '@/lib/utils';
 // ── Constantes ─────────────────────────────────────────────────────────────
 
 const TYPES_DOC = [
-    { value: 'acte_principal', label: 'Acte principal',  icon: FileCheck,  color: 'bg-ink/10 text-ink border-ink/20' },
-    { value: 'annexe',         label: 'Annexe',           icon: Paperclip,  color: 'bg-blue-50 text-blue-700 border-blue-200' },
-    { value: 'procedure',      label: 'Procédure',        icon: PenLine,    color: 'bg-amber-50 text-amber-700 border-amber-200' },
-    { value: 'lettre',         label: 'Lettre',           icon: Mail,       color: 'bg-purple-50 text-purple-700 border-purple-200' },
-    { value: 'recepisse',      label: 'Récépissé',        icon: Receipt,    color: 'bg-green-50 text-green-700 border-green-200' },
+    { value: 'acte_principal', label: 'Acte principal',       icon: FileCheck,     color: 'bg-ink/10 text-ink border-ink/20' },
+    { value: 'page_garde',     label: 'Page de garde',         icon: BookOpen,      color: 'bg-slate-50 text-slate-600 border-slate-200' },
+    { value: 'attestation',    label: 'Attestation',           icon: ShieldCheck,   color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    { value: 'declaration',    label: 'Déclaration',           icon: ClipboardList, color: 'bg-violet-50 text-violet-700 border-violet-200' },
+    { value: 'dnsv',           label: 'DNSV',                  icon: Fingerprint,   color: 'bg-orange-50 text-orange-700 border-orange-200' },
+    { value: 'insertion',      label: 'Insertion au JORG',     icon: Newspaper,     color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+    { value: 'rccm',           label: 'RCCM',                  icon: Building2,     color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    { value: 'note_frais',     label: 'Note de frais',         icon: Calculator,    color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+    { value: 'bordereau',      label: 'Bordereau / Tableau',   icon: LayoutList,    color: 'bg-pink-50 text-pink-700 border-pink-200' },
+    { value: 'annexe',         label: 'Annexe',                icon: Paperclip,     color: 'bg-blue-50 text-blue-700 border-blue-200' },
+    { value: 'procedure',      label: 'Procédure',             icon: PenLine,       color: 'bg-amber-50 text-amber-700 border-amber-200' },
+    { value: 'lettre',         label: 'Lettre / Transmission', icon: Mail,          color: 'bg-purple-50 text-purple-700 border-purple-200' },
+    { value: 'recepisse',      label: 'Récépissé',             icon: Receipt,       color: 'bg-green-50 text-green-700 border-green-200' },
 ];
 const TYPE_DOC_MAP = Object.fromEntries(TYPES_DOC.map(t => [t.value, t]));
 
@@ -87,36 +97,48 @@ function CopyPathButton({ path }) {
 
 // ── Modale Créer / Modifier ─────────────────────────────────────────────────
 
+import { useForm } from '@inertiajs/react';
+
 function ModalModele({ open, onClose, typesActes, modele = null }) {
     const isEdit = !!modele;
-    const [form, setForm] = useState({
-        nom:            modele?.nom            ?? '',
-        type_acte_id:   modele?.type_acte_id   ? String(modele.type_acte_id) : '',
-        type_document:  modele?.type_document  ?? 'acte_principal',
-        version:        modele?.version        ?? '1.0',
-        chemin_fichier: modele?.chemin_fichier ?? '',
+    const { data, setData, post, processing, errors, reset, clearErrors } = useForm({
+        nom:            '',
+        type_acte_id:   '',
+        type_document:  'acte_principal',
+        version:        '1.0',
+        fichier:        null,
+        chemin_fichier: '',
     });
-    const [errors, setErrors] = useState({});
 
     // sync si modele change (ouverture édition)
     React.useEffect(() => {
-        if (modele) {
-            setForm({
-                nom:            modele.nom,
-                type_acte_id:   String(modele.type_acte_id),
-                type_document:  modele.type_document,
-                version:        modele.version,
-                chemin_fichier: modele.chemin_fichier,
-            });
+        if (open) {
+            clearErrors();
+            if (modele) {
+                setData({
+                    nom:            modele.nom,
+                    type_acte_id:   String(modele.type_acte_id),
+                    type_document:  modele.type_document,
+                    version:        modele.version,
+                    fichier:        null,
+                    chemin_fichier: modele.chemin_fichier,
+                });
+            } else {
+                reset();
+            }
         }
-    }, [modele]);
+    }, [open, modele]);
 
     const submit = () => {
-        const opts = { onSuccess: () => { onClose(); setErrors({}); }, onError: setErrors };
+        const opts = { onSuccess: () => { onClose(); reset(); } };
         if (isEdit) {
-            router.patch(`/modeles/${modele.id}`, form, opts);
+            // Pour uploader un fichier en PATCH avec Laravel + Inertia
+            router.post(`/modeles/${modele.id}`, {
+                _method: 'patch',
+                ...data
+            }, { ...opts, forceFormData: true });
         } else {
-            router.post('/modeles', form, opts);
+            post('/modeles', { ...opts, forceFormData: true });
         }
     };
 
@@ -134,8 +156,8 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
                         <Label>Nom du modèle</Label>
                         <Input
                             placeholder="ex : Statuts SARL — Constitution"
-                            value={form.nom}
-                            onChange={e => setForm(f => ({ ...f, nom: e.target.value }))}
+                            value={data.nom}
+                            onChange={e => setData('nom', e.target.value)}
                         />
                         {errors.nom && <p className="text-xs text-danger-text">{errors.nom}</p>}
                     </div>
@@ -143,7 +165,7 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                             <Label>Type d'acte</Label>
-                            <Select value={form.type_acte_id} onValueChange={v => setForm(f => ({ ...f, type_acte_id: v }))}>
+                            <Select value={data.type_acte_id} onValueChange={v => setData('type_acte_id', v)}>
                                 <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
                                 <SelectContent className="max-h-60">
                                     {typesActes?.map(t => (
@@ -156,7 +178,7 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
 
                         <div className="space-y-1.5">
                             <Label>Type de document</Label>
-                            <Select value={form.type_document} onValueChange={v => setForm(f => ({ ...f, type_document: v }))}>
+                            <Select value={data.type_document} onValueChange={v => setData('type_document', v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     {TYPES_DOC.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
@@ -170,17 +192,21 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
                             <Label>Version</Label>
                             <Input
                                 placeholder="1.0"
-                                value={form.version}
-                                onChange={e => setForm(f => ({ ...f, version: e.target.value }))}
+                                value={data.version}
+                                onChange={e => setData('version', e.target.value)}
                             />
                         </div>
                         <div className="col-span-2 space-y-1.5">
-                            <Label>Chemin / Référence fichier</Label>
+                            <Label>Fichier (.docx)</Label>
                             <Input
-                                placeholder="modeles/societe/statuts-sarl.docx"
-                                value={form.chemin_fichier}
-                                onChange={e => setForm(f => ({ ...f, chemin_fichier: e.target.value }))}
+                                type="file"
+                                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                onChange={e => setData('fichier', e.target.files[0])}
                             />
+                            {!data.fichier && data.chemin_fichier && (
+                                <p className="text-[10px] text-slate-400 truncate mt-1">Actuel : {data.chemin_fichier}</p>
+                            )}
+                            {errors.fichier && <p className="text-xs text-danger-text">{errors.fichier}</p>}
                             {errors.chemin_fichier && <p className="text-xs text-danger-text">{errors.chemin_fichier}</p>}
                         </div>
                     </div>
@@ -188,7 +214,7 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
 
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annuler</Button>
-                    <Button variant="seal" onClick={submit}>
+                    <Button variant="seal" onClick={submit} disabled={processing}>
                         {isEdit ? 'Enregistrer' : 'Créer le modèle'}
                     </Button>
                 </DialogFooter>

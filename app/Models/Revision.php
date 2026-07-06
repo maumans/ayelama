@@ -39,12 +39,12 @@ class Revision extends Model
     // Calculs
     public function nombreConformes(): int
     {
-        return $this->points->where('etat', 'conforme')->count();
+        return $this->points->where('etat', 'ok')->count();
     }
 
     public function nombreNonConformes(): int
     {
-        return $this->points->where('etat', 'non_conforme')->count();
+        return $this->points->where('etat', 'a_corriger')->count();
     }
 
     public function nombreEvalues(): int
@@ -55,6 +55,17 @@ class Revision extends Model
     public function estValidable(): bool
     {
         return $this->nombreNonConformes() === 0;
+    }
+
+    public function resetPoints(): void
+    {
+        $this->points()->delete();
+        $this->update([
+            'statut'     => StatutRevision::EnAttente,
+            'commentaire' => null,
+            'valide_at'  => null,
+            'renvoye_at' => null,
+        ]);
     }
 
     public function valider(User $reviseur): void

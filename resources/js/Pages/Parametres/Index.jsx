@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Head, router } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppLayout from '@/Layouts/AppLayout';
@@ -14,8 +14,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import {
     AlertTriangle, Check, CheckCircle, CheckCircle2, ChevronDown, ChevronUp,
-    ClipboardList, FileText, GripVertical, Pencil, Percent, Plus, Scale,
-    Search, Settings, Shield, Trash2, Users, X, XCircle,
+    ClipboardList, FileText, GripVertical, Palette, Pencil, Percent, Plus,
+    Scale, Search, Settings, Shield, Trash2, Upload, Users, X, XCircle,
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════
@@ -58,10 +58,11 @@ const ORGANISME_COLORS = {
 };
 
 const TABS = [
-    { id: 'utilisateurs', label: 'Utilisateurs',  icon: Users         },
-    { id: 'types-actes',  label: "Types d'actes", icon: FileText      },
-    { id: 'baremes',      label: 'Barèmes & Taux', icon: Scale        },
-    { id: 'grilles',      label: 'Grilles de révision', icon: ClipboardList },
+    { id: 'utilisateurs', label: 'Utilisateurs',       icon: Users         },
+    { id: 'types-actes',  label: "Types d'actes",      icon: FileText      },
+    { id: 'baremes',      label: 'Barèmes & Taux',     icon: Scale         },
+    { id: 'grilles',      label: 'Grilles de révision',icon: ClipboardList },
+    { id: 'apparence',    label: 'Apparence',          icon: Palette       },
 ];
 
 const CAT_BADGE_ALL = {
@@ -1032,6 +1033,302 @@ function TabGrilles({ grilles = [], typesActes = [] }) {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   Tab: Apparence
+═══════════════════════════════════════════════════════════ */
+
+function ColorPicker({ label, description, value, onChange }) {
+    const inputRef = useRef(null);
+    return (
+        <div className="flex items-center justify-between gap-4 py-3 border-b border-slate-100 last:border-b-0">
+            <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-700">{label}</div>
+                {description && <div className="text-xs text-slate-400 mt-0.5">{description}</div>}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+                <div
+                    className="h-8 w-8 rounded-md border border-slate-300 cursor-pointer shadow-sm transition-transform hover:scale-110"
+                    style={{ backgroundColor: value }}
+                    onClick={() => inputRef.current?.click()}
+                    title="Cliquer pour changer"
+                />
+                <code className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 w-20 text-center">
+                    {value}
+                </code>
+                <input
+                    ref={inputRef}
+                    type="color"
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
+                    className="sr-only"
+                />
+            </div>
+        </div>
+    );
+}
+
+function TabApparence({ apparence = {} }) {
+    const [form, setForm] = useState({
+        office_nom:        apparence.office_nom        || 'Maître Ayelama Bah',
+        office_sous_titre: apparence.office_sous_titre || 'Notaire',
+        couleur_primaire:  apparence.couleur_primaire  || '#0F2D60',
+        couleur_accent:    apparence.couleur_accent    || '#E8A520',
+        couleur_fond:      apparence.couleur_fond      || '#F5F5F3',
+    });
+    const [logoPreview, setLogoPreview] = useState(apparence.logo_url || null);
+    const [logoFile, setLogoFile]       = useState(null);
+    const [saving, setSaving]           = useState(false);
+    const [saved, setSaved]             = useState(false);
+    const fileRef = useRef(null);
+
+    const f = k => v => setForm(p => ({ ...p, [k]: v }));
+
+    const handleLogoChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setLogoFile(file);
+        setLogoPreview(URL.createObjectURL(file));
+    };
+
+    const uploadLogo = () => {
+        if (!logoFile) return;
+        const data = new FormData();
+        data.append('logo', logoFile);
+        router.post('/parametres/apparence/logo', data, {
+            forceFormData: true,
+            onSuccess: () => { setLogoFile(null); },
+        });
+    };
+
+    const deleteLogo = () => {
+        router.delete('/parametres/apparence/logo', {
+            onSuccess: () => { setLogoPreview(null); setLogoFile(null); },
+        });
+    };
+
+    const saveSettings = (e) => {
+        e.preventDefault();
+        setSaving(true);
+        router.post('/parametres/apparence', form, {
+            onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2500); },
+            onFinish: () => setSaving(false),
+        });
+    };
+
+    // Upload logo séparément si un fichier est prêt
+    useEffect(() => {
+        if (logoFile) uploadLogo();
+    }, [logoFile]);
+
+    const previewPrimary = form.couleur_primaire;
+    const previewAccent  = form.couleur_accent;
+    const previewFond    = form.couleur_fond;
+
+    return (
+        <form onSubmit={saveSettings} className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                {/* Colonne gauche — paramètres */}
+                <div className="space-y-5">
+
+                    {/* Logo */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                        <h3 className="text-sm font-semibold text-ink mb-4 flex items-center gap-2">
+                            <Upload className="h-4 w-4 text-seal" />
+                            Logo de l'office
+                        </h3>
+                        <div className="flex items-center gap-4">
+                            <div className="h-16 w-16 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
+                                {logoPreview
+                                    ? <img src={logoPreview} alt="Logo" className="h-full w-full object-contain p-1" />
+                                    : <span className="text-slate-300 text-xs text-center leading-tight">Aucun logo</span>
+                                }
+                            </div>
+                            <div className="flex flex-col gap-2 min-w-0">
+                                <Button type="button" variant="outline" size="sm" className="h-8"
+                                    onClick={() => fileRef.current?.click()}>
+                                    <Upload className="h-3.5 w-3.5" />
+                                    {logoPreview ? 'Changer le logo' : 'Choisir un logo'}
+                                </Button>
+                                {logoPreview && (
+                                    <Button type="button" variant="ghost" size="sm" className="h-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                        onClick={deleteLogo}>
+                                        <Trash2 className="h-3.5 w-3.5" /> Supprimer
+                                    </Button>
+                                )}
+                                <p className="text-[10px] text-slate-400">PNG, JPG ou SVG · max 2 Mo</p>
+                                <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml"
+                                    className="sr-only" onChange={handleLogoChange} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Identité */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                        <h3 className="text-sm font-semibold text-ink mb-4">Identité de l'office</h3>
+                        <div className="space-y-3">
+                            <div className="space-y-1.5">
+                                <Label>Nom de l'office</Label>
+                                <Input value={form.office_nom}
+                                    onChange={e => f('office_nom')(e.target.value)}
+                                    placeholder="Maître Ayelama Bah" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>Sous-titre <span className="text-slate-400 text-[10px]">(affiché sous le nom)</span></Label>
+                                <Input value={form.office_sous_titre}
+                                    onChange={e => f('office_sous_titre')(e.target.value)}
+                                    placeholder="Notaire" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Couleurs */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                        <h3 className="text-sm font-semibold text-ink mb-1">Palette de couleurs</h3>
+                        <p className="text-xs text-slate-400 mb-4">Les changements s'appliquent immédiatement à toute l'interface.</p>
+                        <div>
+                            <ColorPicker
+                                label="Couleur principale"
+                                description="Sidebar, boutons principaux, titres"
+                                value={previewPrimary}
+                                onChange={f('couleur_primaire')}
+                            />
+                            <ColorPicker
+                                label="Couleur d'accent"
+                                description="Or notarial — icônes actives, badges, boutons d'action"
+                                value={previewAccent}
+                                onChange={f('couleur_accent')}
+                            />
+                            <ColorPicker
+                                label="Fond de l'application"
+                                description="Arrière-plan général de l'interface"
+                                value={previewFond}
+                                onChange={f('couleur_fond')}
+                            />
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => setForm(p => ({ ...p, couleur_primaire: '#0F2D60', couleur_accent: '#E8A520', couleur_fond: '#F5F5F3' }))}
+                                className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                            >
+                                Réinitialiser aux couleurs par défaut
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Colonne droite — aperçu */}
+                <div className="space-y-4">
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                        <h3 className="text-sm font-semibold text-slate-700 mb-4">Aperçu</h3>
+
+                        {/* Mini sidebar preview */}
+                        <div className="rounded-lg overflow-hidden border border-slate-200 shadow-sm">
+                            {/* Sidebar */}
+                            <div className="flex" style={{ height: 160 }}>
+                                <div className="w-32 flex flex-col" style={{ backgroundColor: previewPrimary }}>
+                                    {/* Logo area */}
+                                    <div className="flex items-center gap-2 px-2 py-2 border-b" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+                                        <div className="h-6 w-6 rounded flex items-center justify-center overflow-hidden shrink-0"
+                                             style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>
+                                            {logoPreview
+                                                ? <img src={logoPreview} alt="" className="h-full w-full object-contain" />
+                                                : <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: previewAccent }} />
+                                            }
+                                        </div>
+                                        <div>
+                                            <div className="text-white text-[8px] font-semibold leading-tight truncate" style={{ maxWidth: 72 }}>
+                                                {form.office_nom.split(' ').slice(-2).join(' ')}
+                                            </div>
+                                            <div className="text-[6px] font-medium tracking-wider truncate" style={{ color: previewAccent, maxWidth: 72 }}>
+                                                {form.office_sous_titre.toUpperCase()}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {/* Nav items */}
+                                    {['Tableau de bord', 'Dossiers', 'Révisions', 'Formalités'].map((item, i) => (
+                                        <div key={item} className="flex items-center gap-1.5 px-2 py-1 mx-1 my-0.5 rounded text-[7px]"
+                                             style={{
+                                                 backgroundColor: i === 0 ? 'rgba(255,255,255,0.15)' : 'transparent',
+                                                 color: i === 0 ? '#fff' : 'rgba(255,255,255,0.6)'
+                                             }}>
+                                            <div className="h-2 w-2 rounded-sm shrink-0"
+                                                 style={{ backgroundColor: i === 0 ? previewAccent : 'rgba(255,255,255,0.3)' }} />
+                                            {item}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Main area */}
+                                <div className="flex-1 flex flex-col" style={{ backgroundColor: previewFond }}>
+                                    {/* Topbar */}
+                                    <div className="h-8 bg-white border-b border-slate-200 flex items-center gap-2 px-3">
+                                        <div className="flex-1 h-3 bg-slate-100 rounded-full" />
+                                        <div className="h-5 px-2 rounded text-[7px] font-medium text-white flex items-center"
+                                             style={{ backgroundColor: previewAccent }}>
+                                            + Dossier
+                                        </div>
+                                    </div>
+                                    {/* Content */}
+                                    <div className="flex-1 p-3 space-y-2">
+                                        <div className="h-3 rounded" style={{ backgroundColor: previewPrimary, opacity: 0.08, width: '60%' }} />
+                                        <div className="grid grid-cols-2 gap-1.5">
+                                            {[previewPrimary, previewAccent, '#10B981', '#6366F1'].map((c, i) => (
+                                                <div key={i} className="h-8 rounded-md bg-white border border-slate-200 flex items-center gap-1 px-1.5">
+                                                    <div className="h-3 w-3 rounded shrink-0" style={{ backgroundColor: c, opacity: 0.9 }} />
+                                                    <div className="h-1.5 bg-slate-100 rounded flex-1" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p className="text-[10px] text-slate-400 text-center mt-3">Aperçu en temps réel</p>
+                    </div>
+
+                    {/* Palettes prédéfinies */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                        <h3 className="text-sm font-semibold text-slate-700 mb-3">Palettes prédéfinies</h3>
+                        <div className="grid grid-cols-2 gap-2">
+                            {[
+                                { label: 'Notarial Guinée',  primary: '#0F2D60', accent: '#E8A520', fond: '#F5F5F3' },
+                                { label: 'Bordeaux Royal',   primary: '#6B1A1A', accent: '#C9A84C', fond: '#FAFAF8' },
+                                { label: 'Vert Forêt',       primary: '#1B4332', accent: '#D4A017', fond: '#F4F7F4' },
+                                { label: 'Marine Classique', primary: '#1E3A5F', accent: '#C0934E', fond: '#F6F6F4' },
+                            ].map(palette => (
+                                <button
+                                    key={palette.label}
+                                    type="button"
+                                    onClick={() => setForm(p => ({ ...p, ...palette }))}
+                                    className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all text-left"
+                                >
+                                    <div className="flex gap-0.5 shrink-0">
+                                        {[palette.primary, palette.accent, palette.fond].map((c, i) => (
+                                            <div key={i} className="h-4 w-4 rounded-sm border border-black/10" style={{ backgroundColor: c }} />
+                                        ))}
+                                    </div>
+                                    <span className="text-[10px] text-slate-600 font-medium truncate">{palette.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Barre de sauvegarde */}
+            <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-slate-200 -mx-5 px-5 py-3 flex items-center justify-between gap-3 rounded-b-xl">
+                <p className="text-xs text-slate-400">Les couleurs s'appliquent immédiatement — cliquez sur Enregistrer pour les conserver.</p>
+                <Button type="submit" variant="seal" disabled={saving} className="shrink-0">
+                    {saved ? <><Check className="h-4 w-4" /> Enregistré</> : saving ? 'Enregistrement…' : 'Enregistrer'}
+                </Button>
+            </div>
+        </form>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════
    Page principale
 ═══════════════════════════════════════════════════════════ */
 
@@ -1041,6 +1338,7 @@ export default function ParametresIndex({
     typesActes = [],
     baremesTypesActes = [], categories = [], organismes = [],
     grilles = [],
+    apparence = {},
 }) {
     const [activeTab, setActiveTab] = useState('utilisateurs');
 
@@ -1164,6 +1462,9 @@ export default function ParametresIndex({
                                 )}
                                 {activeTab === 'grilles' && (
                                     <TabGrilles grilles={grilles} typesActes={typesActes} />
+                                )}
+                                {activeTab === 'apparence' && (
+                                    <TabApparence apparence={apparence} />
                                 )}
                             </motion.div>
                         </AnimatePresence>
