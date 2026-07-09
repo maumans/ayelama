@@ -14,25 +14,32 @@ import {
 } from '@/components/ui/tooltip';
 import {
     ArrowUpDown, Briefcase, CreditCard, ExternalLink,
-    FileText, Mail, MapPin, Phone, Search, Users, X,
+    FileText, Mail, MapPin, Phone, Search, Users, UserCheck, X,
 } from 'lucide-react';
 
 /* ─── Role metadata ──────────────────────────────────────── */
 
 const ROLE_META = {
-    acheteur:   { label: 'Acheteur',   badge: 'bg-blue-50 text-blue-700 border-blue-200',         avatar: 'bg-blue-600' },
-    vendeur:    { label: 'Vendeur',    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', avatar: 'bg-emerald-600' },
-    associe:    { label: 'Associé',    badge: 'bg-purple-50 text-purple-700 border-purple-200',    avatar: 'bg-purple-600' },
-    gerant:     { label: 'Gérant',     badge: 'bg-amber-50 text-amber-700 border-amber-200',       avatar: 'bg-amber-600' },
-    heritier:   { label: 'Héritier',   badge: 'bg-rose-50 text-rose-700 border-rose-200',          avatar: 'bg-rose-600' },
-    mandant:    { label: 'Mandant',    badge: 'bg-indigo-50 text-indigo-700 border-indigo-200',    avatar: 'bg-indigo-600' },
-    mandataire: { label: 'Mandataire', badge: 'bg-teal-50 text-teal-700 border-teal-200',          avatar: 'bg-teal-600' },
-    donateur:   { label: 'Donateur',   badge: 'bg-orange-50 text-orange-700 border-orange-200',    avatar: 'bg-orange-600' },
-    donataire:  { label: 'Donataire',  badge: 'bg-pink-50 text-pink-700 border-pink-200',          avatar: 'bg-pink-600' },
-    epoux:      { label: 'Époux',      badge: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', avatar: 'bg-fuchsia-600' },
-    epouse:     { label: 'Épouse',     badge: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', avatar: 'bg-fuchsia-600' },
-    creancier:  { label: 'Créancier',  badge: 'bg-red-50 text-red-700 border-red-200',             avatar: 'bg-red-600' },
-    debiteur:   { label: 'Débiteur',   badge: 'bg-slate-100 text-slate-600 border-slate-200',      avatar: 'bg-slate-500' },
+    acheteur:       { label: 'Acheteur',       badge: 'bg-blue-50 text-blue-700 border-blue-200',         avatar: 'bg-blue-600' },
+    vendeur:        { label: 'Vendeur',        badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', avatar: 'bg-emerald-600' },
+    associe:        { label: 'Associé',        badge: 'bg-purple-50 text-purple-700 border-purple-200',    avatar: 'bg-purple-600' },
+    associe_unique: { label: 'Associé unique', badge: 'bg-purple-50 text-purple-700 border-purple-200',    avatar: 'bg-purple-600' },
+    gerant:         { label: 'Gérant',         badge: 'bg-amber-50 text-amber-700 border-amber-200',       avatar: 'bg-amber-600' },
+    heritier:       { label: 'Héritier',       badge: 'bg-rose-50 text-rose-700 border-rose-200',          avatar: 'bg-rose-600' },
+    mandant:        { label: 'Mandant',        badge: 'bg-indigo-50 text-indigo-700 border-indigo-200',    avatar: 'bg-indigo-600' },
+    mandataire:     { label: 'Mandataire',     badge: 'bg-teal-50 text-teal-700 border-teal-200',          avatar: 'bg-teal-600' },
+    donateur:       { label: 'Donateur',       badge: 'bg-orange-50 text-orange-700 border-orange-200',    avatar: 'bg-orange-600' },
+    donataire:      { label: 'Donataire',      badge: 'bg-pink-50 text-pink-700 border-pink-200',          avatar: 'bg-pink-600' },
+    epoux:          { label: 'Époux',          badge: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', avatar: 'bg-fuchsia-600' },
+    epouse:         { label: 'Épouse',         badge: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', avatar: 'bg-fuchsia-600' },
+    creancier:      { label: 'Créancier',      badge: 'bg-red-50 text-red-700 border-red-200',             avatar: 'bg-red-600' },
+    debiteur:       { label: 'Débiteur',       badge: 'bg-slate-100 text-slate-600 border-slate-200',      avatar: 'bg-slate-500' },
+    bailleur:       { label: 'Bailleur',       badge: 'bg-cyan-50 text-cyan-700 border-cyan-200',          avatar: 'bg-cyan-600' },
+    locataire:      { label: 'Locataire',      badge: 'bg-cyan-50 text-cyan-700 border-cyan-200',          avatar: 'bg-cyan-600' },
+    actionnaire:    { label: 'Actionnaire',    badge: 'bg-purple-50 text-purple-700 border-purple-200',    avatar: 'bg-purple-600' },
+    administrateur: { label: 'Administrateur', badge: 'bg-amber-50 text-amber-700 border-amber-200',       avatar: 'bg-amber-600' },
+    membre:         { label: 'Membre',         badge: 'bg-purple-50 text-purple-700 border-purple-200',    avatar: 'bg-purple-600' },
+    liquidateur:    { label: 'Liquidateur',    badge: 'bg-slate-100 text-slate-600 border-slate-200',      avatar: 'bg-slate-500' },
 };
 
 const DEFAULT_ROLE = { label: null, badge: 'bg-slate-100 text-slate-600 border-slate-200', avatar: 'bg-ink' };
@@ -45,7 +52,7 @@ const getRoleLabel = (role) => {
 
 /* ─── PartieCard ─────────────────────────────────────────── */
 
-function PartieCard({ partie }) {
+function PartieCard({ partie, onFilterClient }) {
     const meta = getRoleMeta(partie.role);
 
     return (
@@ -59,9 +66,22 @@ function PartieCard({ partie }) {
                 </Avatar>
                 <div className="flex-1 min-w-0">
                     <div className="font-medium text-sm text-ink leading-tight">{partie.nom}</div>
-                    <Badge className={`mt-0.5 text-[10px] px-1.5 py-0 border ${meta.badge}`}>
-                        {getRoleLabel(partie.role)}
-                    </Badge>
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                        <Badge className={`text-[10px] px-1.5 py-0 border ${meta.badge}`}>
+                            {getRoleLabel(partie.role)}
+                        </Badge>
+                        {partie.client_id && (
+                            <button
+                                type="button"
+                                onClick={() => onFilterClient(partie.client_id)}
+                                title={`Client enregistré (${partie.client?.type === 'morale' ? 'personne morale' : 'personne physique'}) — voir ses autres dossiers`}
+                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0 rounded-full border bg-ink/5 text-ink border-ink/20 hover:bg-ink/10 transition-colors"
+                            >
+                                <UserCheck className="h-2.5 w-2.5" />
+                                Client
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -129,10 +149,11 @@ function PartieCard({ partie }) {
 
 /* ─── Page ───────────────────────────────────────────────── */
 
-export default function RepertoireIndex({ parties, stats, roles, filters: init }) {
-    const [q,    setQ]    = useState(init?.q    ?? '');
-    const [role, setRole] = useState(init?.role ?? '');
-    const [sort, setSort] = useState(init?.sort ?? '');
+export default function RepertoireIndex({ parties, stats, roles, filters: init, clientFiltre }) {
+    const [q,        setQ]        = useState(init?.q        ?? '');
+    const [role,     setRole]     = useState(init?.role     ?? '');
+    const [sort,     setSort]     = useState(init?.sort     ?? '');
+    const [clientId, setClientId] = useState(init?.client_id ?? '');
     const firstRender     = useRef(true);
 
     const apply = useCallback((params) => {
@@ -143,28 +164,33 @@ export default function RepertoireIndex({ parties, stats, roles, filters: init }
     /* debounce search input */
     useEffect(() => {
         if (firstRender.current) { firstRender.current = false; return; }
-        const t = setTimeout(() => apply({ q, role, sort }), 350);
+        const t = setTimeout(() => apply({ q, role, sort, client_id: clientId }), 350);
         return () => clearTimeout(t);
     }, [q]);
 
     const setRoleFilter = (r) => {
         const next = r === role ? '' : r;
         setRole(next);
-        apply({ q, role: next, sort });
+        apply({ q, role: next, sort, client_id: clientId });
     };
 
     const setSortFilter = (s) => {
         const next = s === '__none__' ? '' : s;
         setSort(next);
-        apply({ q, role, sort: next });
+        apply({ q, role, sort: next, client_id: clientId });
+    };
+
+    const onFilterClient = (id) => {
+        setClientId(id);
+        apply({ q, role, sort, client_id: id });
     };
 
     const reset = () => {
-        setQ(''); setRole(''); setSort('');
+        setQ(''); setRole(''); setSort(''); setClientId('');
         router.get('/repertoire', {}, { preserveState: true, replace: true });
     };
 
-    const hasFilters = q || role || sort;
+    const hasFilters = q || role || sort || clientId;
     const data       = parties?.data ?? [];
     const parRole    = stats?.parRole ?? [];
     const total      = stats?.total ?? 0;
@@ -268,7 +294,7 @@ export default function RepertoireIndex({ parties, stats, roles, filters: init }
                         />
                         {q && (
                             <button
-                                onClick={() => { setQ(''); apply({ q: '', role, sort }); }}
+                                onClick={() => { setQ(''); apply({ q: '', role, sort, client_id: clientId }); }}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                             >
                                 <X className="h-3.5 w-3.5" />
@@ -316,6 +342,16 @@ export default function RepertoireIndex({ parties, stats, roles, filters: init }
                     )}
                 </div>
 
+                {clientId && (
+                    <div className="flex items-center gap-2 text-sm bg-ink/5 border border-ink/15 rounded-lg px-3 py-1.5 w-fit">
+                        <UserCheck className="h-3.5 w-3.5 text-ink" />
+                        Filtré sur le client : <span className="font-medium">{clientFiltre ?? clientId}</span>
+                        <button onClick={() => onFilterClient('')} className="text-slate-400 hover:text-slate-600">
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                    </div>
+                )}
+
                 {hasFilters && data.length > 0 && (
                     <p className="text-xs text-slate-400">
                         {parties?.total ?? data.length} résultat{(parties?.total ?? data.length) !== 1 ? 's' : ''}
@@ -343,7 +379,7 @@ export default function RepertoireIndex({ parties, stats, roles, filters: init }
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: i * 0.03 }}
                                 >
-                                    <PartieCard partie={p} />
+                                    <PartieCard partie={p} onFilterClient={onFilterClient} />
                                 </motion.div>
                             ))}
                         </AnimatePresence>

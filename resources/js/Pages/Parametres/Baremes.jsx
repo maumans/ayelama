@@ -3,14 +3,16 @@ import { Head, router, usePage } from '@inertiajs/react';
 import { motion } from 'framer-motion';
 import {
     Scale, Plus, Trash2, ChevronDown, ChevronUp,
-    Percent, X
+    Percent, X, ClipboardCheck
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumberField } from '@/components/ui/number-field';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -19,6 +21,13 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+
+const EMPTY_BAREME_FORM = {
+    type_acte_id: '', organisme: 'Impots', libelle: '',
+    taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '',
+    genere_formalite: false, obligatoire: true,
+    type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
+};
 
 const ORGANISME_COLORS = {
     APIP:         'bg-blue-50 text-blue-700',
@@ -30,21 +39,29 @@ const ORGANISME_COLORS = {
 };
 
 function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
-    const [form, setForm] = useState({
-        type_acte_id: '', organisme: 'Impots', libelle: '',
-        taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '',
-    });
+    const [form, setForm] = useState(EMPTY_BAREME_FORM);
+    const [nouvellePiece, setNouvellePiece] = useState('');
     const [errors, setErrors] = useState({});
+
+    const ajouterPiece = () => {
+        const label = nouvellePiece.trim();
+        if (!label) return;
+        setForm(f => ({ ...f, pieces_requises: [...f.pieces_requises, label] }));
+        setNouvellePiece('');
+    };
+    const retirerPiece = (i) => setForm(f => ({ ...f, pieces_requises: f.pieces_requises.filter((_, idx) => idx !== i) }));
 
     const submit = () => {
         router.post('/parametres/baremes', {
             ...form,
             taux:         form.taux         !== '' ? parseFloat(form.taux)         : null,
             montant_fixe: form.montant_fixe !== '' ? parseFloat(form.montant_fixe) : null,
+            delai_heures: form.delai_heures !== '' ? parseInt(form.delai_heures, 10) : null,
         }, {
             onSuccess: () => {
                 onClose();
-                setForm({ type_acte_id: '', organisme: 'Impots', libelle: '', taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '' });
+                setForm(EMPTY_BAREME_FORM);
+                setNouvellePiece('');
             },
             onError: setErrors,
         });
@@ -108,15 +125,12 @@ function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
                         <div className="space-y-1.5">
                             <Label>Taux (%)</Label>
                             <div className="relative">
-                                <Input
-                                    type="number"
-                                    step="0.0001"
-                                    min="0"
-                                    max="100"
+                                <NumberField
+                                    decimals={4}
                                     placeholder="2.5"
                                     className="pr-8"
                                     value={form.taux}
-                                    onChange={e => setForm(f => ({ ...f, taux: e.target.value }))}
+                                    onValueChange={val => setForm(f => ({ ...f, taux: val }))}
                                 />
                                 <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                             </div>
@@ -126,20 +140,93 @@ function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
                         <div className="space-y-1.5">
                             <Label>Montant fixe (GNF)</Label>
                             <div className="relative">
-                                <Input
-                                    type="number"
-                                    step="1000"
-                                    min="0"
+                                <NumberField
                                     placeholder="50000"
                                     className="pr-14"
                                     value={form.montant_fixe}
-                                    onChange={e => setForm(f => ({ ...f, montant_fixe: e.target.value }))}
+                                    onValueChange={val => setForm(f => ({ ...f, montant_fixe: val }))}
                                 />
                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-ref">GNF</span>
                             </div>
                             {errors.montant_fixe && <p className="text-xs text-danger-text">{errors.montant_fixe}</p>}
                         </div>
                     )}
+
+                    <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                        <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                            <Checkbox checked={form.genere_formalite}
+                                onCheckedChange={(checked) => setForm(f => ({ ...f, genere_formalite: checked === true }))} />
+                            <span className="flex items-center gap-1.5">
+                                <ClipboardCheck className="h-3.5 w-3.5 text-seal-hover" />
+                                Génère automatiquement une formalité à la création du dossier
+                            </span>
+                        </label>
+                        {errors.genere_formalite && <p className="text-xs text-danger-text">{errors.genere_formalite}</p>}
+
+                        {form.genere_formalite && (
+                            <div className="space-y-3 pt-1">
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div className="space-y-1.5">
+                                        <Label>Type d'impôt <span className="text-slate-400 text-xs">(optionnel)</span></Label>
+                                        <Input value={form.type_impot} onChange={e => setForm(f => ({ ...f, type_impot: e.target.value }))}
+                                            placeholder="droits_enregistrement" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label>Retour attendu <span className="text-slate-400 text-xs">(optionnel)</span></Label>
+                                        <Input value={form.retour_attendu} onChange={e => setForm(f => ({ ...f, retour_attendu: e.target.value }))}
+                                            placeholder="Titre foncier mis à jour" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label>Délai <span className="text-slate-400 text-xs">(heures)</span></Label>
+                                        <NumberField value={form.delai_heures}
+                                            onValueChange={val => setForm(f => ({ ...f, delai_heures: val }))} placeholder="72" />
+                                    </div>
+                                </div>
+
+                                <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                                    <Checkbox checked={form.obligatoire}
+                                        onCheckedChange={(checked) => setForm(f => ({ ...f, obligatoire: checked === true }))} />
+                                    Formalité obligatoire pour ce type d'acte
+                                </label>
+
+                                <div className="space-y-1.5">
+                                    <Label>
+                                        Pièces requises
+                                        {form.pieces_requises.length > 0 && (
+                                            <span className="ml-2 text-xs font-normal text-slate-400">
+                                                {form.pieces_requises.length} pièce{form.pieces_requises.length > 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                    </Label>
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 min-h-[56px] flex flex-col gap-1.5">
+                                        {form.pieces_requises.length === 0 && (
+                                            <p className="text-xs text-slate-400 text-center my-auto py-3">
+                                                Aucune pièce ajoutée — saisissez ci-dessous
+                                            </p>
+                                        )}
+                                        {form.pieces_requises.map((label, i) => (
+                                            <div key={i} className="flex items-center gap-2 bg-white rounded-md border border-slate-200 px-2.5 py-1.5 group">
+                                                <span className="flex-1 text-sm text-slate-700">{label}</span>
+                                                <button type="button" onClick={() => retirerPiece(i)}
+                                                    className="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                                                    <X className="h-3.5 w-3.5" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Input value={nouvellePiece} onChange={e => setNouvellePiece(e.target.value)}
+                                            placeholder="ex : Copie CNI vendeur, Titre foncier original…"
+                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); ajouterPiece(); } }} />
+                                        <Button type="button" variant="outline" size="sm" onClick={ajouterPiece}
+                                            disabled={!nouvellePiece.trim()} className="shrink-0">
+                                            <Plus className="h-3.5 w-3.5 mr-1" /> Ajouter
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                     <div className="space-y-1.5">
                         <Label>Description <span className="text-slate-400">(optionnel)</span></Label>
@@ -228,7 +315,15 @@ function TypeActeRow({ typeActe }) {
                                                 {b.organisme}
                                             </span>
                                         </td>
-                                        <td className="font-medium text-sm text-slate-700">{b.libelle}</td>
+                                        <td className="font-medium text-sm text-slate-700">
+                                            {b.libelle}
+                                            {b.genere_formalite && (
+                                                <span title="Génère une formalité à la création du dossier"
+                                                    className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0 rounded-full bg-ink/10 text-ink font-medium align-middle">
+                                                    <ClipboardCheck className="h-2.5 w-2.5" /> Formalité
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="text-xs text-slate-500">
                                             {b.base_calcul === 'valeur_acte' ? '% valeur acte' : 'Montant fixe'}
                                         </td>

@@ -1,20 +1,29 @@
+import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
+import { DateField } from '@/Components/ui/date-field';
+import { NumberField } from '@/Components/ui/number-field';
+import { PhoneField } from '@/Components/ui/phone-field';
+import { ClientPicker } from '@/Components/ui/client-picker';
+import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
+import { mapClientToRepeatableItem } from '@/lib/clientFields';
 
 /**
  * RepeatableGroup — bloc de formulaire répétable pour associés, gérants, administrateurs, etc.
  *
  * Props :
- *   fieldDef   — définition du champ repeatable depuis questionnaires.js
+ *   fieldDef   — définition du champ repeatable depuis questionnaires.js (fieldDef.clientRole
+ *                active le sélecteur de client par item)
  *   value      — tableau des items actuels (ex. [{nom:'...', parts_chiffres:'100'}, ...])
  *   onChange   — callback(newArray) appelé à chaque modification
  *   readOnly   — si true, affiche sans contrôles d'édition
  */
 export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false }) {
-    const { fields = [], min = 1, max = 10, label } = fieldDef;
+    const { fields = [], min = 1, max = 10, label, clientRole } = fieldDef;
+    const [creatingForIndex, setCreatingForIndex] = useState(null);
 
     const emptyItem = () => Object.fromEntries(fields.map(f => [f.id, '']));
 
@@ -32,6 +41,24 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
         const next = value.map((item, i) =>
             i === idx ? { ...item, [fieldId]: fieldValue } : item
         );
+        onChange(next);
+    };
+
+    const applyClient = (idx, client) => {
+        const fieldIds = fields.map(f => f.id);
+        const mapped = mapClientToRepeatableItem(client, fieldIds);
+        const next = value.map((item, i) =>
+            i === idx ? { ...item, ...mapped, client_id: client.id } : item
+        );
+        onChange(next);
+    };
+
+    const unlinkClient = (idx) => {
+        const next = value.map((item, i) => {
+            if (i !== idx) return item;
+            const { client_id, ...rest } = item;
+            return rest;
+        });
         onChange(next);
     };
 
@@ -85,6 +112,18 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                             )}
                         </div>
 
+                        {clientRole && (
+                            <div className="mb-3">
+                                <ClientPicker
+                                    placeholder="Rechercher un client existant pour cette personne…"
+                                    linked={item.client_id ? { id: item.client_id, type: item.type_personne === 'Personne morale' ? 'morale' : 'physique', prenom_nom: item.nom, denomination: item.nom, piece_numero: item.cni, telephone: item.telephone } : null}
+                                    onUnlink={() => unlinkClient(idx)}
+                                    onSelect={(client) => applyClient(idx, client)}
+                                    onCreateNew={() => setCreatingForIndex(idx)}
+                                />
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             {fields.map(f => (
                                 <div key={f.id} className={f.type === 'select' ? '' : ''}>
@@ -103,8 +142,30 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                                 <option key={opt} value={opt}>{opt}</option>
                                             ))}
                                         </select>
+                                    ) : f.type === 'date' ? (
+                                        <DateField
+                                            value={item[f.id] ?? ''}
+                                            onValueChange={val => updateItem(idx, f.id, val)}
+                                            className="text-sm"
+                                        />
+                                    ) : f.type === 'number' ? (
+                                        <NumberField
+                                            decimals={f.decimals ?? 0}
+                                            value={item[f.id] ?? ''}
+                                            onValueChange={val => updateItem(idx, f.id, val)}
+                                            placeholder={f.placeholder ?? ''}
+                                            className={`text-sm ${f.mono ? 'font-ref' : ''}`}
+                                        />
+                                    ) : f.type === 'tel' ? (
+                                        <PhoneField
+                                            value={item[f.id] ?? ''}
+                                            onValueChange={val => updateItem(idx, f.id, val)}
+                                            placeholder={f.placeholder ?? ''}
+                                            className="text-sm"
+                                        />
                                     ) : (
                                         <Input
+                                            type={f.type === 'email' ? 'email' : 'text'}
                                             value={item[f.id] ?? ''}
                                             onChange={e => updateItem(idx, f.id, e.target.value)}
                                             placeholder={f.placeholder ?? ''}
@@ -133,6 +194,17 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
 
             {value.length >= max && (
                 <p className="text-xs text-gray-400">Maximum {max} {label.toLowerCase()} atteint.</p>
+            )}
+
+            {clientRole && (
+                <ModalNouveauClient
+                    open={creatingForIndex !== null}
+                    onClose={() => setCreatingForIndex(null)}
+                    onCreated={(client) => {
+                        applyClient(creatingForIndex, client);
+                        setCreatingForIndex(null);
+                    }}
+                />
             )}
         </div>
     );

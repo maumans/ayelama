@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\RoleUtilisateur;
 use App\Enums\StatutFormalite;
 use App\Models\Dossier;
 use App\Models\Formalite;
@@ -14,7 +15,12 @@ class FormaliteController extends Controller
 {
     public function index(Request $request)
     {
+        $this->authorize('viewAny', Dossier::class);
+
+        $user = auth()->user();
+
         $query = Formalite::with(['dossier.typeActe', 'pieces'])
+            ->whereHas('dossier', fn ($d) => $d->visiblePar($user))
             ->when($request->q, fn ($q, $s) => $q->where(fn ($qq) =>
                 $qq->whereHas('dossier', fn ($d) =>
                     $d->where('reference', 'like', "%{$s}%")
@@ -28,13 +34,15 @@ class FormaliteController extends Controller
             ->when(!in_array($request->sort, ['montant', 'organisme']), fn ($q) =>
                 $q->orderByRaw('echeance_at IS NULL, echeance_at ASC'));
 
+        $baseStats = Formalite::whereHas('dossier', fn ($d) => $d->visiblePar($user));
+
         $stats = [
-            'total'       => Formalite::where('statut', '!=', 'cloture')->count(),
-            'aDeposer'    => Formalite::where('statut', 'a_deposer')->count(),
-            'enCours'     => Formalite::whereIn('statut', ['depose', 'en_attente'])->count(),
-            'retourRecu'  => Formalite::where('statut', 'retour_recu')->count(),
-            'urgentes'    => Formalite::urgentes()->count(),
-            'montantTotal' => (float) Formalite::where('statut', '!=', 'cloture')->sum('montant_calcule'),
+            'total'       => (clone $baseStats)->where('statut', '!=', 'cloture')->count(),
+            'aDeposer'    => (clone $baseStats)->where('statut', 'a_deposer')->count(),
+            'enCours'     => (clone $baseStats)->whereIn('statut', ['depose', 'en_attente'])->count(),
+            'retourRecu'  => (clone $baseStats)->where('statut', 'retour_recu')->count(),
+            'urgentes'    => (clone $baseStats)->urgentes()->count(),
+            'montantTotal' => (float) (clone $baseStats)->where('statut', '!=', 'cloture')->sum('montant_calcule'),
         ];
 
         $formalites = $query->paginate(20)->withQueryString();
@@ -44,6 +52,7 @@ class FormaliteController extends Controller
                 'id'             => $f->id,
                 'organisme'      => $f->organisme,
                 'organismeLabel' => $f->labelOrganisme(),
+                'libelle'        => $f->labelAffiche(),
                 'statut'         => $f->statut?->value,
                 'montant_base'   => (float) ($f->montant_base ?? 0),
                 'montant_calcule' => (float) ($f->montant_calcule ?? 0),
@@ -53,6 +62,9 @@ class FormaliteController extends Controller
                 'estUrgente'     => $f->estUrgente(),
                 'estDepassee'    => $f->estDepassee(),
                 'heuresRestantes' => $f->heuresRestantes(),
+                'peutGerer'      => $user->hasRole(RoleUtilisateur::Administrateur)
+                    || $f->dossier?->formaliste_id === $user->id
+                    || $f->dossier?->notaire_id === $user->id,
                 'dossier'        => [
                     'reference' => $f->dossier?->reference,
                     'objet'     => $f->dossier?->objet,
@@ -89,7 +101,8 @@ class FormaliteController extends Controller
         $this->authorize('gererFormalites', $dossier);
 
         $data = $request->validate([
-            'organisme'    => ['required', 'string', 'max:100'],
+            'organisme'    => ['required', 'string', 'in:apip,impots,conservation_fonciere,cnss'],
+            'libelle'      => ['nullable', 'string', 'max:150'],
             'statut'       => ['required', 'string'],
             'montant_base' => ['nullable', 'numeric', 'min:0'],
             'taux'         => ['nullable', 'numeric', 'min:0', 'max:1'],
@@ -112,7 +125,7 @@ class FormaliteController extends Controller
             FormalitePiece::create(['formalite_id' => $formalite->id, 'label' => $piece['label'], 'est_fourni' => false]);
         }
 
-        JournalActivite::enregistrer($dossier, "Formalité ajoutée : {$formalite->labelOrganisme()}", 'formalite');
+        JournalActivite::enregistrer($dossier, "Formalité ajoutée : {$formalite->labelAffiche()}", 'formalite');
 
         return back()->with('success', 'Formalité créée.');
     }
@@ -146,7 +159,7 @@ class FormaliteController extends Controller
 
         JournalActivite::enregistrer(
             $formalite->dossier,
-            "Formalité mise à jour : {$formalite->labelOrganisme()} → statut {$formalite->statut?->value}",
+            "Formalité mise à jour : {$formalite->labelAffiche()} → statut {$formalite->statut?->value}",
             'formalite'
         );
 
@@ -163,7 +176,7 @@ class FormaliteController extends Controller
             'Une formalité clôturée ne peut pas être supprimée.'
         );
 
-        $label   = $formalite->labelOrganisme();
+        $label   = $formalite->labelAffiche();
         $dossier = $formalite->dossier;
 
         $formalite->pieces()->delete();

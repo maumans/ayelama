@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
+import { notifyValidationError } from '@/lib/toast';
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -41,7 +43,7 @@ function FormaliteCard({ formalite, showDossier = true }) {
     const fournis = pieces.filter(p => p.est_fourni).length;
 
     const patch = (data) =>
-        router.patch(`/formalites/${formalite.id}`, data, { preserveScroll: true });
+        router.patch(`/formalites/${formalite.id}`, data, { preserveScroll: true, onError: notifyValidationError });
 
     const handleDepose  = () => patch({ statut: 'depose',      depose_at: new Date().toISOString().slice(0, 10) });
     const handleRetour  = () => patch({ statut: 'retour_recu', retour_at: new Date().toISOString().slice(0, 10) });
@@ -52,7 +54,9 @@ function FormaliteCard({ formalite, showDossier = true }) {
         variant: 'default',
         onConfirm: () => patch({ statut: 'cloture' }),
     });
-    const handleToggle  = (id, est_fourni) => patch({ pieces: [{ id, est_fourni: !est_fourni }] });
+    const peutGerer = !!formalite.peutGerer;
+
+    const handleToggle = (id, est_fourni) => peutGerer && patch({ pieces: [{ id, est_fourni: !est_fourni }] });
 
     const isUrgente  = formalite.estUrgente;
     const isDepassee = formalite.estDepassee;
@@ -85,7 +89,10 @@ function FormaliteCard({ formalite, showDossier = true }) {
             <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-1">
                 <div className="flex items-center gap-2 min-w-0">
                     <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                    <span className="text-sm font-medium text-ink truncate">{formalite.organismeLabel}</span>
+                    <span className="text-sm font-medium text-ink truncate">{formalite.libelle || formalite.organismeLabel}</span>
+                    {formalite.libelle && formalite.libelle !== formalite.organismeLabel && (
+                        <span className="text-[11px] text-slate-400 truncate">({formalite.organismeLabel})</span>
+                    )}
                     {(isDepassee || isUrgente) && (
                         <Flame className={`h-3.5 w-3.5 shrink-0 ${isDepassee ? 'text-danger' : 'text-amber-500'}`} />
                     )}
@@ -159,7 +166,10 @@ function FormaliteCard({ formalite, showDossier = true }) {
                                     <li
                                         key={p.id}
                                         onClick={() => handleToggle(p.id, p.est_fourni)}
-                                        className="flex items-center gap-2 px-1 py-0.5 rounded cursor-pointer hover:bg-slate-50"
+                                        className={cn(
+                                            'flex items-center gap-2 px-1 py-0.5 rounded',
+                                            peutGerer && 'cursor-pointer hover:bg-slate-50'
+                                        )}
                                     >
                                         {p.est_fourni
                                             ? <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
@@ -177,17 +187,17 @@ function FormaliteCard({ formalite, showDossier = true }) {
 
             {/* row 4 — actions */}
             <div className="flex items-center gap-2 px-4 pb-3 pt-2 border-t border-slate-100 mt-1">
-                {formalite.statut === 'a_deposer' && (
+                {peutGerer && formalite.statut === 'a_deposer' && (
                     <Button size="sm" variant="outline" onClick={handleDepose} className="h-7 text-xs gap-1">
                         <Upload className="h-3.5 w-3.5" /> Marquer déposé
                     </Button>
                 )}
-                {(formalite.statut === 'depose' || formalite.statut === 'en_attente') && (
+                {peutGerer && (formalite.statut === 'depose' || formalite.statut === 'en_attente') && (
                     <Button size="sm" variant="success" onClick={handleRetour} className="h-7 text-xs gap-1">
                         <MailCheck className="h-3.5 w-3.5" /> Retour reçu
                     </Button>
                 )}
-                {formalite.statut === 'retour_recu' && (
+                {peutGerer && formalite.statut === 'retour_recu' && (
                     <Button
                         size="sm" variant="outline" onClick={handleCloture}
                         className="h-7 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50"
@@ -314,7 +324,7 @@ export default function FormalitesIndex({ formalites, stats, statuts, filters: i
                         >
                             <AlertCircle className="h-4 w-4 shrink-0" />
                             <span className="flex-1">
-                                <strong>{f.organismeLabel}</strong>
+                                <strong>{f.libelle || f.organismeLabel}</strong>
                                 {f.dossier?.reference && ` · ${f.dossier.reference}`}
                                 {f.estDepassee
                                     ? ' — délai dépassé'

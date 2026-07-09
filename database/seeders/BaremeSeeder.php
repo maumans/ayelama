@@ -41,6 +41,11 @@ class BaremeSeeder extends Seeder
                     'base_calcul'  => 'valeur_acte',
                     'description'  => '2% du prix de vente',
                     'ordre'        => 2,
+                    // Génère aussi la formalité correspondante (ex-FormaliteTypeSeeder VTE-IMM).
+                    'genere_formalite' => true,
+                    'type_impot'       => 'droits_enregistrement',
+                    'delai_heures'     => 120,
+                    'pieces_requises'  => ['Acte de vente signé'],
                 ],
                 [
                     'organisme'    => 'Conservation',
@@ -49,6 +54,10 @@ class BaremeSeeder extends Seeder
                     'base_calcul'  => 'valeur_acte',
                     'description'  => '2% du prix de vente',
                     'ordre'        => 3,
+                    'genere_formalite' => true,
+                    'retour_attendu'   => 'Titre foncier mis à jour',
+                    'delai_heures'     => 240,
+                    'pieces_requises'  => ['Titre foncier original', 'Certificat de situation juridique'],
                 ],
                 [
                     'organisme'    => 'Conservation',
@@ -65,6 +74,17 @@ class BaremeSeeder extends Seeder
                     'base_calcul'  => 'montant_fixe',
                     'description'  => 'Variable selon nombre de pages',
                     'ordre'        => 5,
+                ],
+                [
+                    'organisme'    => 'APIP',
+                    'libelle'      => 'Enregistrement APIP',
+                    'montant_fixe' => 150000.00,
+                    'base_calcul'  => 'montant_fixe',
+                    'description'  => 'Frais fixes d\'enregistrement APIP',
+                    'ordre'        => 6,
+                    'genere_formalite' => true,
+                    'delai_heures'     => 72,
+                    'pieces_requises'  => ['Copie CNI vendeur', 'Copie CNI acquéreur', 'Titre foncier original'],
                 ],
             ]);
         }
@@ -175,6 +195,10 @@ class BaremeSeeder extends Seeder
                     'base_calcul'  => 'valeur_acte',
                     'description'  => '1,5% du montant du crédit',
                     'ordre'        => 1,
+                    // Génère aussi la formalité correspondante (ex-FormaliteTypeSeeder HYP-CON).
+                    'genere_formalite' => true,
+                    'delai_heures'     => 168,
+                    'pieces_requises'  => ['Titre foncier', 'Contrat de prêt'],
                 ],
                 [
                     'organisme'    => 'Impots',
@@ -183,6 +207,8 @@ class BaremeSeeder extends Seeder
                     'base_calcul'  => 'valeur_acte',
                     'description'  => '0,10% du montant du crédit',
                     'ordre'        => 2,
+                    'genere_formalite' => true,
+                    'delai_heures'     => 120,
                 ],
                 [
                     'organisme'    => 'Notaire',

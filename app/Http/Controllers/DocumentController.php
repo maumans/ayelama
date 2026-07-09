@@ -14,11 +14,13 @@ class DocumentController extends Controller
 {
     public function store(Request $request, Dossier $dossier)
     {
+        $this->authorize('genererDocuments', $dossier);
+
         $data = $request->validate([
             'nom'          => ['required', 'string', 'max:200'],
             'type_document'=> ['required', 'in:acte_principal,annexe,procedure,lettre,recepisse'],
             'version'      => ['nullable', 'string', 'max:10'],
-            'fichier'      => ['nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt'],
+            'fichier'      => ['nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt,xlsx,xls'],
         ]);
 
         $cheminFichier = null;
@@ -44,11 +46,13 @@ class DocumentController extends Controller
 
     public function update(Request $request, Document $document)
     {
+        $this->authorize('genererDocuments', $document->dossier);
+
         $data = $request->validate([
             'statut'        => ['sometimes', 'in:a_editer,edite'],
             'nom'           => ['sometimes', 'string', 'max:200'],
             'version'       => ['sometimes', 'string', 'max:10'],
-            'fichier'       => ['sometimes', 'nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt'],
+            'fichier'       => ['sometimes', 'nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt,xlsx,xls'],
         ]);
 
         if ($request->hasFile('fichier')) {
@@ -117,6 +121,8 @@ class DocumentController extends Controller
 
     public function destroy(Document $document)
     {
+        $this->authorize('genererDocuments', $document->dossier);
+
         if ($document->chemin_fichier) {
             Storage::disk('public')->delete($document->chemin_fichier);
         }
@@ -128,6 +134,8 @@ class DocumentController extends Controller
 
     public function download(Document $document)
     {
+        $this->authorize('view', $document->dossier);
+
         if (!$document->chemin_fichier || !Storage::disk('public')->exists($document->chemin_fichier)) {
             abort(404, 'Fichier introuvable.');
         }
@@ -140,6 +148,8 @@ class DocumentController extends Controller
 
     public function preview(Document $document)
     {
+        $this->authorize('view', $document->dossier);
+
         if (!$document->chemin_fichier || !Storage::disk('public')->exists($document->chemin_fichier)) {
             abort(404, 'Fichier introuvable.');
         }

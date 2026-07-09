@@ -5,15 +5,25 @@ import {
     Check, Clock, AlertTriangle, FileText, Download, Eye,
     Building, Send, ClipboardCheck, Phone, MapPin,
     ArrowRight, CheckCircle2, Plus, Trash2, Upload, PenSquare, X,
-    MailCheck, CheckCheck, Square, Pencil, RefreshCw,
+    MailCheck, CheckCheck, Square, Pencil, RefreshCw, Zap,
+    XCircle, Shield, Mail,
 } from 'lucide-react';
 import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
+import { DateField } from '@/components/ui/date-field';
+import { NumberField } from '@/components/ui/number-field';
+import { PhoneField } from '@/components/ui/phone-field';
+import { ClientPicker } from '@/Components/ui/client-picker';
+import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
+import { mapClientToPrefixedFields } from '@/lib/clientFields';
+import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles } from '@/lib/partiesPayload';
+import { isoDateToFR, frDateToISO } from '@/lib/dates';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +31,10 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
+import { notifyValidationError } from '@/lib/toast';
+import DocumentPreviewModal from '@/Components/documents/DocumentPreviewModal';
 
 const STEPS = [
     { id: 'initialisation', label: 'Initialisation', short: 'Init.' },
@@ -69,6 +82,7 @@ function ModalAjouterDocument({ open, onClose, reference }) {
         if (fichier) fd.append('fichier', fichier);
         router.post(`/dossiers/${reference}/documents`, fd, {
             onSuccess: () => { onClose(); setForm(EMPTY_DOC_FORM); setFichier(null); },
+            onError: notifyValidationError,
             forceFormData: true,
         });
     };
@@ -102,7 +116,7 @@ function ModalAjouterDocument({ open, onClose, reference }) {
                         </div>
                     </div>
                     <div className="space-y-1.5">
-                        <Label>Fichier <span className="text-slate-400 text-xs">(PDF, Word, ODT — optionnel)</span></Label>
+                        <Label>Fichier <span className="text-slate-400 text-xs">(PDF, Word, Excel, ODT — optionnel)</span></Label>
                         <div
                             onClick={() => fileRef.current?.click()}
                             className={cn(
@@ -115,7 +129,7 @@ function ModalAjouterDocument({ open, onClose, reference }) {
                                 {fichier ? fichier.name : 'Cliquer pour choisir un fichier'}
                             </p>
                             <input ref={fileRef} type="file" className="hidden"
-                                accept=".pdf,.doc,.docx,.odt"
+                                accept=".pdf,.doc,.docx,.odt,.xlsx,.xls"
                                 onChange={e => setFichier(e.target.files[0] || null)} />
                         </div>
                     </div>
@@ -129,89 +143,15 @@ function ModalAjouterDocument({ open, onClose, reference }) {
     );
 }
 
-const PDF_EXTS = ['pdf'];
-function isPdf(chemin) {
-    if (!chemin) return false;
-    return PDF_EXTS.includes(chemin.split('.').pop()?.toLowerCase());
-}
-
-function ModalPreviewDocument({ doc, onClose }) {
-    const pdf = isPdf(doc?.chemin_fichier);
-    const previewUrl = `/documents/${doc?.id}/preview`;
-
-    useEffect(() => {
-        const handler = (e) => { if (e.key === 'Escape') onClose(); };
-        document.addEventListener('keydown', handler);
-        return () => document.removeEventListener('keydown', handler);
-    }, [onClose]);
-
-    return (
-        <div className="fixed inset-0 z-50 flex flex-col bg-black/70 backdrop-blur-sm" onClick={onClose}>
-            {/* Barre supérieure */}
-            <div
-                className="flex items-center justify-between px-4 py-2 bg-ink text-white shrink-0"
-                onClick={e => e.stopPropagation()}
-            >
-                <div className="flex items-center gap-3 min-w-0">
-                    <FileText className="h-4 w-4 text-slate-300 shrink-0" />
-                    <span className="text-sm font-medium truncate">{doc?.nom}</span>
-                    {doc?.version && <span className="text-xs text-slate-400 shrink-0">v{doc.version}</span>}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                    <a
-                        href={`/documents/${doc?.id}/download`}
-                        download
-                        className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white border border-slate-600 rounded px-2 py-1 transition-colors"
-                        onClick={e => e.stopPropagation()}
-                    >
-                        <Download className="h-3.5 w-3.5" />
-                        Télécharger
-                    </a>
-                    <button
-                        onClick={onClose}
-                        className="h-7 w-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
-                    >
-                        <X className="h-4 w-4" />
-                    </button>
-                </div>
-            </div>
-
-            {/* Zone d'aperçu */}
-            <div className="flex-1 min-h-0 overflow-hidden" onClick={e => e.stopPropagation()}>
-                {pdf ? (
-                    <iframe
-                        src={previewUrl}
-                        className="w-full h-full border-0"
-                        title={doc?.nom}
-                    />
-                ) : (
-                    <div className="flex flex-col items-center justify-center h-full gap-4 text-white">
-                        <FileText className="h-16 w-16 text-slate-500" />
-                        <p className="text-sm text-slate-300">
-                            L'aperçu n'est pas disponible pour ce format.
-                        </p>
-                        <a
-                            href={`/documents/${doc?.id}/download`}
-                            download
-                            className="flex items-center gap-2 text-sm bg-seal text-white px-4 py-2 rounded-md hover:bg-seal/90 transition-colors"
-                        >
-                            <Download className="h-4 w-4" />
-                            Télécharger le fichier
-                        </a>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
-
 // ── Modal : modifier les infos générales du dossier ─────────────────────────
 
-function ModalEditDossier({ open, onClose, dossier, reviseurs, formalistes, notaires }) {
+function ModalEditDossier({ open, onClose, dossier, reviseurs, formalistes, notaires, canReassigner }) {
     const [form, setForm] = useState({
         objet:        dossier.objet ?? '',
         valeur:       dossier.valeur ?? '',
         echeance:     dossier.echeance ?? '',
+        urgent:       dossier.urgent ?? false,
+        notes:        dossier.notes ?? '',
         notaire_id:   dossier.notaire?.id   ?? '',
         reviseur_id:  dossier.reviseur?.id  ?? '',
         formaliste_id: dossier.formaliste?.id ?? '',
@@ -222,6 +162,8 @@ function ModalEditDossier({ open, onClose, dossier, reviseurs, formalistes, nota
             objet:        dossier.objet ?? '',
             valeur:       dossier.valeur ?? '',
             echeance:     dossier.echeance ?? '',
+            urgent:       dossier.urgent ?? false,
+            notes:        dossier.notes ?? '',
             notaire_id:   dossier.notaire?.id   ?? '',
             reviseur_id:  dossier.reviseur?.id  ?? '',
             formaliste_id: dossier.formaliste?.id ?? '',
@@ -236,10 +178,12 @@ function ModalEditDossier({ open, onClose, dossier, reviseurs, formalistes, nota
             objet:         form.objet,
             valeur:        form.valeur        || null,
             echeance:      form.echeance      || null,
+            urgent:        form.urgent,
+            notes:         form.notes         || null,
             notaire_id:    form.notaire_id    || null,
             reviseur_id:   form.reviseur_id   || null,
             formaliste_id: form.formaliste_id || null,
-        }, { onSuccess: () => onClose() });
+        }, { onSuccess: () => onClose(), onError: notifyValidationError });
     };
 
     return (
@@ -260,36 +204,60 @@ function ModalEditDossier({ open, onClose, dossier, reviseurs, formalistes, nota
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                             <Label>Valeur (GNF)</Label>
-                            <Input type="number" min="0" value={form.valeur} onChange={f('valeur')} placeholder="0" />
+                            <NumberField value={form.valeur} onValueChange={val => setForm(p => ({ ...p, valeur: val }))} placeholder="0" />
                         </div>
                         <div className="space-y-1.5">
                             <Label>Échéance</Label>
-                            <Input type="date" value={form.echeance} onChange={f('echeance')} />
+                            <DateField
+                                value={isoDateToFR(form.echeance)}
+                                onValueChange={val => setForm(p => ({ ...p, echeance: frDateToISO(val) }))}
+                            />
                         </div>
                     </div>
+                    <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                        <Checkbox
+                            checked={form.urgent}
+                            onCheckedChange={(checked) => setForm(p => ({ ...p, urgent: checked === true }))}
+                        />
+                        Dossier urgent
+                    </label>
+                    {canReassigner && (
+                        <>
+                            <div className="space-y-1.5">
+                                <Label>Notaire</Label>
+                                <select value={form.notaire_id} onChange={f('notaire_id')}
+                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
+                                    <option value="">Aucun</option>
+                                    {(notaires ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>Réviseur</Label>
+                                <select value={form.reviseur_id} onChange={f('reviseur_id')}
+                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
+                                    <option value="">Aucun</option>
+                                    {(reviseurs ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>Formaliste</Label>
+                                <select value={form.formaliste_id} onChange={f('formaliste_id')}
+                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
+                                    <option value="">Aucun</option>
+                                    {(formalistes ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                </select>
+                            </div>
+                        </>
+                    )}
                     <div className="space-y-1.5">
-                        <Label>Notaire</Label>
-                        <select value={form.notaire_id} onChange={f('notaire_id')}
-                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
-                            <option value="">Aucun</option>
-                            {(notaires ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="space-y-1.5">
-                        <Label>Réviseur</Label>
-                        <select value={form.reviseur_id} onChange={f('reviseur_id')}
-                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
-                            <option value="">Aucun</option>
-                            {(reviseurs ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="space-y-1.5">
-                        <Label>Formaliste</Label>
-                        <select value={form.formaliste_id} onChange={f('formaliste_id')}
-                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
-                            <option value="">Aucun</option>
-                            {(formalistes ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                        </select>
+                        <Label>Notes</Label>
+                        <textarea
+                            value={form.notes}
+                            onChange={f('notes')}
+                            rows={3}
+                            placeholder="Contexte, remarques ou instructions particulières…"
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                        />
                     </div>
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
@@ -303,20 +271,53 @@ function ModalEditDossier({ open, onClose, dossier, reviseurs, formalistes, nota
 
 // ── Modal : modifier le questionnaire ───────────────────────────────────────
 
+function initialClientLinks(fields, parties) {
+    const links = {};
+    for (const group of groupFieldsBySection(fields)) {
+        if (!group.clientRole) continue;
+        const partie = (parties ?? []).find(p => p.role === group.clientRole && p.client);
+        if (partie) links[group.clientRole] = partie.client;
+    }
+    return links;
+}
+
 function ModalEditQuestionnaire({ open, onClose, dossier }) {
     const questKey  = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
     const fields    = QUESTIONNAIRES[questKey] ?? [];
     const [formValues, setFormValues] = useState(dossier.questionnaire ?? {});
+    const [clientLinks, setClientLinks] = useState(() => initialClientLinks(fields, dossier.parties));
+    const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
 
     useEffect(() => {
-        if (open) setFormValues(dossier.questionnaire ?? {});
+        if (open) {
+            setFormValues(dossier.questionnaire ?? {});
+            setClientLinks(initialClientLinks(fields, dossier.parties));
+        }
     }, [open]);
+
+    const applyClientToSection = (group, client) => {
+        const prefix = group.fields[0].id.split('.')[0];
+        const fieldIds = group.fields.map(f => f.id);
+        const mapped = mapClientToPrefixedFields(client, prefix, fieldIds);
+        setFormValues(prev => ({ ...prev, ...mapped }));
+        setClientLinks(prev => ({ ...prev, [group.clientRole]: client }));
+    };
+
+    const unlinkClientFromSection = (role) => {
+        setClientLinks(prev => {
+            const next = { ...prev };
+            delete next[role];
+            return next;
+        });
+    };
 
     const submit = (e) => {
         e.preventDefault();
         router.patch(`/dossiers/${dossier.reference}/questionnaire`, {
             donnees: formValues,
-        }, { onSuccess: () => onClose() });
+            parties: buildPartiesPayload(fields, formValues, clientLinks),
+            managedRoles: getManagedClientRoles(fields),
+        }, { onSuccess: () => onClose(), onError: notifyValidationError });
     };
 
     // Si aucun schéma connu, afficher les champs existants en mode générique
@@ -328,21 +329,32 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
     const visibleFields = getVisibleFields(allFields, formValues);
 
     return (
+        <>
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-2xl">
                 <DialogHeader><DialogTitle>Modifier le questionnaire</DialogTitle></DialogHeader>
                 <form onSubmit={submit}>
                     <div className="max-h-[62vh] overflow-y-auto space-y-4 py-2 pr-1">
-                        {visibleFields.map((field, idx) => {
-                            const showSection = field.section && (idx === 0 || visibleFields[idx - 1]?.section !== field.section);
-                            return (
-                                <React.Fragment key={field.id}>
-                                    {showSection && (
-                                        <div className={cn('pb-1', idx > 0 && 'pt-4 border-t border-slate-100')}>
-                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{field.section}</h4>
-                                        </div>
-                                    )}
-                                    <div className="space-y-1.5">
+                        {groupFieldsBySection(visibleFields).map((group, gi) => (
+                            <React.Fragment key={gi}>
+                                {group.name && (
+                                    <div className={cn('pb-1', gi > 0 && 'pt-4 border-t border-slate-100')}>
+                                        <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{group.name}</h4>
+                                    </div>
+                                )}
+                                {group.clientRole && (
+                                    <div className="mb-1">
+                                        <ClientPicker
+                                            placeholder={`Rechercher un client existant (${group.name})…`}
+                                            linked={clientLinks[group.clientRole] ?? null}
+                                            onSelect={(client) => applyClientToSection(group, client)}
+                                            onUnlink={() => unlinkClientFromSection(group.clientRole)}
+                                            onCreateNew={() => setCreatingClientForGroup(group)}
+                                        />
+                                    </div>
+                                )}
+                                {group.fields.map(field => (
+                                    <div key={field.id} className="space-y-1.5">
                                         {field.type !== 'repeatable' && field.type !== 'checkbox' && field.type !== 'checkbox_required' && (
                                             <Label htmlFor={`qedit-${field.id}`}>
                                                 {field.label}
@@ -396,9 +408,32 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                                     {field.required && <span className="text-danger ml-1">*</span>}
                                                 </label>
                                             </div>
+                                        ) : field.type === 'date' ? (
+                                            <DateField
+                                                id={`qedit-${field.id}`}
+                                                value={formValues[field.id] || ''}
+                                                onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                            />
+                                        ) : field.type === 'number' ? (
+                                            <NumberField
+                                                id={`qedit-${field.id}`}
+                                                decimals={field.decimals ?? 0}
+                                                placeholder={field.placeholder}
+                                                value={formValues[field.id] || ''}
+                                                onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                                className={cn(field.mono && 'font-ref')}
+                                            />
+                                        ) : field.type === 'tel' ? (
+                                            <PhoneField
+                                                id={`qedit-${field.id}`}
+                                                placeholder={field.placeholder}
+                                                value={formValues[field.id] || ''}
+                                                onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                            />
                                         ) : (
                                             <Input
                                                 id={`qedit-${field.id}`}
+                                                type={field.type === 'email' ? 'email' : 'text'}
                                                 placeholder={field.placeholder}
                                                 value={formValues[field.id] || ''}
                                                 onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.value }))}
@@ -406,9 +441,9 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                             />
                                         )}
                                     </div>
-                                </React.Fragment>
-                            );
-                        })}
+                                ))}
+                            </React.Fragment>
+                        ))}
                         {allFields.length === 0 && (
                             <p className="text-sm text-slate-400 italic py-4 text-center">Aucun champ de questionnaire trouvé.</p>
                         )}
@@ -420,6 +455,15 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                 </form>
             </DialogContent>
         </Dialog>
+        <ModalNouveauClient
+            open={creatingClientForGroup !== null}
+            onClose={() => setCreatingClientForGroup(null)}
+            onCreated={(client) => {
+                applyClientToSection(creatingClientForGroup, client);
+                setCreatingClientForGroup(null);
+            }}
+        />
+        </>
     );
 }
 
@@ -533,9 +577,8 @@ function InformationsTab({ dossier, can, onEditQuest }) {
     );
 }
 
-function DocumentsTab({ dossier, reference, etape, can }) {
+function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevision, onPreview }) {
     const [addOpen, setAddOpen] = useState(false);
-    const [previewDoc, setPreviewDoc] = useState(null);
     const [confirmState, setConfirmState] = useState(null);
     const [generating, setGenerating] = useState(false);
     const [regenerating, setRegenerating] = useState(new Set());
@@ -564,7 +607,7 @@ function DocumentsTab({ dossier, reference, etape, can }) {
             description: 'Ce document sera définitivement supprimé.',
             confirmLabel: 'Supprimer',
             variant: 'destructive',
-            onConfirm: () => router.delete(`/documents/${doc.id}`, { preserveState: true }),
+            onConfirm: () => router.delete(`/documents/${doc.id}`, { preserveState: true, onError: notifyValidationError }),
         });
     };
 
@@ -573,13 +616,17 @@ function DocumentsTab({ dossier, reference, etape, can }) {
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
                 <CardTitle>Actes &amp; documents</CardTitle>
                 <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" className="h-8 gap-1" onClick={handleGenererModeles} disabled={generating}>
-                        <RefreshCw className={cn('h-3.5 w-3.5', generating && 'animate-spin')} />
-                        {generating ? 'Génération…' : 'Générer depuis les modèles'}
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => setAddOpen(true)}>
-                        <Plus className="h-3.5 w-3.5" /> Nouveau document
-                    </Button>
+                    {can?.genererDocuments && (
+                        <>
+                            <Button size="sm" variant="outline" className="h-8 gap-1" onClick={handleGenererModeles} disabled={generating}>
+                                <RefreshCw className={cn('h-3.5 w-3.5', generating && 'animate-spin')} />
+                                {generating ? 'Génération…' : 'Générer depuis les modèles'}
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => setAddOpen(true)}>
+                                <Plus className="h-3.5 w-3.5" /> Nouveau document
+                            </Button>
+                        </>
+                    )}
                 </div>
             </CardHeader>
             <CardContent className="px-0 pb-0">
@@ -587,9 +634,11 @@ function DocumentsTab({ dossier, reference, etape, can }) {
                     <div className="px-5 py-10 text-center">
                         <FileText className="h-10 w-10 text-slate-200 mx-auto mb-3" />
                         <p className="text-sm text-slate-400">Aucun document pour ce dossier.</p>
-                        <Button size="sm" variant="outline" className="mt-4" onClick={() => setAddOpen(true)}>
-                            <Plus className="h-3.5 w-3.5" /> Ajouter un document
-                        </Button>
+                        {can?.genererDocuments && (
+                            <Button size="sm" variant="outline" className="mt-4" onClick={() => setAddOpen(true)}>
+                                <Plus className="h-3.5 w-3.5" /> Ajouter un document
+                            </Button>
+                        )}
                     </div>
                 ) : (
                     <table className="w-full table-notarial">
@@ -619,7 +668,7 @@ function DocumentsTab({ dossier, reference, etape, can }) {
                                                 {doc.chemin_fichier && (
                                                     <>
                                                         <Button variant="ghost" size="icon-sm" title="Prévisualiser"
-                                                            onClick={() => setPreviewDoc(doc)}>
+                                                            onClick={() => onPreview(doc)}>
                                                             <Eye className="h-3.5 w-3.5" />
                                                         </Button>
                                                         <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
@@ -629,18 +678,22 @@ function DocumentsTab({ dossier, reference, etape, can }) {
                                                         </Button>
                                                     </>
                                                 )}
-                                                <Button
-                                                    variant="ghost" size="icon-sm"
-                                                    title="Régénérer depuis le modèle (écrase la version actuelle)"
-                                                    onClick={() => handleRegenerer(doc)}
-                                                    disabled={regenerating.has(doc.id)}
-                                                >
-                                                    <RefreshCw className={cn('h-3.5 w-3.5 text-slate-400', regenerating.has(doc.id) && 'animate-spin text-blue-500')} />
-                                                </Button>
-                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-red-500"
-                                                    onClick={() => supprimer(doc)} title="Supprimer">
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                </Button>
+                                                {can?.genererDocuments && (
+                                                    <>
+                                                        <Button
+                                                            variant="ghost" size="icon-sm"
+                                                            title="Régénérer depuis le modèle (écrase la version actuelle)"
+                                                            onClick={() => handleRegenerer(doc)}
+                                                            disabled={regenerating.has(doc.id)}
+                                                        >
+                                                            <RefreshCw className={cn('h-3.5 w-3.5 text-slate-400', regenerating.has(doc.id) && 'animate-spin text-blue-500')} />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-red-500"
+                                                            onClick={() => supprimer(doc)} title="Supprimer">
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -649,21 +702,16 @@ function DocumentsTab({ dossier, reference, etape, can }) {
                         </tbody>
                     </table>
                 )}
-                {can?.reviser && etape === 'edition' && (
+                {can?.avancer && etape === 'edition' && (
                     <div className="px-5 py-3 border-t border-slate-100">
-                        <Button variant="outline" size="sm" asChild>
-                            <Link href={`/dossiers/${reference}/revision`}>
-                                <Send className="h-3.5 w-3.5" />
-                                Soumettre à révision
-                            </Link>
+                        <Button variant="outline" size="sm" onClick={onSubmitRevision} disabled={avancing}>
+                            <Send className="h-3.5 w-3.5" />
+                            {avancing ? 'Envoi…' : 'Soumettre à révision'}
                         </Button>
                     </div>
                 )}
             </CardContent>
             <ModalAjouterDocument open={addOpen} onClose={() => setAddOpen(false)} reference={reference} />
-            {previewDoc && (
-                <ModalPreviewDocument doc={previewDoc} onClose={() => setPreviewDoc(null)} />
-            )}
             <ConfirmDialog
                 open={!!confirmState}
                 onClose={() => setConfirmState(null)}
@@ -714,7 +762,7 @@ const ORGANISMES = [
     { value: 'cnss',                  label: 'CNSS' },
 ];
 
-const EMPTY_FORMALITE_FORM = { organisme: 'apip', montant_base: '', taux: '', echeance_at: '', pieces: [] };
+const EMPTY_FORMALITE_FORM = { organisme: 'apip', libelle: '', montant_base: '', taux: '', echeance_at: '', pieces: [] };
 
 function ModalAjouterFormalite({ open, onClose, reference }) {
     const [form, setForm] = useState(EMPTY_FORMALITE_FORM);
@@ -735,6 +783,7 @@ function ModalAjouterFormalite({ open, onClose, reference }) {
         e.preventDefault();
         router.post(`/dossiers/${reference}/formalites`, {
             organisme:    form.organisme,
+            libelle:      form.libelle || null,
             statut:       'a_deposer',
             montant_base: form.montant_base || null,
             taux:         form.taux || null,
@@ -742,6 +791,7 @@ function ModalAjouterFormalite({ open, onClose, reference }) {
             pieces:       form.pieces,
         }, {
             onSuccess: () => { onClose(); setForm(EMPTY_FORMALITE_FORM); },
+            onError: notifyValidationError,
         });
     };
 
@@ -761,14 +811,18 @@ function ModalAjouterFormalite({ open, onClose, reference }) {
                             </SelectContent>
                         </Select>
                     </div>
+                    <div className="space-y-1.5">
+                        <Label>Libellé <span className="text-slate-400 text-xs">(précise la démarche, sinon le nom de l'organisme sera affiché)</span></Label>
+                        <Input value={form.libelle} onChange={f('libelle')} placeholder="ex : Droits d'enregistrement" />
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                             <Label>Montant de base <span className="text-slate-400 text-xs">(GNF)</span></Label>
-                            <Input type="number" min="0" value={form.montant_base} onChange={f('montant_base')} placeholder="0" />
+                            <NumberField value={form.montant_base} onValueChange={val => setForm(p => ({ ...p, montant_base: val }))} placeholder="0" />
                         </div>
                         <div className="space-y-1.5">
                             <Label>Taux <span className="text-slate-400 text-xs">(ex : 0.05)</span></Label>
-                            <Input type="number" step="0.0001" min="0" max="1" value={form.taux} onChange={f('taux')} placeholder="0.05" />
+                            <NumberField decimals={4} value={form.taux} onValueChange={val => setForm(p => ({ ...p, taux: val }))} placeholder="0.05" />
                         </div>
                     </div>
                     <div className="space-y-1.5">
@@ -841,7 +895,7 @@ function FormaliteCardDossier({ f, peutGerer }) {
     const today   = new Date().toISOString().slice(0, 10);
 
     const patch = (data) =>
-        router.patch(`/formalites/${f.id}`, data, { preserveState: true });
+        router.patch(`/formalites/${f.id}`, data, { preserveState: true, onError: notifyValidationError });
 
     const handleDepose   = () => patch({ statut: 'depose',      depose_at: today });
     const handleRetour   = () => patch({ statut: 'retour_recu', retour_at: today });
@@ -854,11 +908,11 @@ function FormaliteCardDossier({ f, peutGerer }) {
     });
     const handleToggle   = (p) => peutGerer && patch({ pieces: [{ id: p.id, est_fourni: !p.est_fourni }] });
     const handleSupprimer = () => setConfirmState({
-        title: `Supprimer la formalité ${f.organismeLabel} ?`,
+        title: `Supprimer la formalité ${f.libelle || f.organismeLabel} ?`,
         description: 'Cette action est irréversible.',
         confirmLabel: 'Supprimer',
         variant: 'destructive',
-        onConfirm: () => router.delete(`/formalites/${f.id}`, { preserveState: true }),
+        onConfirm: () => router.delete(`/formalites/${f.id}`, { preserveState: true, onError: notifyValidationError }),
     });
 
     const isCloture  = f.statut === 'cloture';
@@ -888,9 +942,12 @@ function FormaliteCardDossier({ f, peutGerer }) {
                 <div className="flex items-start justify-between gap-3">
                     <div>
                         <div className="font-medium text-slate-800 flex items-center gap-1.5">
-                            {f.organismeLabel}
+                            {f.libelle || f.organismeLabel}
                             {f.estDepassee && <AlertTriangle className="h-3.5 w-3.5 text-danger" />}
                         </div>
+                        {f.libelle && f.libelle !== f.organismeLabel && (
+                            <div className="text-xs text-slate-400 mt-0.5">{f.organismeLabel}</div>
+                        )}
                         {f.montant_calcule > 0 && (
                             <div className="text-xs text-slate-500 font-ref mt-0.5">
                                 {Number(f.montant_calcule).toLocaleString('fr-GN')} GNF
@@ -1044,11 +1101,120 @@ function FormalitesTab({ dossier, reference, can }) {
     );
 }
 
+function ExpeditionTab({ dossier, reference, can, onPreview }) {
+    const [generatingId, setGeneratingId] = useState(null);
+    const peutGerer  = can?.genererCourriers;
+    const modeles    = dossier.courrierModelesApplicables ?? [];
+    const courriers  = dossier.courriers ?? [];
+
+    const genererCourrier = (modele) => {
+        setGeneratingId(modele.id);
+        router.post(`/dossiers/${reference}/courriers/generer`, { modele_acte_id: modele.id }, {
+            preserveScroll: true,
+            onError: notifyValidationError,
+            onFinish: () => setGeneratingId(null),
+        });
+    };
+
+    const marquerEnvoye = (courrier) => {
+        router.patch(`/courriers/${courrier.id}`, { statut: 'envoye' }, {
+            preserveScroll: true,
+            preserveState: true,
+            onError: notifyValidationError,
+        });
+    };
+
+    return (
+        <div className="space-y-4">
+            {peutGerer && modeles.length > 0 && (
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-sm">Lettres de transmission disponibles</CardTitle>
+                        <p className="text-xs text-slate-400">Générées à partir des données du dossier — à relire avant envoi.</p>
+                    </CardHeader>
+                    <CardContent className="pt-0 flex flex-wrap gap-2">
+                        {modeles.map(m => (
+                            <Button
+                                key={m.id}
+                                size="sm"
+                                variant="outline"
+                                className="h-8 gap-1.5"
+                                disabled={generatingId === m.id}
+                                onClick={() => genererCourrier(m)}
+                            >
+                                <Send className={cn('h-3.5 w-3.5', generatingId === m.id && 'animate-pulse')} />
+                                {generatingId === m.id ? 'Génération…' : m.nom}
+                            </Button>
+                        ))}
+                    </CardContent>
+                </Card>
+            )}
+
+            {courriers.length === 0 ? (
+                <Card>
+                    <CardContent className="p-6 text-center py-12">
+                        <Mail className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+                        <p className="text-slate-500 text-sm font-medium">Aucun courrier généré pour ce dossier</p>
+                        {modeles.length === 0 && (
+                            <p className="text-xs text-slate-400 mt-1">Aucun modèle de courrier n'est configuré pour ce type d'acte.</p>
+                        )}
+                    </CardContent>
+                </Card>
+            ) : (
+                <div className="space-y-2">
+                    {courriers.map(c => (
+                        <Card key={c.id}>
+                            <CardContent className="p-4 flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-sm font-medium text-slate-800 truncate">{c.objet}</span>
+                                        <Badge variant={c.statut === 'envoye' ? 'success' : 'secondary'} className="text-[10px]">
+                                            {c.statut === 'envoye' ? 'Envoyé' : 'Brouillon'}
+                                        </Badge>
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-0.5 truncate">
+                                        {c.destinataire || 'Destinataire non renseigné'}
+                                        {c.envoye_at && ` · envoyé le ${c.envoye_at}`}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    {c.has_file && (
+                                        <>
+                                            <Button
+                                                variant="ghost" size="icon-sm" title="Aperçu"
+                                                onClick={() => onPreview({ id: c.id, nom: c.objet, chemin_fichier: c.chemin_fichier }, c.url_preview, c.url_download)}
+                                            >
+                                                <Eye className="h-3.5 w-3.5" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
+                                                <a href={c.url_download} download>
+                                                    <Download className="h-3.5 w-3.5" />
+                                                </a>
+                                            </Button>
+                                        </>
+                                    )}
+                                    {peutGerer && c.statut !== 'envoye' && (
+                                        <Button variant="ghost" size="icon-sm" title="Marquer envoyé" onClick={() => marquerEnvoye(c)}>
+                                            <MailCheck className="h-3.5 w-3.5 text-slate-400" />
+                                        </Button>
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function getStepBlockers(dossier) {
     const etape = dossier?.etape?.value;
     const docs = dossier?.documents ?? [];
     const formalites = dossier?.formalites ?? [];
     const revision = dossier?.revision;
+    const modelesCourrier = dossier?.courrierModelesApplicables ?? [];
+    const courriers = dossier?.courriers ?? [];
 
     switch (etape) {
         case 'initialisation': {
@@ -1072,7 +1238,13 @@ function getStepBlockers(dossier) {
         }
         case 'formalites': {
             const nonClos = formalites.filter(f => f.statut !== 'cloture');
-            if (nonClos.length > 0) return [`${nonClos.length} formalité(s) non clôturée(s) : ${nonClos.map(f => f.organismeLabel || f.organisme).join(', ')}`];
+            if (nonClos.length > 0) return [`${nonClos.length} formalité(s) non clôturée(s) : ${nonClos.map(f => f.libelle || f.organismeLabel || f.organisme).join(', ')}`];
+            return [];
+        }
+        case 'expedition': {
+            if (modelesCourrier.length === 0) return [];
+            const envoye = courriers.some(c => c.type === 'transmission' && c.statut === 'envoye');
+            if (!envoye) return ["Au moins une lettre de transmission doit être générée et marquée « envoyée »"];
             return [];
         }
         default:
@@ -1204,6 +1376,19 @@ function WorkflowStepper({ currentStep }) {
     );
 }
 
+// Reconstruit l'état local des verdicts de révision (par document) à partir des points
+// déjà sauvegardés (tableau [{point_id, etat, commentaire}]) — point_id = id du document.
+function buildInitialRevisionEtats(documents, points) {
+    const byId = {};
+    (points ?? []).forEach(p => { byId[String(p.point_id)] = { etat: p.etat, commentaire: p.commentaire }; });
+    const init = {};
+    (documents ?? []).forEach(doc => {
+        const saved = byId[String(doc.id)];
+        init[String(doc.id)] = { etat: saved?.etat ?? null, commentaire: saved?.commentaire ?? '' };
+    });
+    return init;
+}
+
 export default function DossierShow() {
     const { dossier, can, reviseurs, formalistes, notaires } = usePage().props;
     const [activeTab, setActiveTab] = useState('informations');
@@ -1211,6 +1396,16 @@ export default function DossierShow() {
     const [avancerErrors, setAvancerErrors] = useState([]);
     const [editDossierOpen, setEditDossierOpen] = useState(false);
     const [editQuestOpen, setEditQuestOpen] = useState(false);
+    const [previewDoc, setPreviewDoc] = useState(null);
+    const openPreview = (doc, previewUrl, downloadUrl) => setPreviewDoc({ doc, previewUrl, downloadUrl });
+
+    // Révision — évaluation inline des documents (onglet "Révision")
+    const [revisionEtats, setRevisionEtats] = useState(() => buildInitialRevisionEtats(dossier.documents, dossier.revision?.points));
+    const [showRenvoyerDialog, setShowRenvoyerDialog] = useState(false);
+    const [motifRenvoyer, setMotifRenvoyer] = useState('');
+    const [savingRevision, setSavingRevision] = useState(false);
+    const [validatingRevision, setValidatingRevision] = useState(false);
+    const [renvoyantRevision, setRenvoyantRevision] = useState(false);
 
     const etape = dossier?.etape?.value ?? '';
     const reference = dossier?.reference ?? '';
@@ -1218,18 +1413,85 @@ export default function DossierShow() {
     const blockers = can?.avancer ? getStepBlockers(dossier) : [];
 
     const actionContextuel = {
-        revision:  { label: 'Voir la révision',   href: `/dossiers/${reference}/revision`, variant: 'seal',    icon: ClipboardCheck },
-        formalites:{ label: 'Voir les formalités', tab: 'formalites',                       variant: 'default', icon: Building },
+        revision:   { label: 'Voir la révision',   tab: 'revision',   variant: 'seal',    icon: ClipboardCheck },
+        formalites: { label: 'Voir les formalités', tab: 'formalites', variant: 'default', icon: Building },
+        expedition: { label: "Voir l'expédition",   tab: 'expedition', variant: 'default', icon: Mail },
     };
     const action = actionContextuel[etape];
 
-    const handleAvancer = () => {
+    const revisionDocList     = dossier.documents ?? [];
+    const revisionStatut      = dossier.revision?.statut ?? 'en_attente';
+    const revisionEvalues     = Object.values(revisionEtats).filter(e => e.etat !== null).length;
+    const revisionOk          = Object.values(revisionEtats).filter(e => e.etat === 'ok').length;
+    const revisionACorriger   = Object.values(revisionEtats).filter(e => e.etat === 'a_corriger').length;
+    const revisionACorrigerSansCommentaire = Object.values(revisionEtats)
+        .some(e => e.etat === 'a_corriger' && !e.commentaire?.trim());
+    const revisionPct         = revisionDocList.length > 0 ? Math.round((revisionEvalues / revisionDocList.length) * 100) : 0;
+    const revisionCanValidate = revisionACorriger === 0 && revisionEvalues === revisionDocList.length && revisionDocList.length > 0;
+    const revisionCanRenvoyer = revisionACorriger > 0 && !revisionACorrigerSansCommentaire;
+
+    const setRevisionVerdict = (docId, etat) => {
+        setRevisionEtats(prev => ({ ...prev, [docId]: { ...prev[docId], etat } }));
+    };
+    const setRevisionCommentaire = (docId, commentaire) => {
+        setRevisionEtats(prev => ({ ...prev, [docId]: { ...prev[docId], commentaire } }));
+    };
+
+    const handleSaveRevision = () => {
+        setSavingRevision(true);
+        router.put(`/dossiers/${reference}/revision`, { points: revisionEtats }, {
+            preserveScroll: true,
+            preserveState: true,
+            onError: notifyValidationError,
+            onFinish: () => setSavingRevision(false),
+        });
+    };
+
+    // Sauvegarde d'abord les points en base (l'évaluation ne vit qu'en état local
+    // React tant qu'on n'a pas cliqué « Sauvegarder ») avant de valider/renvoyer,
+    // sinon le serveur peut refuser l'action car il ne connaît pas encore les
+    // verdicts que l'utilisateur vient de saisir.
+    const handleValiderRevision = () => {
+        setValidatingRevision(true);
+        router.put(`/dossiers/${reference}/revision`, { points: revisionEtats }, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: () => {
+                router.post(`/dossiers/${reference}/revision/valider`, {}, {
+                    preserveScroll: true,
+                    preserveState: true,
+                    onError: notifyValidationError,
+                    onFinish: () => setValidatingRevision(false),
+                });
+            },
+            onError: (errors) => { notifyValidationError(errors); setValidatingRevision(false); },
+        });
+    };
+
+    const handleRenvoyerRevision = () => {
+        setRenvoyantRevision(true);
+        router.put(`/dossiers/${reference}/revision`, { points: revisionEtats }, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: () => {
+                router.post(`/dossiers/${reference}/revision/renvoyer`, { motif: motifRenvoyer }, {
+                    preserveScroll: true,
+                    preserveState: true,
+                    onError: notifyValidationError,
+                    onFinish: () => { setRenvoyantRevision(false); setShowRenvoyerDialog(false); },
+                });
+            },
+            onError: (errors) => { notifyValidationError(errors); setRenvoyantRevision(false); },
+        });
+    };
+
+    const handleAvancer = (onDone) => {
         setAvancerErrors([]);
         setAvancing(true);
         router.post(`/dossiers/${reference}/avancer`, {}, {
             onFinish: () => setAvancing(false),
             onError: (errors) => setAvancerErrors(Object.values(errors).flat()),
-            onSuccess: () => setAvancerErrors([]),
+            onSuccess: () => { setAvancerErrors([]); onDone?.(); },
         });
     };
 
@@ -1273,6 +1535,12 @@ export default function DossierShow() {
                                                         En retard
                                                     </Badge>
                                                 )}
+                                                {dossier.urgent && (
+                                                    <Badge variant="warning" className="gap-1">
+                                                        <Zap className="h-2.5 w-2.5" />
+                                                        Urgent
+                                                    </Badge>
+                                                )}
                                             </div>
                                             <h1 className="font-serif text-display text-ink">{dossier.objet}</h1>
                                             <div className="flex items-center gap-4 text-xs text-slate-500">
@@ -1313,7 +1581,7 @@ export default function DossierShow() {
                                             {can?.avancer && (
                                                 <Button
                                                     variant="outline"
-                                                    onClick={handleAvancer}
+                                                    onClick={() => handleAvancer()}
                                                     disabled={avancing || blockers.length > 0}
                                                     title={blockers.length > 0 ? 'Des conditions sont requises avant d\'avancer' : ''}
                                                 >
@@ -1341,6 +1609,30 @@ export default function DossierShow() {
                                                             </li>
                                                         ))}
                                                     </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Rappel : dossier renvoyé en correction */}
+                                    {etape === 'edition' && dossier.revision?.statut === 'renvoye' && (
+                                        <div className="mt-3 p-3 rounded-lg border bg-danger-bg border-red-200">
+                                            <div className="flex items-start gap-2">
+                                                <AlertTriangle className="h-4 w-4 text-danger mt-0.5 shrink-0" />
+                                                <div className="flex-1">
+                                                    <p className="text-xs font-semibold text-danger-text mb-1">
+                                                        Ce dossier a été renvoyé en correction
+                                                    </p>
+                                                    {dossier.revision?.commentaire && (
+                                                        <p className="text-xs text-danger-text/90 mb-1.5">{dossier.revision.commentaire}</p>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setActiveTab('revision')}
+                                                        className="text-xs font-medium text-danger-text underline underline-offset-2 hover:no-underline"
+                                                    >
+                                                        Voir le détail des points signalés
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -1436,6 +1728,14 @@ export default function DossierShow() {
                                             </span>
                                         )}
                                     </TabsTrigger>
+                                    <TabsTrigger value="expedition">
+                                        Expédition
+                                        {dossier.courriers?.length > 0 && (
+                                            <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
+                                                {dossier.courriers.length}
+                                            </span>
+                                        )}
+                                    </TabsTrigger>
                                     <TabsTrigger value="parties">
                                         Parties
                                         {dossier.parties?.length > 0 && (
@@ -1472,69 +1772,307 @@ export default function DossierShow() {
                                         reference={reference}
                                         etape={etape}
                                         can={can}
+                                        avancing={avancing}
+                                        onSubmitRevision={() => handleAvancer(() => setActiveTab('revision'))}
+                                        onPreview={openPreview}
                                     />
                                 </TabsContent>
 
                                 {/* Onglet Révision */}
-                                <TabsContent value="revision">
-                                    {dossier.revision ? (
-                                        <Card className={cn(
-                                            'border-l-4',
-                                            dossier.revision.statut === 'valide' && 'border-l-success',
-                                            dossier.revision.statut === 'en_cours' && 'border-l-seal',
-                                            dossier.revision.statut === 'renvoye' && 'border-l-danger',
-                                            dossier.revision.statut === 'en_attente' && 'border-l-slate-300',
-                                        )}>
-                                            <CardContent className="p-5">
-                                                <div className="flex items-center justify-between gap-4 mb-4">
-                                                    <div>
-                                                        <h3 className="font-serif text-heading text-ink">Révision des documents</h3>
-                                                        {dossier.revision.reviseur && (
-                                                            <p className="text-sm text-slate-500 mt-0.5">Réviseur : {dossier.revision.reviseur.name}</p>
-                                                        )}
-                                                    </div>
-                                                    <span className={cn(
-                                                        'inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border',
-                                                        revisionStatutColors[dossier.revision.statut] ?? 'bg-slate-50 text-slate-600 border-slate-200'
-                                                    )}>
-                                                        {revisionStatutLabels[dossier.revision.statut] ?? dossier.revision.statut}
-                                                    </span>
-                                                </div>
-                                                {dossier.revision.commentaire && (
-                                                    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-700 mb-4">
-                                                        {dossier.revision.commentaire}
-                                                    </div>
-                                                )}
-                                                <div className="flex gap-2">
-                                                    <Button variant="seal" asChild>
-                                                        <Link href={`/dossiers/${reference}/revision`}>
-                                                            <ClipboardCheck className="h-4 w-4" />
-                                                            Accéder à la révision
-                                                        </Link>
+                                <TabsContent value="revision" className="space-y-4">
+                                    {/* Dialog renvoyer en correction */}
+                                    {showRenvoyerDialog && (
+                                        <motion.div
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                                            onClick={e => e.target === e.currentTarget && setShowRenvoyerDialog(false)}
+                                        >
+                                            <motion.div
+                                                initial={{ scale: 0.95, opacity: 0 }}
+                                                animate={{ scale: 1, opacity: 1 }}
+                                                className="bg-white rounded-xl shadow-dialog p-6 w-full max-w-md"
+                                            >
+                                                <h3 className="font-serif text-heading text-ink mb-1">Renvoyer en correction</h3>
+                                                <p className="text-sm text-slate-500 mb-4">
+                                                    Décrivez le motif général du renvoi (optionnel) — le rédacteur le recevra en plus des commentaires par document.
+                                                </p>
+                                                <textarea
+                                                    rows={3}
+                                                    value={motifRenvoyer}
+                                                    onChange={e => setMotifRenvoyer(e.target.value)}
+                                                    placeholder="Motif général du renvoi en correction…"
+                                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-seal resize-none mb-4"
+                                                />
+                                                <div className="flex items-center gap-2 justify-end">
+                                                    <Button variant="outline" onClick={() => setShowRenvoyerDialog(false)}>Annuler</Button>
+                                                    <Button variant="warning" onClick={handleRenvoyerRevision} disabled={renvoyantRevision}>
+                                                        <AlertTriangle className="h-4 w-4" />
+                                                        {renvoyantRevision ? 'Envoi…' : 'Confirmer le renvoi'}
                                                     </Button>
                                                 </div>
-                                            </CardContent>
-                                        </Card>
-                                    ) : (
-                                        <Card>
-                                            <CardContent className="p-6 flex flex-col items-center gap-4 text-center py-12">
-                                                <div className="h-12 w-12 rounded-full bg-warning-bg flex items-center justify-center">
-                                                    <ClipboardCheck className="h-6 w-6 text-warning" />
-                                                </div>
+                                            </motion.div>
+                                        </motion.div>
+                                    )}
+
+                                    {/* En-tête révision */}
+                                    <Card className={cn(
+                                        'border-l-4',
+                                        revisionStatut === 'valide' && 'border-l-success',
+                                        revisionStatut === 'en_cours' && 'border-l-seal',
+                                        revisionStatut === 'renvoye' && 'border-l-danger',
+                                        revisionStatut === 'en_attente' && 'border-l-slate-300',
+                                    )}>
+                                        <CardContent className="p-5">
+                                            <div className="flex items-center justify-between gap-4">
                                                 <div>
-                                                    <h3 className="font-serif text-heading text-ink">Révision en attente</h3>
-                                                    <p className="text-slate-500 text-sm mt-1">La grille de contrôle n'a pas encore été soumise</p>
+                                                    <h3 className="font-serif text-heading text-ink">Révision des documents</h3>
+                                                    {dossier.revision?.reviseur && (
+                                                        <p className="text-sm text-slate-500 mt-0.5">Réviseur : {dossier.revision.reviseur.name}</p>
+                                                    )}
                                                 </div>
-                                                {can?.reviser && (
-                                                    <Button variant="seal" asChild>
-                                                        <Link href={`/dossiers/${reference}/revision`}>
-                                                            <ClipboardCheck className="h-4 w-4" />
-                                                            Accéder à la révision
-                                                        </Link>
-                                                    </Button>
-                                                )}
+                                                <span className={cn(
+                                                    'inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border shrink-0',
+                                                    revisionStatutColors[revisionStatut] ?? 'bg-slate-50 text-slate-600 border-slate-200'
+                                                )}>
+                                                    {revisionStatutLabels[revisionStatut] ?? revisionStatut}
+                                                </span>
+                                            </div>
+
+                                            {dossier.revision?.commentaire && (
+                                                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-700 mt-4">
+                                                    {dossier.revision.commentaire}
+                                                </div>
+                                            )}
+
+                                            {revisionDocList.length > 0 && (
+                                                <div className="mt-5 space-y-2">
+                                                    <div className="flex items-center justify-between text-xs">
+                                                        <span className="text-slate-500">
+                                                            {revisionEvalues}/{revisionDocList.length} document{revisionDocList.length > 1 ? 's' : ''} évalué{revisionEvalues > 1 ? 's' : ''}
+                                                        </span>
+                                                        <div className="flex items-center gap-3">
+                                                            {revisionOk > 0 && (
+                                                                <span className="flex items-center gap-1 text-success">
+                                                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                                                    {revisionOk} OK
+                                                                </span>
+                                                            )}
+                                                            {revisionACorriger > 0 && (
+                                                                <span className="flex items-center gap-1 text-danger">
+                                                                    <XCircle className="h-3.5 w-3.5" />
+                                                                    {revisionACorriger} à corriger
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <Progress
+                                                        value={revisionPct}
+                                                        indicatorClassName={revisionACorriger > 0 ? 'bg-danger' : revisionEvalues === revisionDocList.length ? 'bg-success' : 'bg-seal'}
+                                                    />
+                                                </div>
+                                            )}
+                                        </CardContent>
+                                    </Card>
+
+                                    {/* Aucun document */}
+                                    {revisionDocList.length === 0 && (
+                                        <Card>
+                                            <CardContent className="p-10 flex flex-col items-center gap-3 text-center">
+                                                <FileText className="h-10 w-10 text-slate-200" />
+                                                <p className="text-slate-500 text-sm">Aucun document n'a encore été ajouté à ce dossier.</p>
                                             </CardContent>
                                         </Card>
+                                    )}
+
+                                    {/* Liste des documents */}
+                                    <div className="space-y-3">
+                                        {revisionDocList.map((doc) => {
+                                            const docId   = String(doc.id);
+                                            const etatDoc = revisionEtats[docId] ?? { etat: null, commentaire: '' };
+                                            const isOk    = etatDoc.etat === 'ok';
+                                            const isNok   = etatDoc.etat === 'a_corriger';
+
+                                            return (
+                                                <Card key={doc.id} className={cn(
+                                                    'transition-colors border',
+                                                    isOk  && 'border-success/40 bg-success-bg/20',
+                                                    isNok && 'border-danger/30 bg-danger-bg/30',
+                                                    !isOk && !isNok && 'border-slate-200',
+                                                )}>
+                                                    <CardContent className="p-5">
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div className="flex items-start gap-3 min-w-0">
+                                                                <div className={cn(
+                                                                    'h-9 w-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5',
+                                                                    isOk ? 'bg-success/10' : isNok ? 'bg-danger/10' : 'bg-slate-100'
+                                                                )}>
+                                                                    {isOk ? (
+                                                                        <CheckCircle2 className="h-4.5 w-4.5 text-success" />
+                                                                    ) : isNok ? (
+                                                                        <XCircle className="h-4.5 w-4.5 text-danger" />
+                                                                    ) : (
+                                                                        <FileText className="h-4.5 w-4.5 text-slate-400" />
+                                                                    )}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <p className="font-medium text-slate-800 leading-snug">{doc.nom}</p>
+                                                                    <Badge variant="outline" className="mt-1">
+                                                                        {TYPE_DOC_LABELS[doc.type_document] ?? doc.type_document}
+                                                                    </Badge>
+                                                                </div>
+                                                            </div>
+
+                                                            {doc.has_file && (
+                                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                                    <a
+                                                                        href={doc.url_download}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all"
+                                                                    >
+                                                                        <Download className="h-3.5 w-3.5" />
+                                                                        Télécharger
+                                                                    </a>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openPreview(doc)}
+                                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all"
+                                                                    >
+                                                                        <Eye className="h-3.5 w-3.5" />
+                                                                        Aperçu
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {can?.reviser && (
+                                                            <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
+                                                                <span className="text-xs text-slate-400 mr-1">Verdict :</span>
+                                                                <button
+                                                                    onClick={() => setRevisionVerdict(docId, isOk ? null : 'ok')}
+                                                                    className={cn(
+                                                                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all',
+                                                                        isOk
+                                                                            ? 'bg-success text-white border-success shadow-sm'
+                                                                            : 'bg-white text-slate-500 border-slate-200 hover:border-success hover:text-success'
+                                                                    )}
+                                                                >
+                                                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                                                    OK
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => setRevisionVerdict(docId, isNok ? null : 'a_corriger')}
+                                                                    className={cn(
+                                                                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all',
+                                                                        isNok
+                                                                            ? 'bg-danger text-white border-danger shadow-sm'
+                                                                            : 'bg-white text-slate-500 border-slate-200 hover:border-danger hover:text-danger'
+                                                                    )}
+                                                                >
+                                                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                                                    À corriger
+                                                                </button>
+                                                            </div>
+                                                        )}
+
+                                                        {(isNok || etatDoc.commentaire) && (
+                                                            <div className="mt-3">
+                                                                {isNok && (
+                                                                    <span className="text-xs text-slate-400">
+                                                                        Commentaire <span className="text-danger">*</span> — obligatoire pour un document à corriger
+                                                                    </span>
+                                                                )}
+                                                                <textarea
+                                                                    value={etatDoc.commentaire}
+                                                                    onChange={e => setRevisionCommentaire(docId, e.target.value)}
+                                                                    placeholder="Décrivez les corrections à apporter…"
+                                                                    rows={2}
+                                                                    readOnly={!can?.reviser}
+                                                                    className={cn(
+                                                                        'mt-1 w-full text-sm rounded-lg border px-3 py-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-seal resize-none',
+                                                                        isNok && !etatDoc.commentaire?.trim() ? 'border-danger' : 'border-slate-200'
+                                                                    )}
+                                                                />
+                                                            </div>
+                                                        )}
+
+                                                        {!can?.reviser && etatDoc.etat && (
+                                                            <div className={cn(
+                                                                'mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium',
+                                                                isOk ? 'text-success' : 'text-danger-text'
+                                                            )}>
+                                                                {isOk ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                                                                {isOk ? 'Document validé' : 'À corriger'}
+                                                            </div>
+                                                        )}
+                                                    </CardContent>
+                                                </Card>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Avertissement si documents à corriger */}
+                                    {revisionACorriger > 0 && (
+                                        <div className="flex items-start gap-3 p-4 rounded-lg bg-danger-bg border border-red-200 text-danger-text text-sm">
+                                            <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                                            <div>
+                                                {revisionStatut === 'renvoye' ? (
+                                                    <>
+                                                        <span className="font-medium">Déjà renvoyé en correction — </span>
+                                                        {revisionACorriger} document{revisionACorriger > 1 ? 's' : ''} en attente de correction par le rédacteur.
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="font-medium">Validation bloquée — </span>
+                                                        {revisionACorriger} document{revisionACorriger > 1 ? 's' : ''} à corriger.
+                                                        Renvoyez le dossier en édition pour que le rédacteur effectue les corrections.
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Actions */}
+                                    {can?.reviser && (
+                                        <div className="flex flex-col sm:flex-row items-center gap-3 pt-1">
+                                            <div className="flex-1" />
+                                            <Button
+                                                variant="outline"
+                                                onClick={handleSaveRevision}
+                                                disabled={savingRevision || revisionACorrigerSansCommentaire}
+                                                title={revisionACorrigerSansCommentaire ? 'Ajoutez un commentaire aux documents « À corriger »' : ''}
+                                            >
+                                                <Send className="h-4 w-4" />
+                                                {savingRevision ? 'Sauvegarde…' : 'Sauvegarder'}
+                                            </Button>
+                                            <Button
+                                                variant="warning"
+                                                disabled={!revisionCanRenvoyer}
+                                                onClick={() => setShowRenvoyerDialog(true)}
+                                            >
+                                                <AlertTriangle className="h-4 w-4" />
+                                                Renvoyer en correction
+                                                {revisionACorriger > 0 && (
+                                                    <span className="ml-1 text-xs bg-warning-text/20 px-1.5 py-0.5 rounded-full">
+                                                        {revisionACorriger}
+                                                    </span>
+                                                )}
+                                            </Button>
+                                            <Button
+                                                variant="seal"
+                                                disabled={!revisionCanValidate || validatingRevision || revisionStatut === 'valide'}
+                                                onClick={handleValiderRevision}
+                                            >
+                                                <Shield className="h-4 w-4" />
+                                                {validatingRevision ? 'Validation…' : revisionStatut === 'valide' ? 'Révision validée ✓' : 'Valider la révision'}
+                                                {!revisionCanValidate && revisionEvalues < revisionDocList.length && revisionStatut !== 'valide' && (
+                                                    <span className="text-xs opacity-70 ml-1">
+                                                        ({revisionDocList.length - revisionEvalues} restant{revisionDocList.length - revisionEvalues > 1 ? 's' : ''})
+                                                    </span>
+                                                )}
+                                            </Button>
+                                        </div>
                                     )}
                                 </TabsContent>
 
@@ -1545,6 +2083,16 @@ export default function DossierShow() {
                                         reference={reference}
                                         etape={etape}
                                         can={can}
+                                    />
+                                </TabsContent>
+
+                                {/* Onglet Expédition */}
+                                <TabsContent value="expedition">
+                                    <ExpeditionTab
+                                        dossier={dossier}
+                                        reference={reference}
+                                        can={can}
+                                        onPreview={openPreview}
                                     />
                                 </TabsContent>
 
@@ -1678,9 +2226,18 @@ export default function DossierShow() {
                                 {dossier.formalites.filter(f => f.estUrgente).map(f => (
                                     <div key={f.id} className="flex items-start gap-2 p-2 rounded-lg bg-danger-bg border border-red-200 text-danger-text text-xs mb-2">
                                         <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                                        <span>{f.organismeLabel}</span>
+                                        <span>{f.libelle || f.organismeLabel}</span>
                                     </div>
                                 ))}
+                            </div>
+                        </>
+                    )}
+                    {dossier.notes && (
+                        <>
+                            <Separator />
+                            <div>
+                                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Notes</h3>
+                                <p className="text-sm text-slate-600 whitespace-pre-wrap">{dossier.notes}</p>
                             </div>
                         </>
                     )}
@@ -1697,6 +2254,7 @@ export default function DossierShow() {
                         reviseurs={reviseurs}
                         formalistes={formalistes}
                         notaires={notaires}
+                        canReassigner={can?.reassigner}
                     />
                     <ModalEditQuestionnaire
                         open={editQuestOpen}
@@ -1704,6 +2262,14 @@ export default function DossierShow() {
                         dossier={dossier}
                     />
                 </>
+            )}
+            {previewDoc && (
+                <DocumentPreviewModal
+                    doc={previewDoc.doc}
+                    previewUrl={previewDoc.previewUrl}
+                    downloadUrl={previewDoc.downloadUrl}
+                    onClose={() => setPreviewDoc(null)}
+                />
             )}
         </AppLayout>
     );

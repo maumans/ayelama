@@ -30,7 +30,8 @@ class DossierController extends Controller
         $user  = auth()->user();
         $today = now()->toDateString();
 
-        $query = Dossier::with(['typeActe', 'redacteur', 'notaire', 'revision:id,dossier_id,statut'])
+        $query = Dossier::visiblePar($user)
+            ->with(['typeActe', 'redacteur', 'notaire', 'revision:id,dossier_id,statut'])
             ->withCount([
                 'documents',
                 'formalites as formalites_non_clos' => fn ($q) => $q->where('statut', '!=', 'cloture'),
@@ -113,20 +114,21 @@ class DossierController extends Controller
                 'delai_jours' => $t->delai_jours,
                 'description' => $t->description,
             ])),
-            'notaires'   => User::where('role', 'notaire')->where('actif', true)->get(['id', 'name', 'initiales']),
-            'reviseurs'  => User::where('role', 'reviseur')->where('actif', true)->get(['id', 'name', 'initiales']),
-            'formalistes' => User::where('role', 'formaliste')->where('actif', true)->get(['id', 'name', 'initiales']),
+            'notaires'   => User::withRole('notaire')->where('actif', true)->get(['id', 'name', 'initiales']),
+            'reviseurs'  => User::withRole('reviseur')->where('actif', true)->get(['id', 'name', 'initiales']),
+            'formalistes' => User::withRole('formaliste')->where('actif', true)->get(['id', 'name', 'initiales']),
         ]);
     }
 
     public function store(
         StoreDossierRequest $request,
         \App\Services\ActesGeneratorService $generatorService,
-        \App\Services\FacturationService $facturationService
+        \App\Services\FacturationService $facturationService,
+        \App\Services\FormaliteGenerationService $formaliteGenerationService
     ) {
         $typeActe = TypeActe::findOrFail($request->type_acte_id);
 
-        $dossier = DB::transaction(function () use ($request, $typeActe, $generatorService, $facturationService) {
+        $dossier = DB::transaction(function () use ($request, $typeActe, $generatorService, $facturationService, $formaliteGenerationService) {
             $reference = $this->genererReference($typeActe);
 
             $dossier = Dossier::create([
@@ -140,6 +142,8 @@ class DossierController extends Controller
                 'objet'         => $request->objet,
                 'valeur'        => $request->valeur,
                 'echeance'      => $request->echeance,
+                'urgent'        => $request->boolean('urgent'),
+                'notes'         => $request->notes,
             ]);
 
             Questionnaire::create([
@@ -180,6 +184,10 @@ class DossierController extends Controller
             $dossier->load('questionnaire');
             $facturationService->genererFacture($dossier);
 
+            // Génération automatique des formalités à partir des barèmes marqués
+            // "génère une formalité" pour ce type d'acte (table baremes)
+            $formaliteGenerationService->genererFormalites($dossier);
+
             JournalActivite::enregistrer($dossier, 'Dossier créé', 'creation', [
                 'type_acte' => $typeActe->label,
             ]);
@@ -198,13 +206,14 @@ class DossierController extends Controller
 
     public function show(Dossier $dossier)
     {
+        $this->authorize('view', $dossier);
+
         $dossier->load([
             'typeActe', 'redacteur', 'reviseur', 'notaire', 'formaliste',
             'questionnaire', 'documents', 'revision.reviseur', 'revision.points',
-            'formalites.pieces', 'parties', 'journal.user', 'factures.lignes'
+            'formalites.pieces', 'parties.client', 'journal.user', 'factures.lignes',
+            'courriers.redacteur',
         ]);
-
-        $this->authorize('view', $dossier);
 
         return Inertia::render('Dossiers/Show', [
             'dossier'    => $this->dossierDetailToArray($dossier),
@@ -213,11 +222,16 @@ class DossierController extends Controller
                 'avancer'         => auth()->user()->can('avancer', $dossier),
                 'reviser'         => auth()->user()->can('reviser', $dossier),
                 'gererFormalites' => auth()->user()->can('gererFormalites', $dossier),
+                'genererDocuments' => auth()->user()->can('genererDocuments', $dossier),
+                'genererCourriers' => auth()->user()->can('genererCourriers', $dossier),
+                'reassigner'      => auth()->user()->can('reassigner', $dossier),
                 'delete'          => auth()->user()->can('delete', $dossier),
+                'validerRevision'  => $dossier->revision && auth()->user()->can('valider', $dossier->revision),
+                'renvoyerRevision' => $dossier->revision && auth()->user()->can('renvoyer', $dossier->revision),
             ],
-            'reviseurs'   => User::where('role', 'reviseur')->where('actif', true)->get(['id', 'name']),
-            'formalistes' => User::where('role', 'formaliste')->where('actif', true)->get(['id', 'name']),
-            'notaires'    => User::where('role', 'notaire')->where('actif', true)->get(['id', 'name']),
+            'reviseurs'   => User::withRole('reviseur')->where('actif', true)->get(['id', 'name']),
+            'formalistes' => User::withRole('formaliste')->where('actif', true)->get(['id', 'name']),
+            'notaires'    => User::withRole('notaire')->where('actif', true)->get(['id', 'name']),
         ]);
     }
 
@@ -225,7 +239,13 @@ class DossierController extends Controller
     {
         $this->authorize('update', $dossier);
 
-        $dossier->update($request->validated());
+        $data = $request->validated();
+
+        if (!auth()->user()->can('reassigner', $dossier)) {
+            unset($data['notaire_id'], $data['reviseur_id'], $data['formaliste_id']);
+        }
+
+        $dossier->update($data);
 
         JournalActivite::enregistrer($dossier, 'Informations du dossier mises à jour', 'modification', []);
 
@@ -236,13 +256,28 @@ class DossierController extends Controller
     {
         $this->authorize('update', $dossier);
 
-        $validated = $request->validate(['donnees' => ['required', 'array']]);
+        $validated = $request->validate([
+            'donnees'         => ['required', 'array'],
+            'managedRoles'    => ['nullable', 'array'],
+            'managedRoles.*'  => ['string', 'max:100'],
+            ...StoreDossierRequest::partiesRules(),
+        ]);
 
-        if ($dossier->questionnaire) {
-            $dossier->questionnaire->update(['donnees' => $validated['donnees']]);
-        } else {
-            Questionnaire::create(['dossier_id' => $dossier->id, 'donnees' => $validated['donnees']]);
-        }
+        DB::transaction(function () use ($dossier, $validated) {
+            if ($dossier->questionnaire) {
+                $dossier->questionnaire->update(['donnees' => $validated['donnees']]);
+            } else {
+                Questionnaire::create(['dossier_id' => $dossier->id, 'donnees' => $validated['donnees']]);
+            }
+
+            $managedRoles = $validated['managedRoles'] ?? [];
+            if (!empty($managedRoles)) {
+                $dossier->parties()->whereIn('role', $managedRoles)->delete();
+                foreach ($validated['parties'] ?? [] as $partieData) {
+                    Partie::create(array_merge(['dossier_id' => $dossier->id], $partieData));
+                }
+            }
+        });
 
         JournalActivite::enregistrer($dossier, 'Questionnaire mis à jour', 'modification', []);
 
@@ -350,6 +385,8 @@ class DossierController extends Controller
             'notaire'    => $d->notaire   ? ['name' => $d->notaire->name,   'initiales' => $d->notaire->initiales]   : null,
             'valeur'     => $d->valeur,
             'echeance'   => $d->echeance?->toDateString(),
+            'urgent'     => $d->urgent,
+            'notes'      => $d->notes,
             'estEnRetard' => $d->estEnRetard(),
             'updated_at' => $d->updated_at->diffForHumans(),
         ];
@@ -370,6 +407,9 @@ class DossierController extends Controller
                 'version'        => $doc->version,
                 'statut'         => $doc->statut,
                 'chemin_fichier' => $doc->chemin_fichier,
+                'has_file'       => (bool) $doc->chemin_fichier,
+                'url_download'   => route('documents.download', $doc),
+                'url_preview'    => route('documents.preview', $doc),
             ]),
             'revision'    => $d->revision ? [
                 'id'         => $d->revision->id,
@@ -387,6 +427,7 @@ class DossierController extends Controller
                 'id'           => $f->id,
                 'organisme'    => $f->organisme,
                 'organismeLabel' => $f->labelOrganisme(),
+                'libelle'      => $f->labelAffiche(),
                 'statut'       => $f->statut?->value,
                 'montant_base' => $f->montant_base,
                 'taux'         => $f->taux,
@@ -409,6 +450,18 @@ class DossierController extends Controller
                 'adresse'   => $p->adresse,
                 'email'     => $p->email,
                 'initiales' => $p->initiales,
+                'client_id' => $p->client_id,
+                'client'    => $p->client ? [
+                    'id'           => $p->client->id,
+                    'type'         => $p->client->type,
+                    'civilite'     => $p->client->civilite,
+                    'prenom_nom'   => $p->client->prenom_nom,
+                    'denomination' => $p->client->denomination,
+                    'piece_numero' => $p->client->piece_numero,
+                    'telephone'    => $p->client->telephone,
+                    'forme'        => $p->client->forme,
+                    'rccm'         => $p->client->rccm,
+                ] : null,
             ]),
             'journal' => $d->journal->map(fn ($j) => [
                 'id'         => $j->id,
@@ -430,6 +483,43 @@ class DossierController extends Controller
                     'montant'     => (float) $l->montant,
                 ]),
             ]),
+            'courriers' => $d->courriers->map(fn ($c) => [
+                'id'             => $c->id,
+                'reference'      => $c->reference,
+                'objet'          => $c->objet,
+                'destinataire'   => $c->destinataire,
+                'type'           => $c->type,
+                'statut'         => $c->statut,
+                'envoye_at'      => $c->envoye_at?->format('d/m/Y'),
+                'redacteur'      => $c->redacteur?->name,
+                'chemin_fichier' => $c->chemin_fichier,
+                'has_file'       => (bool) $c->chemin_fichier,
+                'url_download'   => $c->chemin_fichier ? route('courriers.download', $c) : null,
+                'url_preview'    => $c->chemin_fichier ? route('courriers.preview', $c) : null,
+            ]),
+            'courrierModelesApplicables' => $this->courrierModelesApplicables($d),
         ];
+    }
+
+    /**
+     * Modèles de courrier de transmission (type d'acte COU-CER) applicables à la
+     * catégorie du dossier — sert à la fois à l'onglet Expédition et au blocage de
+     * sortie d'étape (DossierStepService::verifierExpedition).
+     */
+    private function courrierModelesApplicables(Dossier $d): \Illuminate\Support\Collection
+    {
+        $couCerId = TypeActe::where('code', 'COU-CER')->value('id');
+        if (!$couCerId) {
+            return collect();
+        }
+
+        $categorie = $d->typeActe?->categorie?->value;
+
+        return ModeleActe::where('type_acte_id', $couCerId)
+            ->actif()
+            ->get()
+            ->filter(fn (ModeleActe $m) => $categorie && $m->applicablePour($categorie))
+            ->map(fn (ModeleActe $m) => ['id' => $m->id, 'nom' => $m->nom])
+            ->values();
     }
 }

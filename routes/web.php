@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ClientController;
 use App\Http\Controllers\CourrierController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
@@ -57,6 +58,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/repertoire', [RepertoireController::class, 'index'])->name('repertoire.index');
     Route::get('/repertoire/autocomplete', [RepertoireController::class, 'autocomplete'])->name('repertoire.autocomplete');
 
+    // Clients (recherche/création rapide depuis le questionnaire de dossier)
+    Route::get('/clients/autocomplete', [ClientController::class, 'autocomplete'])->name('clients.autocomplete');
+    Route::post('/clients', [ClientController::class, 'store'])->name('clients.store');
+
     // Modèles d'actes
     Route::get('/modeles', [ModeleActeController::class, 'index'])->name('modeles.index');
     Route::post('/modeles', [ModeleActeController::class, 'store'])->name('modeles.store');
@@ -69,6 +74,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/courriers', [CourrierController::class, 'store'])->name('courriers.store');
     Route::patch('/courriers/{courrier}', [CourrierController::class, 'update'])->name('courriers.update');
     Route::delete('/courriers/{courrier}', [CourrierController::class, 'destroy'])->name('courriers.destroy');
+    Route::get('/courriers/{courrier}/download', [CourrierController::class, 'download'])->name('courriers.download');
+    Route::get('/courriers/{courrier}/preview',  [CourrierController::class, 'preview'])->name('courriers.preview');
+    Route::post('/dossiers/{dossier:reference}/courriers/generer', [CourrierController::class, 'genererDepuisModele'])->name('dossiers.courriers.generer');
 
     // Paramètres (Module 10 - admin only)
     Route::middleware('role:administrateur')->prefix('parametres')->name('parametres.')->group(function () {

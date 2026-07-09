@@ -15,9 +15,13 @@ class RevisionController extends Controller
 
     public function index(Request $request)
     {
+        $this->authorize('viewAny', Dossier::class);
+
         $today = now()->toDateString();
+        $user  = auth()->user();
 
         $query = Dossier::with(['typeActe', 'redacteur', 'revision.reviseur', 'revision.points'])
+            ->visiblePar($user)
             ->enRevision()
             ->when($request->q, fn ($q, $s) => $q->where(fn ($qq) =>
                 $qq->where('reference', 'like', "%{$s}%")
@@ -36,15 +40,15 @@ class RevisionController extends Controller
                 $q->orderByRaw('echeance IS NULL, echeance ASC'));
 
         $stats = [
-            'total'     => Dossier::enRevision()->count(),
-            'enAttente' => Dossier::enRevision()->where(fn ($q) =>
+            'total'     => Dossier::visiblePar($user)->enRevision()->count(),
+            'enAttente' => Dossier::visiblePar($user)->enRevision()->where(fn ($q) =>
                 $q->whereDoesntHave('revision')
                   ->orWhereHas('revision', fn ($r) => $r->where('statut', 'en_attente'))
             )->count(),
-            'enCours'  => Dossier::enRevision()
+            'enCours'  => Dossier::visiblePar($user)->enRevision()
                 ->whereHas('revision', fn ($r) => $r->where('statut', 'en_cours'))
                 ->count(),
-            'enRetard' => Dossier::enRevision()
+            'enRetard' => Dossier::visiblePar($user)->enRevision()
                 ->whereNotNull('echeance')->where('echeance', '<', $today)
                 ->count(),
         ];
@@ -80,9 +84,9 @@ class RevisionController extends Controller
 
     public function show(Dossier $dossier)
     {
-        $dossier->load(['typeActe', 'redacteur', 'documents', 'revision.reviseur', 'revision.points']);
-
         $this->authorize('view', $dossier);
+
+        $dossier->load(['typeActe', 'redacteur', 'documents', 'revision.reviseur', 'revision.points']);
 
         return Inertia::render('Dossiers/Revision', [
             'dossier' => [
@@ -122,22 +126,22 @@ class RevisionController extends Controller
 
     public function update(Request $request, Dossier $dossier)
     {
+        $this->authorize('reviser', $dossier);
+
         $revision = $dossier->revision;
         if (!$revision) {
             $revision = Revision::create([
                 'dossier_id'  => $dossier->id,
-                'reviseur_id' => auth()->id(),
+                'reviseur_id' => $dossier->reviseur_id,
                 'statut'      => \App\Enums\StatutRevision::EnCours,
             ]);
         }
-
-        $this->authorize('update', $revision);
 
         $points = $request->validate([
             'points'   => ['required', 'array'],
             'points.*' => ['required', 'array'],
             'points.*.etat'        => ['nullable', 'string', 'in:ok,a_corriger'],
-            'points.*.commentaire' => ['nullable', 'string', 'max:500'],
+            'points.*.commentaire' => ['nullable', 'string', 'max:500', 'required_if:points.*.etat,a_corriger'],
         ])['points'];
 
         foreach ($points as $pointId => $data) {

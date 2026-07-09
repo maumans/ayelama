@@ -13,6 +13,7 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { notifyValidationError } from '@/lib/toast';
 
 // ── Métadonnées par étape ──────────────────────────────────────────────────
 
@@ -300,6 +301,12 @@ export default function DossiersIndex() {
                                                                 En retard
                                                             </span>
                                                         )}
+                                                        {d.urgent && (
+                                                            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-warning-bg text-warning-text border border-amber-200">
+                                                                <Zap className="h-2.5 w-2.5" />
+                                                                Urgent
+                                                            </span>
+                                                        )}
                                                     </div>
 
                                                     {/* Ligne 2 : objet */}
@@ -359,7 +366,10 @@ export default function DossiersIndex() {
                                                                     {},
                                                                     {
                                                                         preserveScroll: true,
-                                                                        onError: () => router.visit(`/dossiers/${d.reference}`),
+                                                                        onError: (errors) => {
+                                                                            notifyValidationError(errors);
+                                                                            router.visit(`/dossiers/${d.reference}`);
+                                                                        },
                                                                     }
                                                                 );
                                                             }}

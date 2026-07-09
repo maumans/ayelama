@@ -54,12 +54,16 @@ class Revision extends Model
 
     public function estValidable(): bool
     {
-        return $this->nombreNonConformes() === 0;
+        $totalDocuments = $this->dossier->documents()->count();
+
+        return $totalDocuments > 0
+            && $this->nombreNonConformes() === 0
+            && $this->nombreEvalues() === $totalDocuments;
     }
 
     public function resetPoints(): void
     {
-        $this->points()->delete();
+        $this->points()->where('etat', 'a_corriger')->delete();
         $this->update([
             'statut'     => StatutRevision::EnAttente,
             'commentaire' => null,
@@ -72,7 +76,6 @@ class Revision extends Model
     {
         $this->update([
             'statut'     => StatutRevision::Valide,
-            'reviseur_id' => $reviseur->id,
             'valide_at'  => now(),
         ]);
     }
@@ -80,10 +83,9 @@ class Revision extends Model
     public function renvoyer(User $reviseur, ?string $commentaire = null): void
     {
         $this->update([
-            'statut'             => StatutRevision::Renvoye,
-            'reviseur_id'        => $reviseur->id,
+            'statut'      => StatutRevision::Renvoye,
             'commentaire' => $commentaire,
-            'renvoye_at'         => now(),
+            'renvoye_at'  => now(),
         ]);
     }
 }

@@ -64,9 +64,11 @@ export default function Revision() {
     const docEvalues   = Object.values(etats).filter(e => e.etat !== null).length;
     const docOk        = Object.values(etats).filter(e => e.etat === 'ok').length;
     const docACorriger = Object.values(etats).filter(e => e.etat === 'a_corriger').length;
+    const docACorrigerSansCommentaire = Object.values(etats)
+        .some(e => e.etat === 'a_corriger' && !e.commentaire?.trim());
     const pctProgress  = docList.length > 0 ? Math.round((docEvalues / docList.length) * 100) : 0;
     const canValidate  = docACorriger === 0 && docEvalues === docList.length && docList.length > 0;
-    const canRenvoyer  = docACorriger > 0;
+    const canRenvoyer  = docACorriger > 0 && !docACorrigerSansCommentaire;
 
     const setVerdict = (docId, etat) => {
         setEtats(prev => ({ ...prev, [docId]: { ...prev[docId], etat } }));
@@ -82,17 +84,31 @@ export default function Revision() {
         });
     };
 
+    // Sauvegarde d'abord les points en base avant de valider/renvoyer, sinon le
+    // serveur peut refuser l'action car il ne connaît pas encore les verdicts que
+    // l'utilisateur vient de saisir localement (tant que « Sauvegarder » n'a pas
+    // été cliqué séparément).
     const handleValider = () => {
         setValidating(true);
-        router.post(`/dossiers/${dossier.reference}/revision/valider`, {}, {
-            onFinish: () => setValidating(false),
+        router.put(`/dossiers/${dossier.reference}/revision`, { points: etats }, {
+            onSuccess: () => {
+                router.post(`/dossiers/${dossier.reference}/revision/valider`, {}, {
+                    onFinish: () => setValidating(false),
+                });
+            },
+            onError: () => setValidating(false),
         });
     };
 
     const handleRenvoyer = () => {
         setRenvoyant(true);
-        router.post(`/dossiers/${dossier.reference}/revision/renvoyer`, { motif: motifRenvoyer }, {
-            onFinish: () => { setRenvoyant(false); setShowRenvoyerDialog(false); },
+        router.put(`/dossiers/${dossier.reference}/revision`, { points: etats }, {
+            onSuccess: () => {
+                router.post(`/dossiers/${dossier.reference}/revision/renvoyer`, { motif: motifRenvoyer }, {
+                    onFinish: () => { setRenvoyant(false); setShowRenvoyerDialog(false); },
+                });
+            },
+            onError: () => setRenvoyant(false),
         });
     };
 
@@ -124,7 +140,7 @@ export default function Revision() {
                             >
                                 <h3 className="font-serif text-heading text-ink mb-1">Renvoyer en correction</h3>
                                 <p className="text-sm text-slate-500 mb-4">
-                                    Décrivez le motif général du renvoi (optionnel). Le rédacteur le recevra en plus des commentaires par document.
+                                    Décrivez le motif général du renvoi (optionnel) — le rédacteur le recevra en plus des commentaires par document.
                                 </p>
                                 <textarea
                                     rows={3}
@@ -335,13 +351,21 @@ export default function Revision() {
                                                     exit={{ height: 0, opacity: 0 }}
                                                     className="overflow-hidden"
                                                 >
+                                                    {isNok && (
+                                                        <span className="text-xs text-slate-400">
+                                                            Commentaire <span className="text-danger">*</span> — obligatoire pour un document à corriger
+                                                        </span>
+                                                    )}
                                                     <textarea
                                                         value={etatDoc.commentaire}
                                                         onChange={e => setCommentaire(docId, e.target.value)}
                                                         placeholder="Décrivez les corrections à apporter…"
                                                         rows={2}
                                                         readOnly={!can?.update}
-                                                        className="mt-3 w-full text-sm rounded-lg border border-slate-200 px-3 py-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                        className={cn(
+                                                            'mt-1 w-full text-sm rounded-lg border px-3 py-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-seal resize-none',
+                                                            isNok && !etatDoc.commentaire?.trim() ? 'border-danger' : 'border-slate-200'
+                                                        )}
                                                     />
                                                 </motion.div>
                                             )}
@@ -373,9 +397,18 @@ export default function Revision() {
                     >
                         <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
                         <div>
-                            <span className="font-medium">Validation bloquée — </span>
-                            {docACorriger} document{docACorriger > 1 ? 's' : ''} à corriger.
-                            Renvoyez le dossier en édition pour que le rédacteur effectue les corrections.
+                            {revisionStatut === 'renvoye' ? (
+                                <>
+                                    <span className="font-medium">Déjà renvoyé en correction — </span>
+                                    {docACorriger} document{docACorriger > 1 ? 's' : ''} en attente de correction par le rédacteur.
+                                </>
+                            ) : (
+                                <>
+                                    <span className="font-medium">Validation bloquée — </span>
+                                    {docACorriger} document{docACorriger > 1 ? 's' : ''} à corriger.
+                                    Renvoyez le dossier en édition pour que le rédacteur effectue les corrections.
+                                </>
+                            )}
                         </div>
                     </motion.div>
                 )}
@@ -397,13 +430,19 @@ export default function Revision() {
                     <div className="flex-1" />
 
                     {can?.update && (
-                        <Button variant="outline" size="lg" onClick={handleSave} disabled={saving}>
+                        <Button
+                            variant="outline"
+                            size="lg"
+                            onClick={handleSave}
+                            disabled={saving || docACorrigerSansCommentaire}
+                            title={docACorrigerSansCommentaire ? 'Ajoutez un commentaire aux documents « À corriger »' : ''}
+                        >
                             <Send className="h-4 w-4" />
                             {saving ? 'Sauvegarde…' : 'Sauvegarder'}
                         </Button>
                     )}
 
-                    {can?.renvoyer && (
+                    {can?.update && (
                         <Button
                             variant="warning"
                             size="lg"
@@ -420,7 +459,7 @@ export default function Revision() {
                         </Button>
                     )}
 
-                    {can?.valider && (
+                    {can?.update && (
                         <Button
                             variant="seal"
                             size="lg"

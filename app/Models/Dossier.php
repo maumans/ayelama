@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\EtapeDossier;
+use App\Enums\RoleUtilisateur;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -14,7 +15,7 @@ class Dossier extends Model
         'reference', 'type_acte_id',
         'etape', 'redacteur_id', 'reviseur_id',
         'notaire_id', 'formaliste_id',
-        'objet', 'valeur', 'echeance', 'notes',
+        'objet', 'valeur', 'echeance', 'urgent', 'notes',
         'etape_changed_at',
     ];
 
@@ -25,6 +26,7 @@ class Dossier extends Model
             'echeance'         => 'date',
             'etape_changed_at' => 'datetime',
             'valeur'           => 'integer',
+            'urgent'           => 'boolean',
         ];
     }
 
@@ -89,6 +91,11 @@ class Dossier extends Model
         return $this->hasMany(Facture::class);
     }
 
+    public function courriers()
+    {
+        return $this->hasMany(Courrier::class)->orderByDesc('created_at');
+    }
+
     public function societe()
     {
         return $this->hasOne(Societe::class);
@@ -120,6 +127,20 @@ class Dossier extends Model
         return $query->whereNotNull('echeance')
             ->where('echeance', '<=', now()->addHours($heures))
             ->whereNotIn('etape', [EtapeDossier::Cloture->value]);
+    }
+
+    public function scopeVisiblePar($query, User $user)
+    {
+        if ($user->hasRole(RoleUtilisateur::Administrateur)) {
+            return $query;
+        }
+
+        return $query->where(function ($q) use ($user) {
+            $q->where('redacteur_id', $user->id)
+                ->orWhere('reviseur_id', $user->id)
+                ->orWhere('notaire_id', $user->id)
+                ->orWhere('formaliste_id', $user->id);
+        });
     }
 
     // Helpers

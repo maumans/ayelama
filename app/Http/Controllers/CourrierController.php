@@ -4,8 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Courrier;
 use App\Models\Dossier;
+use App\Models\JournalActivite;
+use App\Models\ModeleActe;
+use App\Services\ActesGeneratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class CourrierController extends Controller
@@ -53,6 +58,10 @@ class CourrierController extends Controller
             'dossierRef'   => $c->dossier?->reference,
             'dossierObjet' => $c->dossier?->objet,
             'created_at'   => $c->created_at->format('d/m/Y'),
+            'chemin_fichier' => $c->chemin_fichier,
+            'has_file'       => (bool) $c->chemin_fichier,
+            'url_download'   => $c->chemin_fichier ? route('courriers.download', $c) : null,
+            'url_preview'    => $c->chemin_fichier ? route('courriers.preview', $c) : null,
         ]);
 
         return Inertia::render('Courriers/Index', [
@@ -72,6 +81,8 @@ class CourrierController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorize('create', Courrier::class);
+
         $data = $request->validate([
             'destinataire' => ['required', 'string', 'max:300'],
             'adresse'      => ['nullable', 'string', 'max:500'],
@@ -80,6 +91,10 @@ class CourrierController extends Controller
             'contenu'      => ['nullable', 'string'],
             'dossier_id'   => ['nullable', 'exists:dossiers,id'],
         ]);
+
+        if (!empty($data['dossier_id'])) {
+            $this->authorize('view', Dossier::findOrFail($data['dossier_id']));
+        }
 
         $annee    = now()->year;
         $count    = Courrier::whereYear('created_at', $annee)->count() + 1;
@@ -96,6 +111,8 @@ class CourrierController extends Controller
 
     public function update(Request $request, Courrier $courrier)
     {
+        $this->authorize('update', $courrier);
+
         $data = $request->validate([
             'destinataire' => ['sometimes', 'string', 'max:300'],
             'adresse'      => ['sometimes', 'nullable', 'string', 'max:500'],
@@ -120,8 +137,73 @@ class CourrierController extends Controller
 
     public function destroy(Courrier $courrier)
     {
+        $this->authorize('delete', $courrier);
+
         $courrier->delete();
 
         return back()->with('success', 'Courrier supprimé.');
+    }
+
+    public function genererDepuisModele(Request $request, Dossier $dossier, ActesGeneratorService $generatorService)
+    {
+        $this->authorize('genererCourriers', $dossier);
+
+        $data   = $request->validate(['modele_acte_id' => ['required', 'integer', 'exists:modeles_actes,id']]);
+        $modele = ModeleActe::actif()->findOrFail($data['modele_acte_id']);
+
+        $dossier->load('questionnaire');
+
+        $chemin = $generatorService->genererDocument($dossier, $modele->chemin_fichier, Str::slug($modele->nom));
+
+        $annee     = now()->year;
+        $count     = Courrier::whereYear('created_at', $annee)->count() + 1;
+        $reference = 'COU-' . $annee . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+
+        Courrier::create([
+            'reference'      => $reference,
+            'dossier_id'     => $dossier->id,
+            'redacteur_id'   => Auth::id(),
+            'destinataire'   => '',
+            'objet'          => $modele->nom,
+            'type'           => 'transmission',
+            'statut'         => 'brouillon',
+            'chemin_fichier' => $chemin,
+        ]);
+
+        JournalActivite::enregistrer($dossier, "Courrier « {$modele->nom} » généré", 'expedition', []);
+
+        return back()->with('success', "« {$modele->nom} » généré avec succès.");
+    }
+
+    public function download(Courrier $courrier)
+    {
+        $this->authorize('view', $courrier);
+
+        if (!$courrier->chemin_fichier || !Storage::disk('public')->exists($courrier->chemin_fichier)) {
+            abort(404, 'Fichier introuvable.');
+        }
+
+        $ext      = pathinfo($courrier->chemin_fichier, PATHINFO_EXTENSION);
+        $filename = $courrier->objet . ($ext ? '.' . $ext : '');
+
+        return Storage::disk('public')->download($courrier->chemin_fichier, $filename);
+    }
+
+    public function preview(Courrier $courrier)
+    {
+        $this->authorize('view', $courrier);
+
+        if (!$courrier->chemin_fichier || !Storage::disk('public')->exists($courrier->chemin_fichier)) {
+            abort(404, 'Fichier introuvable.');
+        }
+
+        $path     = Storage::disk('public')->path($courrier->chemin_fichier);
+        $mime     = mime_content_type($path) ?: 'application/octet-stream';
+        $filename = basename($courrier->chemin_fichier);
+
+        return response()->file($path, [
+            'Content-Type'        => $mime,
+            'Content-Disposition' => "inline; filename=\"{$filename}\"",
+        ]);
     }
 }

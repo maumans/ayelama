@@ -38,12 +38,13 @@
 | **Formaliste** | Exécute les démarches administratives (dépôts, paiements, retours) |
 | **Administrateur** | Gère utilisateurs, modèles, barèmes, types d'actes |
 
-### Workflow central (8 étapes séquentielles)
+### Workflow central (6 étapes séquentielles)
 ```
-Initialisation → Édition actes → Révision ⭐ → Signature client
-→ Signature notaire → Formalités → Expédition → Clôturé
+Initialisation → Édition actes → Révision ⭐ → Formalités → Expédition → Clôturé
 ```
 Chaque étape est bloquante : impossible de passer à la suivante sans valider la précédente.
+
+> ⚠️ **Changement du 2026-07-03** : les étapes séparées « Signature client » et « Signature notaire » ont été supprimées. La migration `2026_07_03_184712_migrate_signature_etapes_to_formalites` bascule tout dossier qui s'y trouvait vers `formalites` (pas de rollback possible — voir [décision #19](#8-décisions-techniques)). La signature est désormais gérée à l'intérieur de l'étape Formalités plutôt que comme étape dédiée.
 
 ---
 
@@ -134,19 +135,19 @@ resources/js/
     ├── Modeles/
     │   └── Index.jsx               # CRUD modèles .docx — upload, activer/désactiver, générer
     ├── Courriers/
-    │   └── Index.jsx               # Placeholder (module futur)
+    │   └── Index.jsx               # CRUD complet — KPIs, répartition par type, recherche, modal ModalCourrier
     └── Parametres/
         ├── Index.jsx               # Dashboard admin
         ├── Utilisateurs.jsx        # CRUD utilisateurs + modal création
         ├── TypesActes.jsx          # Liste types d'actes + toggle actif
-        └── Baremes.jsx             # Placeholder (module 6 à venir)
+        └── Baremes.jsx             # CRUD complet — accordéon par type d'acte, légende organismes, toggle actif
 ```
 
 ```
 app/
 ├── Enums/
 │   ├── RoleUtilisateur.php         # clerc, reviseur, notaire, formaliste, administrateur
-│   ├── EtapeDossier.php            # 8 étapes + label(), suivante(), precedente(), ordre(), ordered()
+│   ├── EtapeDossier.php            # 6 étapes (initialisation, edition, revision, formalites, expedition, cloture) + label(), suivante(), precedente(), ordre(), ordered()
 │   ├── CategorieActe.php           # societe, vente, hypotheque, bail, donation, succession, procuration, courrier
 │   ├── StatutRevision.php          # en_attente, en_cours, valide, renvoye
 │   └── StatutFormalite.php         # a_deposer, depose, en_attente, retour_recu, cloture
@@ -157,21 +158,29 @@ app/
 │   ├── Revision.php                # estValidable(), valider(), renvoyer()
 │   ├── RevisionPoint.php           # point_id (string), etat, commentaire
 │   ├── RevisionGrille.php          # groupes() → array par groupe
-│   ├── Formalite.php               # estUrgente(), estDepassee(), heuresRestantes(), labelOrganisme()
+│   ├── Formalite.php               # estUrgente(), estDepassee(), heuresRestantes(), labelOrganisme(), calculerMontant() (mécanisme séparé de Bareme, non unifié)
 │   ├── FormalitePiece.php
 │   ├── Questionnaire.php           # donnees (json)
 │   ├── Document.php
-│   ├── Partie.php                  # initiales (accessor calculé depuis nom)
+│   ├── Partie.php                  # initiales (accessor calculé depuis nom), client_id nullable → Client (coexistence, pas remplacement)
 │   ├── JournalActivite.php         # enregistrer() static
 │   ├── ModeleActe.php
 │   ├── Facture.php
-│   └── LigneFacture.php            # $table = 'lignes_factures' (explicite)
+│   ├── LigneFacture.php            # $table = 'lignes_factures' (explicite)
+│   ├── Client.php                  # personne physique|morale réutilisable, hasMany(Partie), estPersonnePhysique(), nomComplet()
+│   ├── Societe.php                 # belongsTo(Dossier), direction (cast json), formeLabel()
+│   ├── BienImmobilier.php          # belongsTo(Dossier), champs vente ET champs bail dans la même table, loyerTotalBail()
+│   ├── Banque.php                  # belongsTo(Dossier) — bloc hypothèque/crédit
+│   ├── Bareme.php                  # belongsTo(TypeActe), scope actif(), calculerMontant(valeurActe) — taux% ou montant_fixe
+│   ├── Courrier.php                # reference, dossier(), redacteur()→User, scopes brouillon()/envoye(), typeLabel()
+│   └── Setting.php                 # clé/valeur (PK string 'key'), get/set/setMany/all statiques
 ├── Policies/
 │   ├── DossierPolicy.php           # viewAny, view, create (Clerc+Notaire+Admin), update, delete, avancer, reviser, gererFormalites
 │   └── RevisionPolicy.php          # view, update, valider, renvoyer
 ├── Services/
-│   ├── DossierStepService.php      # avancer(), reculer(), verifierPrerequis()
-│   ├── ActesGeneratorService.php   # genererDocument() — PhpWord TemplateProcessor
+│   ├── DossierStepService.php      # avancer(), reculer(), verifierPrerequis() — adapté aux 6 étapes
+│   ├── ActesGeneratorService.php   # genererDocument() — PhpWord TemplateProcessor, moteur générique clé/valeur (gère déjà bien./bq./bail. sans code dédié)
+│   ├── FacturationService.php      # genererFacture(), simuler() — génère Facture+LigneFacture depuis les Bareme actifs du type d'acte, deduireAssiette()
 │   └── NombreEnLettres.php         # convertir(float, devise) → majuscules FR (milliers, millions, milliards)
 ├── Http/
 │   ├── Controllers/
@@ -183,7 +192,8 @@ app/
 │   │   ├── DocumentController.php  # download, preview — téléchargement avec extension correcte
 │   │   ├── SearchController.php    # index → JSON {results:[]}
 │   │   ├── RepertoireController.php# index, autocomplete → JSON
-│   │   ├── ParametresController.php# index, utilisateurs, storeUtilisateur, updateUtilisateur, typesActes, updateTypeActe
+│   │   ├── CourrierController.php  # index (filtres/stats/recherche), store, update (gère envoye_at), destroy
+│   │   ├── ParametresController.php# index, utilisateurs, storeUtilisateur, updateUtilisateur, typesActes, updateTypeActe, baremes, storeBareme, updateBareme, destroyBareme
 │   │   └── ProfileController.php
 │   ├── Middleware/
 │   │   ├── HandleInertiaRequests.php  # partage auth.user.can, notifications
@@ -203,8 +213,16 @@ database/
 └── seeders/
     ├── UserSeeder.php              # 5 utilisateurs (1 par rôle + admin)
     ├── TypeActeSeeder.php          # 19 types d'actes répartis en 8 catégories
-    └── DossierSeeder.php           # 5 dossiers réalistes à différentes étapes
-dictionnaire_balises.md             # Référence complète des variables ${...} des modèles .docx
+    ├── DossierSeeder.php           # 5 dossiers réalistes à différentes étapes
+    ├── ModeleActeSeeder.php
+    └── BaremeSeeder.php            # Barèmes par défaut (APIP, Impôts, Conservation, CNSS, Notaire…)
+dictionnaire_balises.md                            # Référence des variables ${...} des modèles .docx (à recouper avec le dictionnaire ci-dessous, plus large)
+Analyse_et_Prompt_Generation_Modeles_Ayelema.md    # (ajouté 2026-07-06) Analyse des 47 modèles Word reçus + dictionnaire de blocs
+                                                    # réutilisables (pp./pm./soc./bien./bq./bail./cr./fac.) + plan d'implémentation. Voir §6 ci-dessous.
+Documents reçus/                                   # (ajouté 2026-07-06) 64 fichiers modèles réels (.docx/.doc/.xls/.pdf) répartis en 9 sous-dossiers
+                                                    # (SARL, SARLU, SAS, SASU, vente avec/sans TF, baux, courriers, questionnaires PDF).
+                                                    # ⚠️ Un seul fichier normalisé avec balises ${...} (STATUTS_SARLU_balises.docx) — les 63 autres
+                                                    # sont encore bruts (pointillés/MAJUSCULES), non exploitables tels quels par ActesGeneratorService.
 ```
 
 ---
@@ -240,7 +258,7 @@ dictionnaire_balises.md             # Référence complète des variables ${...}
 
 ### Composants clés
 - **Button** : variantes `seal`, `warning`, `success`, `destructive`, sizes `sm/lg/xl/icon/icon-sm`
-- **Stepper** : workflow 8 étapes — fait (✓ vert) / courant (or) / futur (gris)
+- **Stepper** : workflow 6 étapes — fait (✓ vert) / courant (or) / futur (gris)
 - **WorkflowStepper** : composant inline dans `Dossiers/Show.jsx`
 - **Animations** : Framer Motion — fade+slide 6-8px, stagger 0.04-0.08s sur les listes
 
@@ -348,30 +366,60 @@ dictionnaire_balises.md             # Référence complète des variables ${...}
 - [x] Pages Paramètres/Index, Utilisateurs, TypesActes
 - [x] Routes admin protégées par `middleware('role:administrateur')`
 
+### ✅ Complété — Module 6 : Barèmes & facturation automatique
+
+- [x] Table `baremes` (taux % ou montant fixe, par type d'acte, par organisme) + `BaremeSeeder`
+- [x] `ParametresController::baremes/storeBareme/updateBareme/destroyBareme` — CRUD complet
+- [x] `Parametres/Baremes.jsx` — accordéon par type d'acte, légende organismes (APIP/Impôts/Conservation/CNSS/Notaire/Autre), toggle actif
+- [x] `FacturationService::genererFacture()` / `simuler()` — calcule les lignes de facture depuis les barèmes actifs du type d'acte, déduit l'assiette depuis le questionnaire ou `dossier->valeur`
+- [x] Tables `factures` / `lignes_factures` + modèles `Facture` / `LigneFacture`
+- [ ] ⚠️ Non unifié : `Formalite::calculerMontant()` reste un mécanisme séparé (base×taux en dur sur la formalité), indépendant des `Bareme` — à terme, harmoniser les deux
+
+### ✅ Complété — Module Courriers
+
+- [x] Table `courriers` (référence auto `COU-{année}-{0000}`, statut brouillon/envoyé)
+- [x] `CourrierController` — index (recherche, filtres type/statut, stats), store, update (gère `envoye_at`), destroy
+- [x] `Courriers/Index.jsx` — KPIs, répartition par type cliquable, recherche debounced, modal `ModalCourrier`
+
+### ✅ Complété — Données réutilisables (Client / Société / Bien / Banque)
+
+- [x] Tables `clients`, `societes`, `biens_immobiliers`, `banques`, `settings` (migrations 2026-06-29 et 2026-07-03)
+- [x] Modèles `Client` (physique|morale), `Societe`, `BienImmobilier` (champs vente **et** bail dans la même table), `Banque`, `Setting` (clé/valeur, config office : nom, couleurs, logo)
+- [x] `Partie.client_id` (nullable) → `Client` : les deux modèles coexistent, `Client` n'est pas encore le pivot central
+- [ ] ⚠️ Aucun CRUD HTTP dédié pour ces 4 modèles (`clients`, `societes`, `biens_immobiliers`, `banques`) — pas de controller/route ; alimentation indirecte via questionnaire uniquement, aucun seeder
+
+### ⚙️ Changement de workflow (2026-07-03)
+
+- [x] `EtapeDossier` réduit de 8 à 6 cas : `Signature client` et `Signature notaire` supprimées
+- [x] Migration `migrate_signature_etapes_to_formalites` — bascule les dossiers en signature vers `formalites` (irréversible, pas de `down()`)
+- [x] `DossierStepService::verifierPrerequis()` adapté aux 6 étapes
+
 ---
 
 ### 🔲 Reste à faire
 
 #### Module 4 — Génération de documents (suite)
-- [ ] Prévisualisation PDF dans le navigateur (conversion .docx → PDF côté serveur)
+- [ ] **Normaliser les 63 modèles `.docx`/`.doc` bruts** dans `Documents reçus/` (pointillés/MAJUSCULES → balises `${...}`) — un seul fichier fait référence (`STATUTS_SARLU_balises.docx`). Voir `Analyse_et_Prompt_Generation_Modeles_Ayelema.md` §A/§E pour la méthode et le dictionnaire de blocs cible
+- [ ] Ajouter les blocs `cr.*` (Courrier) et `fac.*` (Facture) dans `resources/js/data/questionnaires.js` — documentés dans l'analyse mais absents du frontend, donc pas de formulaire de saisie pour les 13 courriers de transmission et les factures détaillées
+- [ ] Étendre `ActesGeneratorService` avec `cloneRowAndSetValues()` pour les tableaux répétables (lignes de facture, titres fonciers multiples, pièces transmises) — seul `cloneBlock()` simple est utilisé actuellement
+- [ ] Prévisualisation PDF dans le navigateur (conversion .docx → PDF côté serveur, ex. LibreOffice headless)
 - [ ] Gestion des versions de modèles (historique, rollback)
 - [ ] Signature électronique intégrée (module futur)
 
 #### Module 5 — Grilles de révision dynamiques
-- [ ] Interface admin pour configurer les grilles par type d'acte (table `revision_grilles`)
+- [ ] Interface admin pour configurer les grilles par type d'acte (table `revision_grilles`) — routes `parametres/grilles` déjà présentes dans `web.php`, à vérifier si l'UI existe
 - [ ] La page `Revision.jsx` utilise `DEFAULT_GROUPES` si aucune grille en DB — à terme : grilles personnalisées par type d'acte
 - [ ] Notification au rédacteur en cas de renvoi en correction
 
-#### Module 6 — Barèmes & formalités avancées
-- [ ] Page `Parametres/Baremes` à implémenter (actuellement placeholder)
-- [ ] Taux configurables par type d'acte
+#### Module 6 — Barèmes & formalités avancées (suite)
+- [ ] Unifier `Formalite::calculerMontant()` et `Bareme::calculerMontant()` (deux mécanismes de calcul de montant coexistent aujourd'hui)
 - [ ] Génération des bordereaux de paiement
 
 #### Fonctionnalités transverses
 - [ ] Upload pièces jointes (CNI, photos parties)
 - [ ] Export PDF d'un dossier
-- [ ] Page `Courriers/Index` à implémenter (actuellement placeholder)
-- [ ] `php artisan migrate:fresh --seed` — à exécuter pour initialiser la DB
+- [ ] CRUD HTTP pour `Client`, `Societe`, `BienImmobilier`, `Banque` (répertoire de données réutilisables — actuellement alimentés seulement via le questionnaire du dossier, sans écran dédié ni seeder)
+- [ ] Page `Parametres/Apparence` — routes présentes dans `web.php` (`GET/POST /parametres/apparence`, upload logo), à vérifier si l'UI React existe et est branchée à `Setting`
 
 ---
 
@@ -443,6 +491,47 @@ journal_activites — id, dossier_id, user_id, action, type, meta(json), created
 modeles_actes — id, type_acte_id, nom, chemin_fichier, version, est_actif, updated_by, timestamps
 
 notifications — (table standard Laravel notifications)
+
+-- Ajoutées depuis (non documentées avant le 2026-07-06) :
+
+courriers — id, reference, dossier_id, redacteur_id, destinataire, adresse, objet,
+            type(enum: transmission/convocation/relance/divers), statut(brouillon/envoye),
+            contenu, envoye_at, timestamps
+
+baremes — id, type_acte_id, organisme, libelle, taux, montant_fixe,
+          base_calcul(valeur_acte/montant_fixe), description, actif, ordre, timestamps
+
+clients — id, type(physique/morale), civilite, prenom_nom, ne_a, date_naissance, nationalite,
+          piece_type, piece_numero, piece_delivree_le, piece_delivree_a, piece_expire_le,
+          situation_matrimoniale, regime_matrimonial, denomination, forme, rccm,
+          representant_legal, demeurant_ville, quartier, commune, pays, telephone, email,
+          siege, timestamps
+
+societes — id, dossier_id(nullable, cascadeOnDelete), denomination, forme, sigle,
+           capital_chiffres, nombre_parts, valeur_nominale_chiffres, siege_quartier,
+           siege_commune, siege_ville, email_societe, telephone_societe, objet_social,
+           duree, exercice_social, date_acte, rccm_numero, nif, jal_journal,
+           direction(json), commissaire_titulaire, commissaire_suppleant, timestamps
+
+biens_immobiliers — id, dossier_id(nullable, cascadeOnDelete), parcelle_numero, lot_numero,
+                    lieu_de, nature_terrain, usage, superficie_m2, pcp, titre_foncier_numero,
+                    tf_date, livre_foncier_ville, tf_volume, tf_folio, tf_annee,
+                    limites_ne/so/se/no, origine_propriete, prix_vente_chiffres,
+                    -- champs bail dans la même table :
+                    type_bail, duree_bail, date_prise_effet, loyer_chiffres,
+                    periodicite_loyer, destination_bien, engagement_construction, timestamps
+
+banques — id, dossier_id(nullable, cascadeOnDelete), denomination, forme, quartier, commune,
+          ville, montant_credit_chiffres, type_garantie, rang_hypothecaire, timestamps
+
+factures — id, dossier_id, note_numero, note_date, objet, assiette_chiffres,
+           total_chiffres, timestamps
+
+lignes_factures — id, facture_id, designation, quantite, montant, timestamps
+
+settings — key(string, PK), value(text, nullable), timestamps
+           -- seed par défaut : office_nom, office_sous_titre, couleur_primaire,
+           -- couleur_accent, couleur_fond, logo_path
 ```
 
 ### Relations clés
@@ -452,7 +541,14 @@ notifications — (table standard Laravel notifications)
 - `Dossier` HasOne `Revision`, `Questionnaire`
 - `Revision` HasMany `RevisionPoint`
 - `TypeActe` HasOne `RevisionGrille` (grilleActive = est_active=true)
+- `TypeActe` HasMany `Bareme`
 - `Formalite` HasMany `FormalitePiece`
+- `Partie` BelongsTo `Client` (nullable — coexistence, pas remplacement de `Partie`)
+- `Client` HasMany `Partie`
+- `Societe`, `BienImmobilier`, `Banque` BelongsTo `Dossier` (nullable, cascadeOnDelete)
+- `Dossier` HasMany `Courrier`, `Facture`
+- `Facture` HasMany `LigneFacture`
+- `Courrier` BelongsTo `Dossier`, BelongsTo `User` (redacteur)
 
 ### Scopes importants (`Dossier`)
 ```php
@@ -493,6 +589,10 @@ Les clés suffixées `_chiffres` génèrent automatiquement la variante `_lettre
 | 16 | `NombreEnLettres::convertir(montant, '')` | Passer une chaîne vide comme devise produit le nombre en lettres sans suffixe, utile pour les dates (années, jours). Passer `'Francs Guinéens'` (défaut) pour les montants |
 | 17 | `datEnLettres()` — jour 1 = "PREMIER" | Convention notariale française : le 1er du mois s'écrit "PREMIER", pas "UN". Les autres jours passent par `NombreEnLettres::convertir()` |
 | 18 | Champs questionnaire préfixés (`soc.*`, `ger.*`) | Les variables dans les modèles `.docx` utilisent la notation pointée `${soc.denomination}`. Les IDs des champs React DOIVENT correspondre exactement pour que `TemplateProcessor::setValue()` les remplace |
+| 19 | Workflow réduit à 6 étapes (suppression Signature client/notaire) | La signature était en pratique gérée dans les formalités plutôt que comme étape séparée bloquante. Migration `migrate_signature_etapes_to_formalites` bascule tout dossier existant vers `formalites`, sans `down()` — **irréversible**, l'état exact (signature client vs notaire) des dossiers migrés n'est pas conservé |
+| 20 | `Partie.client_id` nullable plutôt que fusion `Partie`/`Client` | `Client` a été introduit pour permettre la réutilisation d'une personne entre plusieurs dossiers (répertoire), mais sans migration de données existantes ni CRUD dédié. `Partie` reste la source de vérité pour un dossier donné ; `Client` est un enrichissement optionnel, pas un remplacement |
+| 21 | Deux mécanismes de calcul de montant non unifiés | `Formalite::calculerMontant()` (base×taux stocké sur la formalité) a précédé `Bareme::calculerMontant()` + `FacturationService` (barèmes paramétrables par type d'acte). Les deux coexistent aujourd'hui — ne pas supposer qu'un changement de barème impacte automatiquement le montant d'une formalité existante |
+| 22 | `ActesGeneratorService` reste générique clé/valeur | Plutôt que du code dédié par bloc (`bien.*`, `bq.*`, `bail.*`), le service boucle sur toutes les clés du questionnaire et appelle `setValue()` pour chacune — ça fonctionne déjà pour ces préfixes sans changement de code, mais la dérivation d'adresse auto (`{pfx}.adresse`) ne couvre que `pp/ger/acq/loc/liquidateur`, pas `bien/bq/bail` |
 
 ---
 
@@ -530,13 +630,17 @@ Les clés suffixées `_chiffres` génèrent automatiquement la variante `_lettre
 
 | Sujet | Détail |
 |-------|--------|
-| DB non initialisée | Exécuter `php artisan migrate:fresh --seed` avant le premier démarrage |
 | `DEFAULT_GROUPES` dans Revision | 3 groupes statiques utilisés si pas de `RevisionGrille` en DB pour le type d'acte. Normal pour l'instant |
 | Pages Auth (Login/Register) | Utilisent encore `GuestLayout` de Breeze — design non unifié, fonctionnel |
 | `recharts` installé | Non encore utilisé — prévu pour graphiques dashboard (module futur) |
 | Importation `@/components/*` vs `@/Components/*` | Windows insensible à la casse : les deux fonctionnent. Sur Linux (déploiement) : vérifier la cohérence de la casse |
 | PDF preview non implémentée | Génération `.docx` OK, mais pas de prévisualisation navigateur. Nécessite LibreOffice headless ou service tiers |
+| 63 modèles `.docx`/`.doc` bruts dans `Documents reçus/` | Non normalisés (pointillés/MAJUSCULES) — inutilisables tels quels par `ActesGeneratorService`. Un seul fichier de référence normalisé (`STATUTS_SARLU_balises.docx`). Voir `Analyse_et_Prompt_Generation_Modeles_Ayelema.md` |
+| Blocs `cr.*` / `fac.*` absents de `questionnaires.js` | Documentés dans l'analyse mais pas de formulaire frontend — les courriers de transmission et factures détaillées ne peuvent pas encore être générés depuis un questionnaire dédié |
+| `Client`/`Societe`/`BienImmobilier`/`Banque` sans CRUD ni seeder | Tables et modèles existent, alimentés uniquement en creux via le questionnaire du dossier — pas d'écran de gestion, pas de données de démo |
+| Migration `migrate_signature_etapes_to_formalites` irréversible | Pas de `down()` — si des dossiers étaient en étape signature avant le 2026-07-03, leur état précis (client vs notaire) est perdu, ils sont tous en `formalites` maintenant |
+| Routes `parametres/apparence` et `parametres/grilles` présentes dans `web.php` | Non vérifié si les pages React correspondantes existent et sont branchées (`Setting` pour apparence, UI d'édition de grille de révision) — à confirmer avant de s'y fier |
 
 ---
 
-*Dernière mise à jour : 01/07/2026 — Modules 1–4, 4b, 7–10 complétés. Génération de documents .docx opérationnelle (PhpWord TemplateProcessor). Édition dossier + questionnaire depuis Show.jsx. Dictionnaire des balises documenté.*
+*Dernière mise à jour : 06/07/2026 — Devbook resynchronisé avec l'état réel du code après dérive de documentation (workflow passé à 6 étapes, modules Courriers et Barèmes/Facturation en réalité complets, nouveaux modèles Client/Societe/BienImmobilier/Banque/Setting, réception de 64 modèles Word réels dont 63 restent à normaliser). Voir `Analyse_et_Prompt_Generation_Modeles_Ayelema.md` pour le plan de normalisation des modèles.*

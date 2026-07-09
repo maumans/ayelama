@@ -5,32 +5,29 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneField } from '@/components/ui/phone-field';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, XCircle, Plus, Pencil, Search, Users } from 'lucide-react';
+import { ROLE_META } from '@/data/roles';
+import { RoleBadgeList } from '@/components/ui/role-badge';
 
-const ROLE_META = {
-    administrateur: { label: 'Admin',     cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-    notaire:        { label: 'Notaire',   cls: 'bg-ink/5 text-ink border-ink/20' },
-    reviseur:       { label: 'Réviseur',  cls: 'bg-purple-50 text-purple-700 border-purple-200' },
-    clerc:          { label: 'Clerc',     cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-    formaliste:     { label: 'Formaliste',cls: 'bg-orange-50 text-orange-700 border-orange-200' },
-};
-
-const EMPTY_FORM = { name: '', email: '', password: '', role: '', initiales: '', telephone: '' };
+const EMPTY_FORM = { name: '', email: '', password: '', roles: [], initiales: '', telephone: '' };
 
 function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
     const isEdit = Boolean(utilisateur);
     const [form, setForm] = useState(EMPTY_FORM);
+    const [rolesError, setRolesError] = useState(false);
 
     useEffect(() => {
         if (open) {
+            setRolesError(false);
             setForm(isEdit ? {
                 name:      utilisateur.name      ?? '',
                 email:     utilisateur.email     ?? '',
                 password:  '',
-                role:      utilisateur.role      ?? '',
+                roles:     utilisateur.roles     ?? [],
                 initiales: utilisateur.initiales ?? '',
                 telephone: utilisateur.telephone ?? '',
             } : EMPTY_FORM);
@@ -39,8 +36,18 @@ function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
 
     const f = (k) => (e) => setForm(p => ({ ...p, [k]: typeof e === 'string' ? e : e.target.value }));
 
+    const toggleRole = (value, checked) => {
+        setForm(p => ({
+            ...p,
+            roles: checked ? [...p.roles, value] : p.roles.filter(v => v !== value),
+        }));
+    };
+
     const submit = (e) => {
         e.preventDefault();
+        if (form.roles.length === 0) { setRolesError(true); return; }
+        setRolesError(false);
+
         const payload = { ...form };
         if (isEdit && !payload.password) delete payload.password;
 
@@ -74,14 +81,20 @@ function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
                             <Label>{isEdit ? 'Nouveau mot de passe' : 'Mot de passe'} {isEdit && <span className="text-slate-400 text-[11px]">(laisser vide pour conserver)</span>}</Label>
                             <Input type="password" value={form.password} onChange={f('password')} required={!isEdit} autoComplete="new-password" />
                         </div>
-                        <div className="space-y-1">
-                            <Label>Rôle</Label>
-                            <Select value={form.role} onValueChange={f('role')}>
-                                <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
-                                <SelectContent>
-                                    {roles?.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
+                        <div className="col-span-2 space-y-1">
+                            <Label>Rôles</Label>
+                            <div className="flex flex-wrap gap-3">
+                                {roles?.map(r => (
+                                    <label key={r.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                                        <Checkbox
+                                            checked={form.roles.includes(r.value)}
+                                            onCheckedChange={(checked) => toggleRole(r.value, checked === true)}
+                                        />
+                                        {r.label}
+                                    </label>
+                                ))}
+                            </div>
+                            {rolesError && <p className="text-xs text-danger">Sélectionnez au moins un rôle.</p>}
                         </div>
                         <div className="space-y-1">
                             <Label>Initiales</Label>
@@ -95,7 +108,7 @@ function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
                         </div>
                         <div className="col-span-2 space-y-1">
                             <Label>Téléphone</Label>
-                            <Input value={form.telephone} onChange={f('telephone')} placeholder="+224 620 000 000" />
+                            <PhoneField value={form.telephone} onValueChange={val => setForm(p => ({ ...p, telephone: val }))} placeholder="622 XX XX XX" />
                         </div>
                     </div>
                     <div className="flex justify-end gap-2 pt-2">
@@ -128,7 +141,7 @@ export default function ParametresUtilisateurs() {
         const q = search.toLowerCase();
         return utilisateurs.filter(u => {
             if (q && !u.name?.toLowerCase().includes(q) && !u.email?.toLowerCase().includes(q)) return false;
-            if (filterRole && u.role !== filterRole) return false;
+            if (filterRole && !u.roles?.includes(filterRole)) return false;
             if (filterActif === 'actif' && !u.actif) return false;
             if (filterActif === 'inactif' && u.actif) return false;
             return true;
@@ -140,7 +153,7 @@ export default function ParametresUtilisateurs() {
 
     /* rôles présents dans la liste */
     const rolesPresents = useMemo(() => {
-        const seen = new Set(utilisateurs.map(u => u.role).filter(Boolean));
+        const seen = new Set(utilisateurs.flatMap(u => u.roles ?? []));
         return roles.filter(r => seen.has(r.value));
     }, [utilisateurs, roles]);
 
@@ -243,7 +256,6 @@ export default function ParametresUtilisateurs() {
                                 </tr>
                             )}
                             {filtered.map(u => {
-                                const rm = ROLE_META[u.role];
                                 return (
                                     <tr key={u.id} className={!u.actif ? 'opacity-60' : ''}>
                                         <td>
@@ -258,10 +270,7 @@ export default function ParametresUtilisateurs() {
                                         </td>
                                         <td className="text-slate-500 text-sm">{u.email}</td>
                                         <td>
-                                            {rm
-                                                ? <span className={`text-[10px] px-2 py-0.5 rounded-full border ${rm.cls}`}>{rm.label}</span>
-                                                : <span className="text-xs text-slate-400">{u.roleLabel}</span>
-                                            }
+                                            <RoleBadgeList roles={u.roles} />
                                         </td>
                                         <td className="text-slate-500 font-mono text-xs">{u.telephone || '—'}</td>
                                         <td className="text-slate-400 text-xs">{u.created_at || '—'}</td>

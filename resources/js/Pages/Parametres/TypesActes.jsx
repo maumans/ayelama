@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import AppLayout from '@/Layouts/AppLayout';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
+import { NumberField } from '@/components/ui/number-field';
 import { Button } from '@/components/ui/button';
 import { FileText, Search, Check, X, Pencil } from 'lucide-react';
 
@@ -45,11 +46,9 @@ function InlineDelaiEdit({ typeActe }) {
     if (editing) {
         return (
             <div className="flex items-center gap-1">
-                <Input
-                    type="number"
-                    min={1}
+                <NumberField
                     value={val}
-                    onChange={e => setVal(e.target.value)}
+                    onValueChange={setVal}
                     onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
                     className="h-6 w-16 text-xs text-center px-1"
                     autoFocus

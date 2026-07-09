@@ -21,23 +21,27 @@ enum RoleUtilisateur: string
         };
     }
 
-    public function peutOuvrir(): bool
+    /** @return self[] */
+    public static function peuventOuvrir(): array
     {
-        return in_array($this, [self::Clerc, self::Administrateur]);
+        return [self::Clerc, self::Notaire, self::Administrateur];
     }
 
-    public function peutReviser(): bool
+    /** @return self[] */
+    public static function peuventReviser(): array
     {
-        return in_array($this, [self::Reviseur, self::Notaire, self::Administrateur]);
+        return [self::Reviseur, self::Notaire, self::Administrateur];
     }
 
-    public function peutSigner(): bool
+    /** @return self[] */
+    public static function peuventSigner(): array
     {
-        return in_array($this, [self::Notaire, self::Administrateur]);
+        return [self::Notaire, self::Administrateur];
     }
 
-    public function peutGererFormalites(): bool
+    /** @return self[] */
+    public static function peuventGererFormalites(): array
     {
-        return in_array($this, [self::Formaliste, self::Notaire, self::Administrateur]);
+        return [self::Formaliste, self::Notaire, self::Administrateur];
     }
 }

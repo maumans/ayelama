@@ -9,14 +9,15 @@ class ModeleActe extends Model
     protected $table = 'modeles_actes';
 
     protected $fillable = [
-        'type_acte_id', 'nom', 'type_document', 'chemin_fichier',
+        'type_acte_id', 'nom', 'type_document', 'categories_cibles', 'chemin_fichier',
         'version', 'est_actif', 'updated_by',
     ];
 
     protected function casts(): array
     {
         return [
-            'est_actif' => 'boolean',
+            'est_actif'         => 'boolean',
+            'categories_cibles' => 'array',
         ];
     }
 
@@ -33,6 +34,15 @@ class ModeleActe extends Model
     public function scopeActif($query)
     {
         return $query->where('est_actif', true);
+    }
+
+    /**
+     * true si ce modèle (typiquement un courrier de transmission) s'applique à la
+     * catégorie d'acte donnée. `categories_cibles` null = applicable à toutes.
+     */
+    public function applicablePour(string $categorieValue): bool
+    {
+        return $this->categories_cibles === null || in_array($categorieValue, $this->categories_cibles, true);
     }
 
     public function typeDocumentLabel(): string

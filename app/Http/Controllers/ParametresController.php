@@ -9,6 +9,7 @@ use App\Models\RevisionGrille;
 use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
+use App\Models\UserRole;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -20,7 +21,7 @@ class ParametresController extends Controller
 {
     public function index()
     {
-        $parRole = User::selectRaw('role, count(*) as n')
+        $parRole = UserRole::selectRaw('role, count(*) as n')
             ->groupBy('role')
             ->get()
             ->map(fn ($r) => ['role' => $r->getRawOriginal('role'), 'count' => (int) $r->n])
@@ -37,12 +38,12 @@ class ParametresController extends Controller
             ->values();
 
         // Données Utilisateurs
-        $utilisateurs = User::orderBy('name')->get()->map(fn ($u) => [
+        $utilisateurs = User::with('roles')->orderBy('name')->get()->map(fn ($u) => [
             'id'         => $u->id,
             'name'       => $u->name,
             'email'      => $u->email,
-            'role'       => $u->role?->value,
-            'roleLabel'  => $u->role?->label(),
+            'roles'      => $u->roleValues(),
+            'roleLabels' => $u->roleLabels(),
             'initiales'  => $u->initiales,
             'telephone'  => $u->telephone,
             'actif'      => $u->actif,
@@ -76,17 +77,7 @@ class ParametresController extends Controller
                 'label'          => $t->label,
                 'categorie'      => $t->categorie?->value,
                 'categorieLabel' => $t->categorie?->label(),
-                'baremes'        => $t->baremes->map(fn ($b) => [
-                    'id'           => $b->id,
-                    'organisme'    => $b->organisme,
-                    'libelle'      => $b->libelle,
-                    'taux'         => $b->taux,
-                    'montant_fixe' => $b->montant_fixe,
-                    'base_calcul'  => $b->base_calcul,
-                    'description'  => $b->description,
-                    'actif'        => $b->actif,
-                    'ordre'        => $b->ordre,
-                ])->values(),
+                'baremes'        => $t->baremes->map(fn ($b) => $this->baremeToArray($b))->values(),
             ]);
 
         $categories = collect(CategorieActe::cases())->map(fn ($c) => [
@@ -133,7 +124,7 @@ class ParametresController extends Controller
             'typesActes'        => $typesActes,
             'baremesTypesActes' => $baremesTypesActes,
             'categories'        => $categories,
-            'organismes'        => ['APIP', 'Impots', 'Conservation', 'CNSS', 'Notaire', 'Autre'],
+            'organismes'        => self::ORGANISMES,
             'grilles'           => $grilles,
             'apparence'         => $settings,
         ]);
@@ -142,12 +133,12 @@ class ParametresController extends Controller
     public function utilisateurs()
     {
         return Inertia::render('Parametres/Utilisateurs', [
-            'utilisateurs' => User::orderBy('name')->get()->map(fn ($u) => [
+            'utilisateurs' => User::with('roles')->orderBy('name')->get()->map(fn ($u) => [
                 'id'         => $u->id,
                 'name'       => $u->name,
                 'email'      => $u->email,
-                'role'       => $u->role?->value,
-                'roleLabel'  => $u->role?->label(),
+                'roles'      => $u->roleValues(),
+                'roleLabels' => $u->roleLabels(),
                 'initiales'  => $u->initiales,
                 'telephone'  => $u->telephone,
                 'actif'      => $u->actif,
@@ -166,20 +157,21 @@ class ParametresController extends Controller
             'name'      => ['required', 'string', 'max:200'],
             'email'     => ['required', 'email', 'unique:users,email'],
             'password'  => ['required', 'string', 'min:8'],
-            'role'      => ['required', 'string', 'in:' . implode(',', array_column(RoleUtilisateur::cases(), 'value'))],
+            'roles'     => ['required', 'array', 'min:1'],
+            'roles.*'   => ['string', 'in:' . implode(',', array_column(RoleUtilisateur::cases(), 'value'))],
             'initiales' => ['nullable', 'string', 'max:5'],
             'telephone' => ['nullable', 'string', 'max:20'],
         ]);
 
-        User::create([
+        $user = User::create([
             'name'      => $data['name'],
             'email'     => $data['email'],
             'password'  => Hash::make($data['password']),
-            'role'      => $data['role'],
             'initiales' => $data['initiales'] ?? strtoupper(substr($data['name'], 0, 2)),
             'telephone' => $data['telephone'] ?? null,
             'actif'     => true,
         ]);
+        $user->syncRoles($data['roles']);
 
         return back()->with('success', 'Utilisateur créé.');
     }
@@ -190,7 +182,8 @@ class ParametresController extends Controller
             'name'      => ['sometimes', 'string', 'max:200'],
             'email'     => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($user->id)],
             'password'  => ['sometimes', 'nullable', 'string', 'min:8'],
-            'role'      => ['sometimes', 'string'],
+            'roles'     => ['sometimes', 'array', 'min:1'],
+            'roles.*'   => ['string', 'in:' . implode(',', array_column(RoleUtilisateur::cases(), 'value'))],
             'initiales' => ['sometimes', 'string', 'max:5'],
             'telephone' => ['sometimes', 'nullable', 'string', 'max:20'],
             'actif'     => ['sometimes', 'boolean'],
@@ -204,7 +197,13 @@ class ParametresController extends Controller
             }
         }
 
+        $roles = $data['roles'] ?? null;
+        unset($data['roles']);
+
         $user->update($data);
+        if ($roles !== null) {
+            $user->syncRoles($roles);
+        }
 
         return back()->with('success', 'Utilisateur mis à jour.');
     }
@@ -239,7 +238,30 @@ class ParametresController extends Controller
         return back()->with('success', 'Type d\'acte mis à jour.');
     }
 
-    // ── Barèmes ──────────────────────────────────────────────────────────
+    // ── Barèmes (facturation + génération automatique de formalités) ───────
+
+    private const ORGANISMES = ['APIP', 'Impots', 'Conservation', 'CNSS', 'Notaire', 'Autre'];
+
+    private function baremeToArray(Bareme $b): array
+    {
+        return [
+            'id'               => $b->id,
+            'organisme'        => $b->organisme,
+            'libelle'          => $b->libelle,
+            'taux'             => $b->taux,
+            'montant_fixe'     => $b->montant_fixe,
+            'base_calcul'      => $b->base_calcul,
+            'description'      => $b->description,
+            'actif'            => $b->actif,
+            'ordre'            => $b->ordre,
+            'genere_formalite' => $b->genere_formalite,
+            'obligatoire'      => $b->obligatoire,
+            'type_impot'       => $b->type_impot,
+            'retour_attendu'   => $b->retour_attendu,
+            'delai_heures'     => $b->delai_heures,
+            'pieces_requises'  => $b->pieces_requises ?? [],
+        ];
+    }
 
     public function baremes(Request $request)
     {
@@ -253,17 +275,7 @@ class ParametresController extends Controller
                 'label'          => $t->label,
                 'categorie'      => $t->categorie?->value,
                 'categorieLabel' => $t->categorie?->label(),
-                'baremes'        => $t->baremes->map(fn ($b) => [
-                    'id'           => $b->id,
-                    'organisme'    => $b->organisme,
-                    'libelle'      => $b->libelle,
-                    'taux'         => $b->taux,
-                    'montant_fixe' => $b->montant_fixe,
-                    'base_calcul'  => $b->base_calcul,
-                    'description'  => $b->description,
-                    'actif'        => $b->actif,
-                    'ordre'        => $b->ordre,
-                ])->values(),
+                'baremes'        => $t->baremes->map(fn ($b) => $this->baremeToArray($b))->values(),
             ]);
 
         return Inertia::render('Parametres/Baremes', [
@@ -272,7 +284,7 @@ class ParametresController extends Controller
                 'value' => $c->value,
                 'label' => $c->label(),
             ]),
-            'organismes' => ['APIP', 'Impots', 'Conservation', 'CNSS', 'Notaire', 'Autre'],
+            'organismes' => self::ORGANISMES,
             'filters'    => $request->only(['categorie']),
             'stats'      => [
                 'total'  => Bareme::count(),
@@ -281,19 +293,51 @@ class ParametresController extends Controller
         ]);
     }
 
+    /**
+     * Vérifie qu'aucun autre Bareme du même type d'acte + organisme ne génère déjà
+     * une formalité (une seule Formalite possible par organisme et par dossier).
+     */
+    private function assertOrganismeFormaliteDisponible(int $typeActeId, string $organisme, ?int $ignoreId = null): void
+    {
+        $conflit = Bareme::where('type_acte_id', $typeActeId)
+            ->where('organisme', $organisme)
+            ->where('genere_formalite', true)
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->exists();
+
+        if ($conflit) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'genere_formalite' => ["Une formalité est déjà générée pour l'organisme « {$organisme} » sur ce type d'acte."],
+            ]);
+        }
+    }
+
     public function storeBareme(Request $request)
     {
         $data = $request->validate([
-            'type_acte_id' => ['required', 'exists:types_actes,id'],
-            'organisme'    => ['required', 'string', 'max:100'],
-            'libelle'      => ['required', 'string', 'max:200'],
-            'taux'         => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'montant_fixe' => ['nullable', 'numeric', 'min:0'],
-            'base_calcul'  => ['required', 'in:valeur_acte,montant_fixe'],
-            'description'  => ['nullable', 'string'],
+            'type_acte_id'      => ['required', 'exists:types_actes,id'],
+            'organisme'         => ['required', 'string', 'max:100'],
+            'libelle'           => ['required', 'string', 'max:200'],
+            'taux'              => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'montant_fixe'      => ['nullable', 'numeric', 'min:0'],
+            'base_calcul'       => ['required', 'in:valeur_acte,montant_fixe'],
+            'description'       => ['nullable', 'string'],
+            'genere_formalite'  => ['boolean'],
+            'obligatoire'       => ['boolean'],
+            'type_impot'        => ['nullable', 'string', 'max:100'],
+            'retour_attendu'    => ['nullable', 'string', 'max:200'],
+            'delai_heures'      => ['nullable', 'integer', 'min:1'],
+            'pieces_requises'   => ['nullable', 'array'],
+            'pieces_requises.*' => ['string', 'max:200'],
         ]);
 
-        Bareme::create($data);
+        if ($data['genere_formalite'] ?? false) {
+            $this->assertOrganismeFormaliteDisponible($data['type_acte_id'], $data['organisme']);
+        }
+
+        Bareme::create(array_merge($data, [
+            'obligatoire' => $data['obligatoire'] ?? true,
+        ]));
 
         return back()->with('success', 'Barème créé.');
     }
@@ -301,15 +345,27 @@ class ParametresController extends Controller
     public function updateBareme(Request $request, Bareme $bareme)
     {
         $data = $request->validate([
-            'organisme'    => ['sometimes', 'string', 'max:100'],
-            'libelle'      => ['sometimes', 'string', 'max:200'],
-            'taux'         => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
-            'montant_fixe' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'base_calcul'  => ['sometimes', 'in:valeur_acte,montant_fixe'],
-            'description'  => ['sometimes', 'nullable', 'string'],
-            'actif'        => ['sometimes', 'boolean'],
-            'ordre'        => ['sometimes', 'integer', 'min:0'],
+            'organisme'         => ['sometimes', 'string', 'max:100'],
+            'libelle'           => ['sometimes', 'string', 'max:200'],
+            'taux'              => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'montant_fixe'      => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'base_calcul'       => ['sometimes', 'in:valeur_acte,montant_fixe'],
+            'description'       => ['sometimes', 'nullable', 'string'],
+            'actif'             => ['sometimes', 'boolean'],
+            'ordre'             => ['sometimes', 'integer', 'min:0'],
+            'genere_formalite'  => ['sometimes', 'boolean'],
+            'obligatoire'       => ['sometimes', 'boolean'],
+            'type_impot'        => ['sometimes', 'nullable', 'string', 'max:100'],
+            'retour_attendu'    => ['sometimes', 'nullable', 'string', 'max:200'],
+            'delai_heures'      => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'pieces_requises'   => ['sometimes', 'nullable', 'array'],
+            'pieces_requises.*' => ['string', 'max:200'],
         ]);
+
+        if ($data['genere_formalite'] ?? false) {
+            $organisme = $data['organisme'] ?? $bareme->organisme;
+            $this->assertOrganismeFormaliteDisponible($bareme->type_acte_id, $organisme, $bareme->id);
+        }
 
         $bareme->update($data);
 

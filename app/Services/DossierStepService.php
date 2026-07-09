@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Enums\EtapeDossier;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
+use App\Models\ModeleActe;
 use App\Models\Revision;
+use App\Models\TypeActe;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
@@ -84,6 +86,7 @@ class DossierStepService
             EtapeDossier::Edition        => $this->verifierEdition($dossier),
             EtapeDossier::Revision       => $this->verifierRevisionValidee($dossier),
             EtapeDossier::Formalites     => $this->verifierFormalites($dossier),
+            EtapeDossier::Expedition     => $this->verifierExpedition($dossier),
             default                      => null,
         };
     }
@@ -146,6 +149,37 @@ class DossierStepService
             $noms = $blocking->pluck('organisme')->join(', ');
             throw ValidationException::withMessages([
                 'formalites' => ["Les formalités suivantes ne sont pas encore clôturées : {$noms}."],
+            ]);
+        }
+    }
+
+    private function verifierExpedition(Dossier $dossier): void
+    {
+        $dossier->loadMissing('typeActe', 'courriers');
+
+        $couCerId = TypeActe::where('code', 'COU-CER')->value('id');
+        if (!$couCerId) {
+            return;
+        }
+
+        $categorie   = $dossier->typeActe?->categorie?->value;
+        $applicables = ModeleActe::where('type_acte_id', $couCerId)
+            ->actif()
+            ->get()
+            ->filter(fn (ModeleActe $m) => $categorie && $m->applicablePour($categorie));
+
+        if ($applicables->isEmpty()) {
+            return;
+        }
+
+        $envoye = $dossier->courriers->contains(
+            fn ($c) => $c->type === 'transmission' && $c->statut === 'envoye'
+        );
+
+        if (!$envoye) {
+            $noms = $applicables->pluck('nom')->join(', ');
+            throw ValidationException::withMessages([
+                'courriers' => ["Au moins une lettre de transmission doit être générée et marquée « envoyée » avant de clôturer ce dossier (ex. : {$noms})."],
             ]);
         }
     }

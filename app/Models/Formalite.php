@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class Formalite extends Model
 {
     protected $fillable = [
-        'dossier_id', 'organisme', 'statut',
+        'dossier_id', 'organisme', 'libelle', 'statut',
         'taux', 'montant_base', 'montant_calcule', 'type_impot',
         'retour_attendu', 'delai_heures',
         'depose_at', 'retour_at', 'echeance_at',
@@ -78,6 +78,11 @@ class Formalite extends Model
             'cnss'                => 'CNSS',
             default               => ucfirst($this->organisme),
         };
+    }
+
+    public function labelAffiche(): string
+    {
+        return $this->libelle ?: $this->labelOrganisme();
     }
 
     public function scopeUrgentes($query)

@@ -2,7 +2,6 @@
 
 namespace App\Http\Middleware;
 
-use App\Enums\RoleUtilisateur;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,11 +20,7 @@ class RoleMiddleware
             return $next($request);
         }
 
-        $userRole = $user->role instanceof RoleUtilisateur
-            ? $user->role->value
-            : $user->role;
-
-        if (!in_array($userRole, $roles)) {
+        if (!$user->hasAnyRole($roles)) {
             abort(403, 'Vous n\'avez pas les droits nécessaires pour accéder à cette ressource.');
         }
 

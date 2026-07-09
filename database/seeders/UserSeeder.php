@@ -16,7 +16,7 @@ class UserSeeder extends Seeder
                 'name'       => 'Ayelama BAH',
                 'email'      => 'ayelama.bah@notaire-guinee.com',
                 'password'   => Hash::make('password'),
-                'role'       => RoleUtilisateur::Notaire,
+                'roles'      => [RoleUtilisateur::Notaire, RoleUtilisateur::Reviseur],
                 'initiales'  => 'AB',
                 'telephone'  => '+224 621 00 00 01',
                 'actif'      => true,
@@ -25,7 +25,7 @@ class UserSeeder extends Seeder
                 'name'       => 'Nènè Aissata Kanté',
                 'email'      => 'nene-aissata.kante@notaire-guinee.com',
                 'password'   => Hash::make('password'),
-                'role'       => RoleUtilisateur::Clerc,
+                'roles'      => [RoleUtilisateur::Clerc],
                 'initiales'  => 'NAK',
                 'telephone'  => '+224 621 00 00 03',
                 'actif'      => true,
@@ -34,7 +34,7 @@ class UserSeeder extends Seeder
                 'name'       => 'Mame Aissata Tafsir Camara',
                 'email'      => 'mame-aissata.camara@notaire-guinee.com',
                 'password'   => Hash::make('password'),
-                'role'       => RoleUtilisateur::Clerc,
+                'roles'      => [RoleUtilisateur::Clerc],
                 'initiales'  => 'MATC',
                 'telephone'  => '+224 621 00 00 05',
                 'actif'      => true,
@@ -43,7 +43,7 @@ class UserSeeder extends Seeder
                 'name'       => 'Ibrahima Sory Fofana',
                 'email'      => 'ibrahima-sory.fofana@notaire-guinee.com',
                 'password'   => Hash::make('password'),
-                'role'       => RoleUtilisateur::Formaliste,
+                'roles'      => [RoleUtilisateur::Formaliste],
                 'initiales'  => 'ISF',
                 'telephone'  => '+224 628 10 06 03',
                 'actif'      => true,
@@ -52,7 +52,7 @@ class UserSeeder extends Seeder
                 'name'       => 'Fatoumata Diallo',
                 'email'      => 'reviseur@ayelama.gn',
                 'password'   => Hash::make('password'),
-                'role'       => RoleUtilisateur::Reviseur,
+                'roles'      => [RoleUtilisateur::Reviseur],
                 'initiales'  => 'FD',
                 'telephone'  => '+224 621 00 00 02',
                 'actif'      => true,
@@ -61,7 +61,7 @@ class UserSeeder extends Seeder
                 'name'       => 'Administrateur',
                 'email'      => 'admin@ayelama.gn',
                 'password'   => Hash::make('password'),
-                'role'       => RoleUtilisateur::Administrateur,
+                'roles'      => [RoleUtilisateur::Administrateur],
                 'initiales'  => 'AD',
                 'telephone'  => '+224 621 00 00 00',
                 'actif'      => true,
@@ -69,7 +69,11 @@ class UserSeeder extends Seeder
         ];
 
         foreach ($users as $data) {
-            User::firstOrCreate(['email' => $data['email']], $data);
+            $roles = $data['roles'];
+            unset($data['roles']);
+
+            $user = User::firstOrCreate(['email' => $data['email']], $data);
+            $user->syncRoles($roles);
         }
     }
 }

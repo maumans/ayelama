@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Client;
 use App\Models\Partie;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -10,13 +11,14 @@ class RepertoireController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Partie::with('dossier.typeActe')
+        $query = Partie::with(['dossier.typeActe', 'client'])
             ->when($request->q, fn ($q, $s) => $q->where(fn ($qq) =>
                 $qq->where('nom',       'like', "%{$s}%")
                    ->orWhere('cni',       'like', "%{$s}%")
                    ->orWhere('telephone', 'like', "%{$s}%")
                    ->orWhere('email',     'like', "%{$s}%")))
             ->when($request->role, fn ($q, $r) => $q->where('role', $r))
+            ->when($request->client_id, fn ($q, $id) => $q->where('client_id', $id))
             ->when($request->sort === 'recent', fn ($q) => $q->orderByDesc('created_at'))
             ->when($request->sort === 'role',   fn ($q) => $q->orderBy('role')->orderBy('nom'))
             ->when(!in_array($request->sort, ['recent', 'role']), fn ($q) => $q->orderBy('nom'));
@@ -25,6 +27,7 @@ class RepertoireController extends Controller
             'total'            => Partie::count(),
             'dossiersCouverts' => Partie::whereNotNull('dossier_id')->distinct()->count('dossier_id'),
             'rolesDisctincts'  => Partie::distinct()->count('role'),
+            'clientsUniques'   => Partie::whereNotNull('client_id')->distinct()->count('client_id'),
             'parRole'          => Partie::selectRaw('role, count(*) as n')
                 ->groupBy('role')
                 ->orderByDesc('n')
@@ -47,6 +50,12 @@ class RepertoireController extends Controller
                 'telephone' => $p->telephone,
                 'email'     => $p->email,
                 'adresse'   => $p->adresse,
+                'client_id' => $p->client_id,
+                'client'    => $p->client ? [
+                    'id'   => $p->client->id,
+                    'type' => $p->client->type,
+                    'nom'  => $p->client->nomComplet(),
+                ] : null,
                 'dossier'   => $p->dossier ? [
                     'reference' => $p->dossier->reference,
                     'objet'     => $p->dossier->objet,
@@ -54,12 +63,14 @@ class RepertoireController extends Controller
                     'etape'     => $p->dossier->etape?->label(),
                 ] : null,
             ]),
-            'stats'   => $stats,
-            'roles'   => $roles,
+            'stats'        => $stats,
+            'roles'        => $roles,
+            'clientFiltre' => $request->client_id ? Client::find($request->client_id)?->nomComplet() : null,
             'filters' => [
-                'q'    => $request->q    ?? '',
-                'role' => $request->role ?? '',
-                'sort' => $request->sort ?? '',
+                'q'         => $request->q         ?? '',
+                'role'      => $request->role      ?? '',
+                'sort'      => $request->sort      ?? '',
+                'client_id' => $request->client_id ?? '',
             ],
         ]);
     }

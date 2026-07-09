@@ -9,7 +9,7 @@ class Courrier extends Model
     protected $fillable = [
         'reference', 'dossier_id', 'redacteur_id',
         'destinataire', 'adresse', 'objet',
-        'type', 'statut', 'contenu', 'envoye_at',
+        'type', 'statut', 'contenu', 'chemin_fichier', 'envoye_at',
     ];
 
     protected function casts(): array

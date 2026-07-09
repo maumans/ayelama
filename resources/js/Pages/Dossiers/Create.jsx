@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
+import { DateField } from '@/components/ui/date-field';
+import { NumberField } from '@/components/ui/number-field';
+import { PhoneField } from '@/components/ui/phone-field';
+import { ClientPicker } from '@/Components/ui/client-picker';
+import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
+import { mapClientToPrefixedFields } from '@/lib/clientFields';
+import { groupFieldsBySection, buildPartiesPayload } from '@/lib/partiesPayload';
+import { notifyValidationError } from '@/lib/toast';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Building2, Home, Scale, Briefcase, Heart, GitBranch,
     FileText, Mail, ChevronLeft, ChevronRight, Check,
-    Users, ArrowRight, AlertCircle, PlusCircle, Edit2, Archive
+    Users, ArrowRight, AlertCircle, PlusCircle, Edit2, Archive, Zap,
+    UserCog, ClipboardCheck, Key, Landmark, Banknote, StickyNote,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 const WIZARD_STEPS = [
@@ -161,7 +171,6 @@ function getQuestionnaire(typeId) {
     ];
 }
 
-
 // Initialise uniquement les champs répétables (pures valeurs par défaut).
 function initRepeatableFields(fields) {
     const init = {};
@@ -174,6 +183,35 @@ function initRepeatableFields(fields) {
     return init;
 }
 
+const SECTION_ICON_RULES = [
+    { test: /société|groupement/i,                                icon: Building2,       iconColor: 'text-blue-600',   iconBg: 'bg-blue-50' },
+    { test: /associé|actionnaire|membre/i,                        icon: Users,           iconColor: 'text-blue-600',   iconBg: 'bg-blue-50' },
+    { test: /gérant|administrat|direction|président|conseil/i,    icon: UserCog,         iconColor: 'text-indigo-600', iconBg: 'bg-indigo-50' },
+    { test: /commissaire/i,                                       icon: ClipboardCheck,  iconColor: 'text-slate-600',  iconBg: 'bg-slate-100' },
+    { test: /bailleur|locataire|preneur|bail/i,                   icon: Key,             iconColor: 'text-cyan-600',   iconBg: 'bg-cyan-50' },
+    { test: /bien|terrain|local|vendeur|acquéreur|acheteur/i,     icon: Home,            iconColor: 'text-emerald-600', iconBg: 'bg-emerald-50' },
+    { test: /banque|créancier|débiteur|emprunteur|hypoth/i,       icon: Landmark,        iconColor: 'text-violet-600', iconBg: 'bg-violet-50' },
+    { test: /transaction/i,                                       icon: Banknote,        iconColor: 'text-amber-600',  iconBg: 'bg-amber-50' },
+    { test: /liquidateur|dissolution/i,                           icon: Archive,         iconColor: 'text-slate-500',  iconBg: 'bg-slate-100' },
+    { test: /modification/i,                                      icon: Edit2,           iconColor: 'text-amber-600',  iconBg: 'bg-amber-50' },
+];
+
+function getSectionMeta(name) {
+    if (!name) return { icon: FileText, iconColor: 'text-slate-400', iconBg: 'bg-slate-100' };
+    return SECTION_ICON_RULES.find(r => r.test.test(name)) ?? { icon: FileText, iconColor: 'text-slate-500', iconBg: 'bg-slate-100' };
+}
+
+function GroupHeader({ icon: Icon, iconColor, iconBg, children }) {
+    return (
+        <div className="flex items-center gap-2 mb-3">
+            <span className={cn('flex h-6 w-6 items-center justify-center rounded-md shrink-0', iconBg)}>
+                <Icon className={cn('h-3.5 w-3.5', iconColor)} />
+            </span>
+            <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wider">{children}</h4>
+        </div>
+    );
+}
+
 export default function DossierCreate() {
     const { typesActes, notaires, reviseurs, formalistes } = usePage().props;
 
@@ -182,12 +220,24 @@ export default function DossierCreate() {
     const [sousGroupe, setSousGroupe] = useState(null);
     const [typeActe, setTypeActe] = useState(null);
     const [formValues, setFormValues] = useState({});
+    const [clientLinks, setClientLinks] = useState({}); // { [clientRole]: clientObject }
+    const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
     const [objet, setObjet] = useState('');
+    const [urgent, setUrgent] = useState(false);
+    const [notes, setNotes] = useState('');
     const [notaireId, setNotaireId] = useState('');
     const [reviseurId, setReviseurId] = useState('');
     const [formalisteId, setFormalisteId] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [errors, setErrors] = useState({});
+
+    // Remonte en haut du contenu défilable à chaque changement d'étape (ou de sous-groupe/type
+    // d'acte à l'étape 2) — sans ça, le scroll reste où l'utilisateur l'a laissé sur l'étape
+    // précédente et la nouvelle étape peut s'afficher en plein milieu, voire tout en bas.
+    useEffect(() => {
+        const scrollable = document.querySelector('main');
+        if (scrollable) scrollable.scrollTop = 0;
+    }, [step, sousGroupe, typeActe?.id]);
 
     // Trouve le TypeActe serveur à partir de la clé questionnaire via TYPE_ACTE_CODE_MAP (inversé).
     const findTypeActeId = () => {
@@ -219,6 +269,29 @@ export default function DossierCreate() {
     const visibleFields = getVisibleFields(questionnaire, formValues);
     const categorieSelected = categories.find(c => c.id === categorie?.id);
     const typeSelected = typeActe;
+
+    const selectType = (type) => {
+        setTypeActe(type);
+        const q = QUESTIONNAIRES[type.id] ?? [];
+        setFormValues(initRepeatableFields(q));
+        setClientLinks({});
+    };
+
+    const applyClientToSection = (group, client) => {
+        const prefix = group.fields[0].id.split('.')[0];
+        const fieldIds = group.fields.map(f => f.id);
+        const mapped = mapClientToPrefixedFields(client, prefix, fieldIds);
+        setFormValues(prev => ({ ...prev, ...mapped }));
+        setClientLinks(prev => ({ ...prev, [group.clientRole]: client }));
+    };
+
+    const unlinkClientFromSection = (role) => {
+        setClientLinks(prev => {
+            const next = { ...prev };
+            delete next[role];
+            return next;
+        });
+    };
 
     const canNext = () => {
         if (step === 0) return !!categorie;
@@ -255,12 +328,15 @@ export default function DossierCreate() {
         router.post('/dossiers', {
             type_acte_id: typeActeId,
             objet: objet,
+            urgent: urgent,
+            notes: notes || undefined,
             notaire_id: notaireId,
             reviseur_id: reviseurId || undefined,
             formaliste_id: formalisteId || undefined,
             donnees: formValues,
+            parties: buildPartiesPayload(questionnaire, formValues, clientLinks),
         }, {
-            onError: (errs) => { setErrors(errs); setSubmitting(false); },
+            onError: (errs) => { setErrors(errs); setSubmitting(false); notifyValidationError(errs); },
             onFinish: () => setSubmitting(false),
         });
     };
@@ -410,11 +486,7 @@ export default function DossierCreate() {
                                                 return (
                                                     <button
                                                         key={type.id + type.label}
-                                                        onClick={() => {
-                                                            setTypeActe(type);
-                                                            const q = QUESTIONNAIRES[type.id] ?? [];
-                                                            setFormValues(initRepeatableFields(q));
-                                                        }}
+                                                        onClick={() => selectType(type)}
                                                         className={cn(
                                                             'w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all',
                                                             isSelected
@@ -461,11 +533,7 @@ export default function DossierCreate() {
                                                 return (
                                                     <button
                                                         key={type.id + type.label}
-                                                        onClick={() => {
-                                                            setTypeActe(type);
-                                                            const q = QUESTIONNAIRES[type.id] ?? [];
-                                                            setFormValues(initRepeatableFields(q));
-                                                        }}
+                                                        onClick={() => selectType(type)}
                                                         className={cn(
                                                             'w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all',
                                                             isSelected
@@ -503,152 +571,252 @@ export default function DossierCreate() {
                                     Questionnaire — <span className="text-slate-500">{typeSelected?.label}</span>
                                 </h2>
 
-                                {/* Champs obligatoires du dossier */}
+                                {/* Champs obligatoires du dossier, organisés par sections */}
                                 <Card className="border-seal/30">
                                     <CardContent className="p-5 space-y-4">
-                                        <div className="space-y-1.5">
-                                            <Label htmlFor="objet">
-                                                Objet du dossier <span className="text-danger">*</span>
-                                            </Label>
-                                            <textarea
-                                                id="objet"
-                                                rows={2}
-                                                placeholder="Description synthétique du dossier (min. 10 caractères)…"
-                                                value={objet}
-                                                onChange={e => setObjet(e.target.value)}
-                                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-                                            />
-                                            {errors.objet && <p className="text-xs text-danger">{errors.objet}</p>}
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label htmlFor="notaire_id">
-                                                Notaire en charge <span className="text-danger">*</span>
-                                            </Label>
-                                            <select
-                                                id="notaire_id"
-                                                value={notaireId}
-                                                onChange={e => setNotaireId(e.target.value)}
-                                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                            >
-                                                <option value="">Choisir un notaire…</option>
-                                                {(notaires ?? []).map(n => (
-                                                    <option key={n.id} value={n.id}>{n.name}{n.initiales ? ` (${n.initiales})` : ''}</option>
-                                                ))}
-                                            </select>
-                                            {errors.notaire_id && <p className="text-xs text-danger">{errors.notaire_id}</p>}
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-1.5">
-                                                <Label htmlFor="reviseur_id">Réviseur</Label>
-                                                <select
-                                                    id="reviseur_id"
-                                                    value={reviseurId}
-                                                    onChange={e => setReviseurId(e.target.value)}
-                                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                >
-                                                    <option value="">Aucun</option>
-                                                    {(reviseurs ?? []).map(r => (
-                                                        <option key={r.id} value={r.id}>{r.name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                <Label htmlFor="formaliste_id">Formaliste</Label>
-                                                <select
-                                                    id="formaliste_id"
-                                                    value={formalisteId}
-                                                    onChange={e => setFormalisteId(e.target.value)}
-                                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                >
-                                                    <option value="">Aucun</option>
-                                                    {(formalistes ?? []).map(f => (
-                                                        <option key={f.id} value={f.id}>{f.name}</option>
-                                                    ))}
-                                                </select>
+
+                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                                            <GroupHeader icon={FileText} iconColor="text-blue-600" iconBg="bg-blue-50">Dossier</GroupHeader>
+                                            <div className="space-y-4">
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="objet">
+                                                        Objet du dossier <span className="text-danger">*</span>
+                                                    </Label>
+                                                    <textarea
+                                                        id="objet"
+                                                        rows={2}
+                                                        placeholder="Description synthétique du dossier (min. 10 caractères)…"
+                                                        value={objet}
+                                                        onChange={e => setObjet(e.target.value)}
+                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                    />
+                                                    {errors.objet && <p className="text-xs text-danger">{errors.objet}</p>}
+                                                </div>
+                                                <label htmlFor="urgent" className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                                                    <Checkbox
+                                                        id="urgent"
+                                                        checked={urgent}
+                                                        onCheckedChange={(checked) => setUrgent(checked === true)}
+                                                    />
+                                                    <span className="flex items-center gap-1.5">
+                                                        <Zap className="h-3.5 w-3.5 text-warning-text" />
+                                                        Dossier urgent
+                                                    </span>
+                                                </label>
                                             </div>
                                         </div>
+
+                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                                            <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">Intervenants</GroupHeader>
+                                            <div className="space-y-4">
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="notaire_id">
+                                                        Notaire en charge <span className="text-danger">*</span>
+                                                    </Label>
+                                                    <select
+                                                        id="notaire_id"
+                                                        value={notaireId}
+                                                        onChange={e => setNotaireId(e.target.value)}
+                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                    >
+                                                        <option value="">Choisir un notaire…</option>
+                                                        {(notaires ?? []).map(n => (
+                                                            <option key={n.id} value={n.id}>{n.name}{n.initiales ? ` (${n.initiales})` : ''}</option>
+                                                        ))}
+                                                    </select>
+                                                    {errors.notaire_id && <p className="text-xs text-danger">{errors.notaire_id}</p>}
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-1.5">
+                                                        <Label htmlFor="reviseur_id">Réviseur</Label>
+                                                        <select
+                                                            id="reviseur_id"
+                                                            value={reviseurId}
+                                                            onChange={e => setReviseurId(e.target.value)}
+                                                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                        >
+                                                            <option value="">Aucun</option>
+                                                            {(reviseurs ?? []).map(r => (
+                                                                <option key={r.id} value={r.id}>{r.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <Label htmlFor="formaliste_id">Formaliste</Label>
+                                                        <select
+                                                            id="formaliste_id"
+                                                            value={formalisteId}
+                                                            onChange={e => setFormalisteId(e.target.value)}
+                                                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                        >
+                                                            <option value="">Aucun</option>
+                                                            {(formalistes ?? []).map(f => (
+                                                                <option key={f.id} value={f.id}>{f.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                                            <GroupHeader icon={StickyNote} iconColor="text-amber-600" iconBg="bg-amber-50">Notes</GroupHeader>
+                                            <div className="space-y-1.5">
+                                                <Label htmlFor="notes">Notes initiales <span className="text-slate-400 text-xs">(optionnel)</span></Label>
+                                                <textarea
+                                                    id="notes"
+                                                    rows={3}
+                                                    placeholder="Contexte, remarques ou instructions particulières pour ce dossier…"
+                                                    value={notes}
+                                                    onChange={e => setNotes(e.target.value)}
+                                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                />
+                                                {errors.notes && <p className="text-xs text-danger">{errors.notes}</p>}
+                                            </div>
+                                        </div>
+
                                     </CardContent>
                                 </Card>
 
-                                {/* Questionnaire spécifique */}
+                                {/* Questionnaire spécifique, groupé par section (icône + grille 2 colonnes) */}
                                 {visibleFields.length > 0 && (
                                     <Card>
                                         <CardContent className="p-5 space-y-4">
-                                            {visibleFields.map((field, idx) => {
-                                                const showSection = field.section && (idx === 0 || visibleFields[idx - 1]?.section !== field.section);
-                                                const isCheckbox = field.type === 'checkbox' || field.type === 'checkbox_required';
+                                            {groupFieldsBySection(visibleFields).map((group, gi) => {
+                                                const meta = getSectionMeta(group.name);
+                                                const Icon = meta.icon;
                                                 return (
-                                                    <React.Fragment key={field.id}>
-                                                        {showSection && (
-                                                            <div className={cn('pb-1', idx > 0 && 'pt-4 border-t border-slate-100 mt-2')}>
-                                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{field.section}</h4>
-                                                            </div>
+                                                    <div key={gi} className="rounded-lg border border-slate-200 bg-white p-4">
+                                                        {group.name && (
+                                                            <GroupHeader icon={Icon} iconColor={meta.iconColor} iconBg={meta.iconBg}>
+                                                                {group.name}
+                                                            </GroupHeader>
                                                         )}
-                                                        {isCheckbox ? (
-                                                            <div className="flex items-center gap-2.5 py-0.5">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    id={field.id}
-                                                                    checked={!!formValues[field.id]}
-                                                                    onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.checked }))}
-                                                                    className="h-4 w-4 rounded border-slate-300 text-seal focus:ring-seal"
+
+                                                        {group.clientRole && (
+                                                            <div className="mb-3">
+                                                                <ClientPicker
+                                                                    placeholder={`Rechercher un client existant (${group.name})…`}
+                                                                    linked={clientLinks[group.clientRole] ?? null}
+                                                                    onSelect={(client) => applyClientToSection(group, client)}
+                                                                    onUnlink={() => unlinkClientFromSection(group.clientRole)}
+                                                                    onCreateNew={() => setCreatingClientForGroup(group)}
                                                                 />
-                                                                <label htmlFor={field.id} className="text-sm text-slate-700 cursor-pointer leading-snug">
-                                                                    {field.label}
-                                                                    {field.required && <span className="text-danger ml-1">*</span>}
-                                                                </label>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="space-y-1.5">
-                                                                <Label htmlFor={field.id}>
-                                                                    {field.label}
-                                                                    {field.required && <span className="text-danger ml-1">*</span>}
-                                                                </Label>
-                                                                {field.note && (
-                                                                    <p className="text-xs text-warning-text flex items-center gap-1">
-                                                                        <AlertCircle className="h-3 w-3" />
-                                                                        {field.note}
-                                                                    </p>
-                                                                )}
-                                                                {field.type === 'repeatable' ? (
-                                                                    <RepeatableGroup
-                                                                        fieldDef={field}
-                                                                        value={formValues[field.id] ?? []}
-                                                                        onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
-                                                                    />
-                                                                ) : field.type === 'textarea' ? (
-                                                                    <textarea
-                                                                        id={field.id}
-                                                                        rows={3}
-                                                                        placeholder={field.placeholder}
-                                                                        value={formValues[field.id] || ''}
-                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-                                                                    />
-                                                                ) : field.type === 'select' ? (
-                                                                    <select
-                                                                        id={field.id}
-                                                                        value={formValues[field.id] || ''}
-                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                                    >
-                                                                        <option value="">— Choisir —</option>
-                                                                        {(field.options ?? []).map(opt => (
-                                                                            <option key={opt} value={opt}>{opt}</option>
-                                                                        ))}
-                                                                    </select>
-                                                                ) : (
-                                                                    <Input
-                                                                        id={field.id}
-                                                                        placeholder={field.placeholder}
-                                                                        value={formValues[field.id] || ''}
-                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                                        className={cn(field.mono && 'font-ref')}
-                                                                    />
-                                                                )}
                                                             </div>
                                                         )}
-                                                    </React.Fragment>
+
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+                                                            {group.fields.map(field => {
+                                                                const isCheckbox = field.type === 'checkbox' || field.type === 'checkbox_required';
+                                                                const isFullWidth = isCheckbox || field.type === 'textarea' || field.type === 'repeatable';
+                                                                return (
+                                                                    <div
+                                                                        key={field.id}
+                                                                        className={cn(
+                                                                            isFullWidth && 'sm:col-span-2',
+                                                                            field.showIf && 'pl-3 border-l-2 border-seal/30'
+                                                                        )}
+                                                                    >
+                                                                        {isCheckbox ? (
+                                                                            <div className="py-0.5">
+                                                                                <div className="flex items-center gap-2.5">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        id={field.id}
+                                                                                        checked={!!formValues[field.id]}
+                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.checked }))}
+                                                                                        className="h-4 w-4 rounded border-slate-300 text-seal focus:ring-seal"
+                                                                                    />
+                                                                                    <label htmlFor={field.id} className="text-sm text-slate-700 cursor-pointer leading-snug">
+                                                                                        {field.label}
+                                                                                        {field.required && <span className="text-danger ml-1">*</span>}
+                                                                                    </label>
+                                                                                </div>
+                                                                                {field.note && (
+                                                                                    <p className="text-xs text-warning-text flex items-center gap-1 mt-1 ml-6">
+                                                                                        <AlertCircle className="h-3 w-3" />
+                                                                                        {field.note}
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="space-y-1.5">
+                                                                                <Label htmlFor={field.id}>
+                                                                                    {field.label}
+                                                                                    {field.required && <span className="text-danger ml-1">*</span>}
+                                                                                </Label>
+                                                                                {field.note && (
+                                                                                    <p className="text-xs text-warning-text flex items-center gap-1">
+                                                                                        <AlertCircle className="h-3 w-3" />
+                                                                                        {field.note}
+                                                                                    </p>
+                                                                                )}
+                                                                                {field.type === 'repeatable' ? (
+                                                                                    <RepeatableGroup
+                                                                                        fieldDef={field}
+                                                                                        value={formValues[field.id] ?? []}
+                                                                                        onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                                                                                    />
+                                                                                ) : field.type === 'textarea' ? (
+                                                                                    <textarea
+                                                                                        id={field.id}
+                                                                                        rows={3}
+                                                                                        placeholder={field.placeholder}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                                                    />
+                                                                                ) : field.type === 'select' ? (
+                                                                                    <select
+                                                                                        id={field.id}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                                                    >
+                                                                                        <option value="">— Choisir —</option>
+                                                                                        {(field.options ?? []).map(opt => (
+                                                                                            <option key={opt} value={opt}>{opt}</option>
+                                                                                        ))}
+                                                                                    </select>
+                                                                                ) : field.type === 'date' ? (
+                                                                                    <DateField
+                                                                                        id={field.id}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onValueChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                                                                                    />
+                                                                                ) : field.type === 'number' ? (
+                                                                                    <NumberField
+                                                                                        id={field.id}
+                                                                                        decimals={field.decimals ?? 0}
+                                                                                        placeholder={field.placeholder}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onValueChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                                                                                        className={cn(field.mono && 'font-ref')}
+                                                                                    />
+                                                                                ) : field.type === 'tel' ? (
+                                                                                    <PhoneField
+                                                                                        id={field.id}
+                                                                                        placeholder={field.placeholder}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onValueChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                                                                                    />
+                                                                                ) : (
+                                                                                    <Input
+                                                                                        id={field.id}
+                                                                                        type={field.type === 'email' ? 'email' : 'text'}
+                                                                                        placeholder={field.placeholder}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                                                                        className={cn(field.mono && 'font-ref')}
+                                                                                    />
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
                                                 );
                                             })}
                                         </CardContent>
@@ -755,6 +923,15 @@ export default function DossierCreate() {
                 </div>
 
             </div>
+
+            <ModalNouveauClient
+                open={creatingClientForGroup !== null}
+                onClose={() => setCreatingClientForGroup(null)}
+                onCreated={(client) => {
+                    applyClientToSection(creatingClientForGroup, client);
+                    setCreatingClientForGroup(null);
+                }}
+            />
         </AppLayout>
     );
 }

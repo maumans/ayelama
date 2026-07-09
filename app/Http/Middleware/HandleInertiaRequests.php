@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\RoleUtilisateur;
 use App\Models\Dossier;
 use App\Models\Setting;
 use Illuminate\Http\Request;
@@ -64,20 +65,20 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'user' => $user ? [
-                    'id'        => $user->id,
-                    'name'      => $user->name,
-                    'email'     => $user->email,
-                    'role'      => $user->role?->value,
-                    'roleLabel' => $user->role?->label(),
-                    'initiales' => $user->initiales,
-                    'avatar'    => $user->avatar,
-                    'actif'     => $user->actif,
-                    'can'       => [
+                    'id'         => $user->id,
+                    'name'       => $user->name,
+                    'email'      => $user->email,
+                    'roles'      => $user->roleValues(),
+                    'roleLabels' => $user->roleLabels(),
+                    'initiales'  => $user->initiales,
+                    'avatar'     => $user->avatar,
+                    'actif'      => $user->actif,
+                    'can'        => [
                         'creerDossier'    => $user->can('create', \App\Models\Dossier::class),
-                        'reviser'         => $user->role?->peutReviser() ?? false,
-                        'signer'          => $user->role?->peutSigner() ?? false,
-                        'gererFormalites' => $user->role?->peutGererFormalites() ?? false,
-                        'administrer'     => $user->role?->value === 'administrateur',
+                        'reviser'         => $user->hasAnyRole(RoleUtilisateur::peuventReviser()),
+                        'signer'          => $user->hasAnyRole(RoleUtilisateur::peuventSigner()),
+                        'gererFormalites' => $user->hasAnyRole(RoleUtilisateur::peuventGererFormalites()),
+                        'administrer'     => $user->hasRole(RoleUtilisateur::Administrateur),
                     ],
                 ] : null,
             ],

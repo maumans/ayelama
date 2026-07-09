@@ -5,30 +5,27 @@ import AppLayout from '@/Layouts/AppLayout';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumberField } from '@/components/ui/number-field';
+import { PhoneField } from '@/components/ui/phone-field';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import {
     AlertTriangle, Check, CheckCircle, CheckCircle2, ChevronDown, ChevronUp,
-    ClipboardList, FileText, GripVertical, Palette, Pencil, Percent, Plus,
+    ClipboardCheck, ClipboardList, FileText, GripVertical, Palette, Pencil, Percent, Plus,
     Scale, Search, Settings, Shield, Trash2, Upload, Users, X, XCircle,
 } from 'lucide-react';
+import { ROLE_META } from '@/data/roles';
+import { RoleBadgeList } from '@/components/ui/role-badge';
 
 /* ═══════════════════════════════════════════════════════════
    Metadata
 ═══════════════════════════════════════════════════════════ */
-
-const ROLE_META = {
-    administrateur: { label: 'Admin',     cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-    notaire:        { label: 'Notaire',   cls: 'bg-ink/5 text-ink border-ink/20' },
-    reviseur:       { label: 'Réviseur',  cls: 'bg-purple-50 text-purple-700 border-purple-200' },
-    clerc:          { label: 'Clerc',     cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-    formaliste:     { label: 'Formaliste',cls: 'bg-orange-50 text-orange-700 border-orange-200' },
-};
 
 const CAT_BAR = {
     immobilier: 'bg-blue-500',
@@ -108,17 +105,19 @@ function HealthBar({ label, value, max, barColor }) {
    Tab: Utilisateurs
 ═══════════════════════════════════════════════════════════ */
 
-const EMPTY_USER_FORM = { name: '', email: '', password: '', role: '', initiales: '', telephone: '' };
+const EMPTY_USER_FORM = { name: '', email: '', password: '', roles: [], initiales: '', telephone: '' };
 
 function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
     const isEdit = Boolean(utilisateur);
     const [form, setForm] = useState(EMPTY_USER_FORM);
+    const [rolesError, setRolesError] = useState(false);
 
     useEffect(() => {
         if (open) {
+            setRolesError(false);
             setForm(isEdit ? {
                 name: utilisateur.name ?? '', email: utilisateur.email ?? '',
-                password: '', role: utilisateur.role ?? '',
+                password: '', roles: utilisateur.roles ?? [],
                 initiales: utilisateur.initiales ?? '', telephone: utilisateur.telephone ?? '',
             } : EMPTY_USER_FORM);
         }
@@ -126,8 +125,18 @@ function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
 
     const f = (k) => (e) => setForm(p => ({ ...p, [k]: typeof e === 'string' ? e : e.target.value }));
 
+    const toggleRole = (value, checked) => {
+        setForm(p => ({
+            ...p,
+            roles: checked ? [...p.roles, value] : p.roles.filter(v => v !== value),
+        }));
+    };
+
     const submit = (e) => {
         e.preventDefault();
+        if (form.roles.length === 0) { setRolesError(true); return; }
+        setRolesError(false);
+
         const payload = { ...form };
         if (isEdit && !payload.password) delete payload.password;
         const opts = { onSuccess: onClose, preserveState: true };
@@ -158,14 +167,20 @@ function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
                             </Label>
                             <Input type="password" value={form.password} onChange={f('password')} required={!isEdit} autoComplete="new-password" />
                         </div>
-                        <div className="space-y-1">
-                            <Label>Rôle</Label>
-                            <Select value={form.role} onValueChange={f('role')}>
-                                <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
-                                <SelectContent>
-                                    {roles?.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
+                        <div className="col-span-2 space-y-1">
+                            <Label>Rôles</Label>
+                            <div className="flex flex-wrap gap-3">
+                                {roles?.map(r => (
+                                    <label key={r.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                                        <Checkbox
+                                            checked={form.roles.includes(r.value)}
+                                            onCheckedChange={(checked) => toggleRole(r.value, checked === true)}
+                                        />
+                                        {r.label}
+                                    </label>
+                                ))}
+                            </div>
+                            {rolesError && <p className="text-xs text-danger">Sélectionnez au moins un rôle.</p>}
                         </div>
                         <div className="space-y-1">
                             <Label>Initiales</Label>
@@ -175,7 +190,7 @@ function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
                         </div>
                         <div className="col-span-2 space-y-1">
                             <Label>Téléphone</Label>
-                            <Input value={form.telephone} onChange={f('telephone')} placeholder="+224 620 000 000" />
+                            <PhoneField value={form.telephone} onValueChange={val => setForm(p => ({ ...p, telephone: val }))} placeholder="622 XX XX XX" />
                         </div>
                     </div>
                     <div className="flex justify-end gap-2 pt-2">
@@ -197,7 +212,7 @@ function TabUtilisateurs({ utilisateurs = [], roles = [] }) {
     const toggleActif = (u) => router.patch(`/parametres/utilisateurs/${u.id}`, { actif: !u.actif }, { preserveState: true });
 
     const rolesPresents = useMemo(() => {
-        const seen = new Set(utilisateurs.map(u => u.role).filter(Boolean));
+        const seen = new Set(utilisateurs.flatMap(u => u.roles ?? []));
         return roles.filter(r => seen.has(r.value));
     }, [utilisateurs, roles]);
 
@@ -205,7 +220,7 @@ function TabUtilisateurs({ utilisateurs = [], roles = [] }) {
         const q = search.toLowerCase();
         return utilisateurs.filter(u => {
             if (q && !u.name?.toLowerCase().includes(q) && !u.email?.toLowerCase().includes(q)) return false;
-            if (filterRole && u.role !== filterRole) return false;
+            if (filterRole && !u.roles?.includes(filterRole)) return false;
             if (filterActif === 'actif' && !u.actif) return false;
             if (filterActif === 'inactif' && u.actif) return false;
             return true;
@@ -272,7 +287,6 @@ function TabUtilisateurs({ utilisateurs = [], roles = [] }) {
                             <tr><td colSpan={7} className="text-center text-slate-400 text-sm py-8 italic">Aucun utilisateur trouvé.</td></tr>
                         )}
                         {filtered.map(u => {
-                            const rm = ROLE_META[u.role];
                             return (
                                 <tr key={u.id} className={!u.actif ? 'opacity-60' : ''}>
                                     <td>
@@ -285,10 +299,7 @@ function TabUtilisateurs({ utilisateurs = [], roles = [] }) {
                                     </td>
                                     <td className="text-slate-500 text-sm">{u.email}</td>
                                     <td>
-                                        {rm
-                                            ? <span className={`text-[10px] px-2 py-0.5 rounded-full border ${rm.cls}`}>{rm.label}</span>
-                                            : <span className="text-xs text-slate-400">{u.roleLabel}</span>
-                                        }
+                                        <RoleBadgeList roles={u.roles} />
                                     </td>
                                     <td className="text-slate-500 font-mono text-xs">{u.telephone || '—'}</td>
                                     <td className="text-slate-400 text-xs">{u.created_at || '—'}</td>
@@ -409,7 +420,7 @@ function ModalTypeActe({ open, onClose }) {
                     </div>
                     <div className="space-y-1.5">
                         <Label>Délai de traitement (jours)</Label>
-                        <Input type="number" min={1} value={form.delai_jours} onChange={f('delai_jours')} required />
+                        <NumberField value={form.delai_jours} onValueChange={val => setForm(p => ({ ...p, delai_jours: val }))} required />
                     </div>
                     <div className="space-y-1.5">
                         <Label>Description <span className="text-slate-400">(optionnel)</span></Label>
@@ -439,7 +450,7 @@ function InlineDelaiEdit({ typeActe }) {
 
     if (editing) return (
         <div className="flex items-center gap-1">
-            <Input type="number" min={1} value={val} onChange={e => setVal(e.target.value)}
+            <NumberField value={val} onValueChange={setVal}
                 onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
                 className="h-6 w-16 text-xs text-center px-1" autoFocus />
             <button onClick={save}   className="text-green-600 hover:text-green-700"><Check className="h-3.5 w-3.5" /></button>
@@ -555,20 +566,34 @@ function TabTypesActes({ typesActes = [] }) {
    Tab: Barèmes
 ═══════════════════════════════════════════════════════════ */
 
+const EMPTY_BAREME_FORM = {
+    type_acte_id: '', organisme: 'Impots', libelle: '',
+    taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '',
+    genere_formalite: false, obligatoire: true,
+    type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
+};
+
 function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
-    const [form, setForm] = useState({
-        type_acte_id: '', organisme: 'Impots', libelle: '',
-        taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '',
-    });
+    const [form, setForm] = useState(EMPTY_BAREME_FORM);
+    const [nouvellePiece, setNouvellePiece] = useState('');
     const [errors, setErrors] = useState({});
+
+    const ajouterPiece = () => {
+        const label = nouvellePiece.trim();
+        if (!label) return;
+        setForm(f => ({ ...f, pieces_requises: [...f.pieces_requises, label] }));
+        setNouvellePiece('');
+    };
+    const retirerPiece = (i) => setForm(f => ({ ...f, pieces_requises: f.pieces_requises.filter((_, idx) => idx !== i) }));
 
     const submit = () => {
         router.post('/parametres/baremes', {
             ...form,
             taux:         form.taux         !== '' ? parseFloat(form.taux)         : null,
             montant_fixe: form.montant_fixe !== '' ? parseFloat(form.montant_fixe) : null,
+            delai_heures: form.delai_heures !== '' ? parseInt(form.delai_heures, 10) : null,
         }, {
-            onSuccess: () => { onClose(); setForm({ type_acte_id: '', organisme: 'Impots', libelle: '', taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '' }); },
+            onSuccess: () => { onClose(); setForm(EMPTY_BAREME_FORM); setNouvellePiece(''); },
             onError: setErrors,
         });
     };
@@ -619,9 +644,9 @@ function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
                         <div className="space-y-1.5">
                             <Label>Taux (%)</Label>
                             <div className="relative">
-                                <Input type="number" step="0.0001" min="0" max="100" placeholder="2.5"
+                                <NumberField decimals={4} placeholder="2.5"
                                     className="pr-8" value={form.taux}
-                                    onChange={e => setForm(f => ({ ...f, taux: e.target.value }))} />
+                                    onValueChange={val => setForm(f => ({ ...f, taux: val }))} />
                                 <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                             </div>
                             {errors.taux && <p className="text-xs text-red-600">{errors.taux}</p>}
@@ -630,14 +655,91 @@ function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
                         <div className="space-y-1.5">
                             <Label>Montant fixe (GNF)</Label>
                             <div className="relative">
-                                <Input type="number" step="1000" min="0" placeholder="50000"
+                                <NumberField placeholder="50000"
                                     className="pr-14" value={form.montant_fixe}
-                                    onChange={e => setForm(f => ({ ...f, montant_fixe: e.target.value }))} />
+                                    onValueChange={val => setForm(f => ({ ...f, montant_fixe: val }))} />
                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-ref">GNF</span>
                             </div>
                             {errors.montant_fixe && <p className="text-xs text-red-600">{errors.montant_fixe}</p>}
                         </div>
                     )}
+
+                    <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                        <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                            <Checkbox checked={form.genere_formalite}
+                                onCheckedChange={(checked) => setForm(f => ({ ...f, genere_formalite: checked === true }))} />
+                            <span className="flex items-center gap-1.5">
+                                <ClipboardCheck className="h-3.5 w-3.5 text-seal-hover" />
+                                Génère automatiquement une formalité à la création du dossier
+                            </span>
+                        </label>
+                        {errors.genere_formalite && <p className="text-xs text-red-600">{errors.genere_formalite}</p>}
+
+                        {form.genere_formalite && (
+                            <div className="space-y-3 pt-1">
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div className="space-y-1.5">
+                                        <Label>Type d'impôt <span className="text-slate-400 text-xs">(optionnel)</span></Label>
+                                        <Input value={form.type_impot} onChange={e => setForm(f => ({ ...f, type_impot: e.target.value }))}
+                                            placeholder="droits_enregistrement" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label>Retour attendu <span className="text-slate-400 text-xs">(optionnel)</span></Label>
+                                        <Input value={form.retour_attendu} onChange={e => setForm(f => ({ ...f, retour_attendu: e.target.value }))}
+                                            placeholder="Titre foncier mis à jour" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label>Délai <span className="text-slate-400 text-xs">(heures)</span></Label>
+                                        <NumberField value={form.delai_heures}
+                                            onValueChange={val => setForm(f => ({ ...f, delai_heures: val }))} placeholder="72" />
+                                    </div>
+                                </div>
+
+                                <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                                    <Checkbox checked={form.obligatoire}
+                                        onCheckedChange={(checked) => setForm(f => ({ ...f, obligatoire: checked === true }))} />
+                                    Formalité obligatoire pour ce type d'acte
+                                </label>
+
+                                <div className="space-y-1.5">
+                                    <Label>
+                                        Pièces requises
+                                        {form.pieces_requises.length > 0 && (
+                                            <span className="ml-2 text-xs font-normal text-slate-400">
+                                                {form.pieces_requises.length} pièce{form.pieces_requises.length > 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                    </Label>
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 min-h-[56px] flex flex-col gap-1.5">
+                                        {form.pieces_requises.length === 0 && (
+                                            <p className="text-xs text-slate-400 text-center my-auto py-3">
+                                                Aucune pièce ajoutée — saisissez ci-dessous
+                                            </p>
+                                        )}
+                                        {form.pieces_requises.map((label, i) => (
+                                            <div key={i} className="flex items-center gap-2 bg-white rounded-md border border-slate-200 px-2.5 py-1.5 group">
+                                                <span className="flex-1 text-sm text-slate-700">{label}</span>
+                                                <button type="button" onClick={() => retirerPiece(i)}
+                                                    className="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                                                    <X className="h-3.5 w-3.5" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Input value={nouvellePiece} onChange={e => setNouvellePiece(e.target.value)}
+                                            placeholder="ex : Copie CNI vendeur, Titre foncier original…"
+                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); ajouterPiece(); } }} />
+                                        <Button type="button" variant="outline" size="sm" onClick={ajouterPiece}
+                                            disabled={!nouvellePiece.trim()} className="shrink-0">
+                                            <Plus className="h-3.5 w-3.5 mr-1" /> Ajouter
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="space-y-1.5">
                         <Label>Description <span className="text-slate-400">(optionnel)</span></Label>
                         <Input placeholder="Note ou précision" value={form.description}
@@ -713,7 +815,15 @@ function TypeActeRow({ typeActe }) {
                                                 {b.organisme}
                                             </span>
                                         </td>
-                                        <td className="font-medium text-sm text-slate-700">{b.libelle}</td>
+                                        <td className="font-medium text-sm text-slate-700">
+                                            {b.libelle}
+                                            {b.genere_formalite && (
+                                                <span title="Génère une formalité à la création du dossier"
+                                                    className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0 rounded-full bg-ink/10 text-ink font-medium align-middle">
+                                                    <ClipboardCheck className="h-2.5 w-2.5" /> Formalité
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="text-xs text-slate-500">
                                             {b.base_calcul === 'valeur_acte' ? '% valeur acte' : 'Montant fixe'}
                                         </td>

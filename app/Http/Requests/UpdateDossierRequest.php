@@ -2,13 +2,15 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\RoleUtilisateur;
+use App\Rules\UtilisateurPossedeRole;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateDossierRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->actif ?? false;
+        return $this->user()?->can('update', $this->route('dossier')) ?? false;
     }
 
     public function rules(): array
@@ -17,9 +19,11 @@ class UpdateDossierRequest extends FormRequest
             'objet'           => ['sometimes', 'string', 'min:10', 'max:500'],
             'valeur'          => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'echeance'        => ['sometimes', 'nullable', 'date'],
-            'notaire_id'      => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
-            'reviseur_id'     => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
-            'formaliste_id'   => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'urgent'          => ['sometimes', 'boolean'],
+            'notes'           => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'notaire_id'      => ['sometimes', 'nullable', 'integer', 'exists:users,id', new UtilisateurPossedeRole(RoleUtilisateur::Notaire)],
+            'reviseur_id'     => ['sometimes', 'nullable', 'integer', 'exists:users,id', new UtilisateurPossedeRole(RoleUtilisateur::Reviseur)],
+            'formaliste_id'   => ['sometimes', 'nullable', 'integer', 'exists:users,id', new UtilisateurPossedeRole(RoleUtilisateur::Formaliste)],
             // Questionnaire — champs scalaires et blocs répétables (associés, gérants…)
             'donnees'         => ['sometimes', 'nullable', 'array'],
             'donnees.*'       => ['nullable'],

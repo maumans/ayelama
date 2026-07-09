@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     LayoutDashboard, FolderOpen, ClipboardCheck, Building2,
     FileText, Users, Mail, Settings, Bell, Search,
-    ChevronLeft, ChevronRight, Plus, LogOut, User,
+    ChevronLeft, ChevronRight, LogOut, User,
     Menu
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -13,6 +13,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import GlobalSearch from '@/components/GlobalSearch';
+import { Toaster } from '@/Components/ui/toaster';
+import { toast } from '@/lib/toast';
 
 /* ── Helpers couleurs dynamiques ───────────────────────────────────── */
 
@@ -119,8 +121,8 @@ function buildNavItems(can, notifications) {
     return [
         { href: '/dashboard',  label: 'Tableau de bord',  icon: LayoutDashboard, show: true },
         { href: '/dossiers',   label: 'Dossiers',          icon: FolderOpen,      show: true },
-        { href: '/revisions',  label: 'Révisions',         icon: ClipboardCheck,  show: true, badge: notifications?.revisionCount || null },
-        { href: '/formalites', label: 'Formalités',        icon: Building2,       show: true, badge: notifications?.urgentCount || null },
+        { href: '/revisions',  label: 'Révisions',         icon: ClipboardCheck,  show: can?.reviser || can?.administrer, badge: notifications?.revisionCount || null },
+        { href: '/formalites', label: 'Formalités',        icon: Building2,       show: can?.gererFormalites || can?.administrer, badge: notifications?.urgentCount || null },
         { href: '/modeles',    label: "Modèles d'actes",   icon: FileText,        show: true },
         { href: '/repertoire', label: 'Répertoire',        icon: Users,           show: true },
         { href: '/courriers',  label: 'Courriers',         icon: Mail,            show: true },
@@ -128,7 +130,7 @@ function buildNavItems(can, notifications) {
 }
 
 export default function AppLayout({ children, breadcrumbs = [] }) {
-    const { auth, notifications, apparence } = usePage().props;
+    const { auth, notifications, apparence, flash } = usePage().props;
     const user = auth?.user;
     const can  = user?.can ?? {};
     const [collapsed, setCollapsed] = useState(false);
@@ -137,11 +139,22 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
     useTheme(apparence);
     const currentPath = usePage().url;
 
+    // Affiche automatiquement un toast à chaque message flash posé par le
+    // serveur (`->with('success'|'error', ...)`) — couvre la quasi-totalité des
+    // actions de l'app sans avoir à instrumenter chaque appel `router.*`.
+    useEffect(() => {
+        if (flash?.success) toast.success(flash.success);
+    }, [flash?.success]);
+    useEffect(() => {
+        if (flash?.error) toast.error(flash.error);
+    }, [flash?.error]);
+
     const navItems    = buildNavItems(can, notifications);
     const totalAlerts = (notifications?.urgentCount || 0) + (notifications?.revisionCount || 0);
 
     const initials = user?.initiales
         || (user?.name ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'U');
+    const roleDisplay = (user?.roleLabels ?? []).join(' · ');
 
     return (
         <TooltipProvider delayDuration={300}>
@@ -281,7 +294,7 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                                                 className="flex-1 text-left overflow-hidden"
                                             >
                                                 <div className="text-xs font-medium text-white truncate">{user?.name || 'Utilisateur'}</div>
-                                                <div className="text-[10px] text-slate-400 truncate">{user?.roleLabel || user?.role || ''}</div>
+                                                <div className="text-[10px] text-slate-400 truncate">{roleDisplay}</div>
                                             </motion.div>
                                         )}
                                     </AnimatePresence>
@@ -290,7 +303,7 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                             <DropdownMenuContent side="right" align="end" className="w-48">
                                 <DropdownMenuLabel className="font-normal">
                                     <div className="font-medium">{user?.name}</div>
-                                    <div className="text-xs text-slate-500">{user?.roleLabel}</div>
+                                    <div className="text-xs text-slate-500">{roleDisplay}</div>
                                 </DropdownMenuLabel>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem asChild>
@@ -358,16 +371,6 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                             <kbd className="text-xs text-slate-300 font-mono">⌘K</kbd>
                         </button>
 
-                        {/* Nouveau dossier (clercs et notaires) */}
-                        {can?.creerDossier && (
-                            <Button size="sm" variant="seal" asChild>
-                                <Link href="/dossiers/create">
-                                    <Plus className="h-3.5 w-3.5" />
-                                    <span className="hidden sm:inline">Nouveau dossier</span>
-                                </Link>
-                            </Button>
-                        )}
-
                         {/* Notifications */}
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -394,7 +397,7 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                             <DropdownMenuContent align="end" className="w-48">
                                 <DropdownMenuLabel className="font-normal">
                                     <div className="font-medium">{user?.name}</div>
-                                    <div className="text-xs text-slate-500">{user?.roleLabel}</div>
+                                    <div className="text-xs text-slate-500">{roleDisplay}</div>
                                 </DropdownMenuLabel>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem asChild>
@@ -426,6 +429,7 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                     </main>
                 </div>
             </div>
+            <Toaster />
         </TooltipProvider>
     );
 }

@@ -19,9 +19,10 @@ import {
 } from '@/components/ui/tooltip';
 import {
     ArrowUpDown, CalendarDays, CheckCircle2, ChevronDown, ChevronUp,
-    Clock, FileText, FolderOpen, Mail, Pencil, Plus, RotateCcw,
+    Clock, Download, Eye, FileText, FolderOpen, Mail, Pencil, Plus, RotateCcw,
     Search, Send, Trash2, X,
 } from 'lucide-react';
+import DocumentPreviewModal from '@/Components/documents/DocumentPreviewModal';
 
 /* ─── constants ─────────────────────────────────────────── */
 
@@ -172,7 +173,7 @@ function ModalCourrier({ open, onClose, courrier = null, dossiers }) {
 
 /* ─── CourrierRow ────────────────────────────────────────── */
 
-function CourrierRow({ c, onEdit, idx }) {
+function CourrierRow({ c, onEdit, onPreview, idx }) {
     const [showContenu, setShowContenu] = useState(false);
     const [confirmState, setConfirmState] = useState(null);
     const typeMeta = getTypeMeta(c.type);
@@ -296,6 +297,34 @@ function CourrierRow({ c, onEdit, idx }) {
                                 </Tooltip>
                             )}
 
+                            {c.has_file && (
+                                <>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button variant="ghost" size="icon-sm"
+                                                className="h-7 w-7 text-slate-400 hover:text-ink"
+                                                onClick={() => onPreview({ id: c.id, nom: c.objet, chemin_fichier: c.chemin_fichier }, c.url_preview, c.url_download)}
+                                            >
+                                                <Eye className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent><p className="text-xs">Aperçu</p></TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button variant="ghost" size="icon-sm" asChild
+                                                className="h-7 w-7 text-slate-400 hover:text-ink"
+                                            >
+                                                <a href={c.url_download} download>
+                                                    <Download className="h-3.5 w-3.5" />
+                                                </a>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent><p className="text-xs">Télécharger</p></TooltipContent>
+                                    </Tooltip>
+                                </>
+                            )}
+
                             {c.contenu && (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
@@ -360,6 +389,8 @@ export default function CourriersIndex({ courriers, dossiers = [], stats = {}, f
     const [statut, setStatut] = useState(init.statut ?? '');
     const [sort,   setSort]   = useState(init.sort   ?? '');
     const [modal,  setModal]  = useState({ open: false, courrier: null });
+    const [previewDoc, setPreviewDoc] = useState(null);
+    const openPreview = (doc, previewUrl, downloadUrl) => setPreviewDoc({ doc, previewUrl, downloadUrl });
     const firstRender = useRef(true);
 
     const apply = useCallback((params) => {
@@ -562,6 +593,7 @@ export default function CourriersIndex({ courriers, dossiers = [], stats = {}, f
                                 c={c}
                                 idx={i}
                                 onEdit={(c) => setModal({ open: true, courrier: c })}
+                                onPreview={openPreview}
                             />
                         ))}
                     </div>
@@ -596,6 +628,14 @@ export default function CourriersIndex({ courriers, dossiers = [], stats = {}, f
                 courrier={modal.courrier}
                 dossiers={dossiers}
             />
+            {previewDoc && (
+                <DocumentPreviewModal
+                    doc={previewDoc.doc}
+                    previewUrl={previewDoc.previewUrl}
+                    downloadUrl={previewDoc.downloadUrl}
+                    onClose={() => setPreviewDoc(null)}
+                />
+            )}
         </AppLayout>
     );
 }
