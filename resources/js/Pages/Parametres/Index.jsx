@@ -573,10 +573,33 @@ const EMPTY_BAREME_FORM = {
     type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
 };
 
-function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
+function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organismes }) {
+    const isEdit = Boolean(bareme);
     const [form, setForm] = useState(EMPTY_BAREME_FORM);
     const [nouvellePiece, setNouvellePiece] = useState('');
     const [errors, setErrors] = useState({});
+
+    useEffect(() => {
+        if (open) {
+            setForm(isEdit ? {
+                type_acte_id:     String(bareme.type_acte_id ?? ''),
+                organisme:        bareme.organisme ?? 'Impots',
+                libelle:          bareme.libelle ?? '',
+                taux:             bareme.taux ?? '',
+                montant_fixe:     bareme.montant_fixe ?? '',
+                base_calcul:      bareme.base_calcul ?? 'valeur_acte',
+                description:      bareme.description ?? '',
+                genere_formalite: !!bareme.genere_formalite,
+                obligatoire:      bareme.obligatoire ?? true,
+                type_impot:       bareme.type_impot ?? '',
+                retour_attendu:   bareme.retour_attendu ?? '',
+                delai_heures:     bareme.delai_heures ?? '',
+                pieces_requises:  bareme.pieces_requises ?? [],
+            } : EMPTY_BAREME_FORM);
+            setErrors({});
+            setNouvellePiece('');
+        }
+    }, [open, bareme?.id]);
 
     const ajouterPiece = () => {
         const label = nouvellePiece.trim();
@@ -587,28 +610,31 @@ function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
     const retirerPiece = (i) => setForm(f => ({ ...f, pieces_requises: f.pieces_requises.filter((_, idx) => idx !== i) }));
 
     const submit = () => {
-        router.post('/parametres/baremes', {
+        const payload = {
             ...form,
             taux:         form.taux         !== '' ? parseFloat(form.taux)         : null,
             montant_fixe: form.montant_fixe !== '' ? parseFloat(form.montant_fixe) : null,
             delai_heures: form.delai_heures !== '' ? parseInt(form.delai_heures, 10) : null,
-        }, {
-            onSuccess: () => { onClose(); setForm(EMPTY_BAREME_FORM); setNouvellePiece(''); },
-            onError: setErrors,
-        });
+        };
+        const opts = { onSuccess: () => onClose(), onError: setErrors };
+        if (isEdit) {
+            router.patch(`/parametres/baremes/${bareme.id}`, payload, opts);
+        } else {
+            router.post('/parametres/baremes', payload, opts);
+        }
     };
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle className="font-serif text-ink">Nouveau barème</DialogTitle>
+                    <DialogTitle className="font-serif text-ink">{isEdit ? 'Modifier le barème' : 'Nouveau barème'}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                             <Label>Type d'acte</Label>
-                            <Select value={form.type_acte_id} onValueChange={v => setForm(f => ({ ...f, type_acte_id: v }))}>
+                            <Select value={form.type_acte_id} onValueChange={v => setForm(f => ({ ...f, type_acte_id: v }))} disabled={isEdit}>
                                 <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
                                 <SelectContent>
                                     {typesActes?.map(t => <SelectItem key={t.id} value={String(t.id)}>{t.label}</SelectItem>)}
@@ -748,14 +774,14 @@ function ModalAjouterBareme({ open, onClose, typesActes, organismes }) {
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annuler</Button>
-                    <Button variant="seal" onClick={submit}>Ajouter le barème</Button>
+                    <Button variant="seal" onClick={submit}>{isEdit ? 'Enregistrer' : 'Ajouter le barème'}</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
     );
 }
 
-function TypeActeRow({ typeActe }) {
+function TypeActeRow({ typeActe, onEdit }) {
     const [open, setOpen] = useState((typeActe.baremes?.length ?? 0) > 0);
     const [confirmState, setConfirmState] = useState(null);
 
@@ -835,10 +861,16 @@ function TypeActeRow({ typeActe }) {
                                         </td>
                                         <td><Switch checked={b.actif} onCheckedChange={() => toggleActif(b)} /></td>
                                         <td>
-                                            <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-red-500"
-                                                onClick={() => supprimer(b)}>
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                            </Button>
+                                            <div className="flex items-center gap-0.5">
+                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-ink"
+                                                    onClick={() => onEdit?.(b)}>
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-red-500"
+                                                    onClick={() => supprimer(b)}>
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -854,7 +886,7 @@ function TypeActeRow({ typeActe }) {
 
 function TabBaremes({ baremesTypesActes = [], categories = [], organismes = [], stats = {} }) {
     const [categorie, setCategorie] = useState('');
-    const [modalOpen, setModalOpen] = useState(false);
+    const [modal, setModal] = useState({ open: false, bareme: null });
 
     const typesActesFlat = baremesTypesActes.map(t => ({ id: t.id, label: t.label }));
 
@@ -879,7 +911,7 @@ function TabBaremes({ baremesTypesActes = [], categories = [], organismes = [], 
                     </Button>
                 )}
                 <span className="ml-auto text-xs text-slate-400">{filtered.length} type{filtered.length > 1 ? 's' : ''} d'actes</span>
-                <Button size="sm" className="h-8" variant="seal" onClick={() => setModalOpen(true)}>
+                <Button size="sm" className="h-8" variant="seal" onClick={() => setModal({ open: true, bareme: null })}>
                     <Plus className="h-4 w-4" /> Nouveau barème
                 </Button>
             </div>
@@ -903,14 +935,19 @@ function TabBaremes({ baremesTypesActes = [], categories = [], organismes = [], 
                 <div className="space-y-2">
                     {filtered.map((t, i) => (
                         <motion.div key={t.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                            <TypeActeRow typeActe={t} />
+                            <TypeActeRow typeActe={t} onEdit={(b) => setModal({ open: true, bareme: { ...b, type_acte_id: t.id } })} />
                         </motion.div>
                     ))}
                 </div>
             )}
 
-            <ModalAjouterBareme open={modalOpen} onClose={() => setModalOpen(false)}
-                typesActes={typesActesFlat} organismes={organismes} />
+            <ModalAjouterBareme
+                open={modal.open}
+                onClose={() => setModal({ open: false, bareme: null })}
+                bareme={modal.bareme}
+                typesActes={typesActesFlat}
+                organismes={organismes}
+            />
         </div>
     );
 }
