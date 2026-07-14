@@ -53,9 +53,6 @@ class TypeActeSeeder extends Seeder
             ['categorie' => CategorieActe::Procuration, 'code' => 'PRO-GEN', 'label' => 'Procuration générale',      'prefixe_reference' => 'PRO', 'delai_jours' => 3,  'description' => 'Procuration générale notariée'],
             ['categorie' => CategorieActe::Procuration, 'code' => 'PRO-SPE', 'label' => 'Procuration spéciale',      'prefixe_reference' => 'PRO', 'delai_jours' => 2,  'description' => 'Procuration pour acte spécifique'],
 
-            // Courrier
-            ['categorie' => CategorieActe::Courrier, 'code' => 'COU-CER', 'label' => 'Courrier de transmission',    'prefixe_reference' => 'COU', 'delai_jours' => 5,  'description' => 'Lettres de transmission, accusés de réception et réquisitions liés à l\'expédition d\'un dossier'],
-
             // Prise en charge
             ['categorie' => CategorieActe::PriseEnCharge, 'code' => 'PEC-MIN', 'label' => 'Prise en charge d\'un mineur',      'prefixe_reference' => 'PEC', 'delai_jours' => 7,  'description' => 'Acte notarial de prise en charge et tutelle d\'un enfant mineur'],
             ['categorie' => CategorieActe::PriseEnCharge, 'code' => 'PEC-ADT', 'label' => 'Prise en charge d\'un adulte',      'prefixe_reference' => 'PEC', 'delai_jours' => 7,  'description' => 'Acte notarial de prise en charge d\'une personne adulte dépendante'],

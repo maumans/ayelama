@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Courrier;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
-use App\Models\ModeleActe;
+use App\Models\ModeleCourrier;
 use App\Services\ActesGeneratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -148,8 +148,8 @@ class CourrierController extends Controller
     {
         $this->authorize('genererCourriers', $dossier);
 
-        $data   = $request->validate(['modele_acte_id' => ['required', 'integer', 'exists:modeles_actes,id']]);
-        $modele = ModeleActe::actif()->findOrFail($data['modele_acte_id']);
+        $data   = $request->validate(['modele_courrier_id' => ['required', 'integer', 'exists:modeles_courriers,id']]);
+        $modele = ModeleCourrier::actif()->findOrFail($data['modele_courrier_id']);
 
         $dossier->load('questionnaire');
 

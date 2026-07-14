@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -23,8 +24,10 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { notifyValidationError } from '@/lib/toast';
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 
@@ -216,6 +219,157 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
                     <Button variant="outline" onClick={onClose}>Annuler</Button>
                     <Button variant="seal" onClick={submit} disabled={processing}>
                         {isEdit ? 'Enregistrer' : 'Créer le modèle'}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// ── Modale Créer / Modifier un courrier de transmission ─────────────────────
+
+function ModalModeleCourrier({ open, onClose, typesActes, categories, modele = null }) {
+    const isEdit = !!modele;
+    const { data, setData, post, processing, errors, reset, clearErrors } = useForm({
+        nom:              '',
+        type_document:    'lettre',
+        version:          '1.0',
+        fichier:          null,
+        chemin_fichier:   '',
+        applicable_tous:  false,
+        type_acte_ids:    [],
+    });
+
+    React.useEffect(() => {
+        if (open) {
+            clearErrors();
+            if (modele) {
+                setData({
+                    nom:             modele.nom,
+                    type_document:   modele.type_document,
+                    version:         modele.version,
+                    fichier:         null,
+                    chemin_fichier:  modele.chemin_fichier,
+                    applicable_tous: modele.applicable_tous,
+                    type_acte_ids:   (modele.type_acte_ids ?? []).map(String),
+                });
+            } else {
+                reset();
+            }
+        }
+    }, [open, modele]);
+
+    const toggleTypeActe = (id) => {
+        const key = String(id);
+        setData('type_acte_ids', data.type_acte_ids.includes(key)
+            ? data.type_acte_ids.filter(v => v !== key)
+            : [...data.type_acte_ids, key]);
+    };
+
+    const submit = () => {
+        const opts = { onSuccess: () => { onClose(); reset(); }, onError: notifyValidationError };
+        if (isEdit) {
+            router.post(`/modeles-courriers/${modele.id}`, { _method: 'patch', ...data }, { ...opts, forceFormData: true });
+        } else {
+            post('/modeles-courriers', { ...opts, forceFormData: true });
+        }
+    };
+
+    const categorieLabels = Object.fromEntries((categories ?? []).map(c => [c.value, c.label]));
+    const groupes = (typesActes ?? []).reduce((acc, t) => {
+        const key = categorieLabels[t.categorie] ?? t.categorie;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(t);
+        return acc;
+    }, {});
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                    <DialogTitle className="font-serif text-ink">
+                        {isEdit ? 'Modifier le courrier de transmission' : 'Nouveau courrier de transmission'}
+                    </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2">
+                    <div className="space-y-1.5">
+                        <Label>Nom de la lettre</Label>
+                        <Input
+                            placeholder="ex : Transmission modification société"
+                            value={data.nom}
+                            onChange={e => setData('nom', e.target.value)}
+                        />
+                        {errors.nom && <p className="text-xs text-danger-text">{errors.nom}</p>}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                            <Label>Type de document</Label>
+                            <Select value={data.type_document} onValueChange={v => setData('type_document', v)}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {TYPES_DOC.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label>Version</Label>
+                            <Input
+                                placeholder="1.0"
+                                value={data.version}
+                                onChange={e => setData('version', e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <Label>Fichier (.docx)</Label>
+                        <Input
+                            type="file"
+                            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            onChange={e => setData('fichier', e.target.files[0])}
+                        />
+                        {!data.fichier && data.chemin_fichier && (
+                            <p className="text-[10px] text-slate-400 truncate mt-1">Actuel : {data.chemin_fichier}</p>
+                        )}
+                        {errors.fichier && <p className="text-xs text-danger-text">{errors.fichier}</p>}
+                        {errors.chemin_fichier && <p className="text-xs text-danger-text">{errors.chemin_fichier}</p>}
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                        <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                            <Checkbox checked={data.applicable_tous}
+                                onCheckedChange={(checked) => setData('applicable_tous', checked === true)} />
+                            <span>Applicable à tous les types d'actes</span>
+                        </label>
+
+                        {!data.applicable_tous && (
+                            <div className="max-h-52 overflow-y-auto space-y-3 pt-1 border-t border-slate-100">
+                                {Object.entries(groupes).map(([cat, items]) => (
+                                    <div key={cat}>
+                                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">{cat}</p>
+                                        <div className="space-y-1.5">
+                                            {items.map(t => (
+                                                <label key={t.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                                    <Checkbox checked={data.type_acte_ids.includes(String(t.id))}
+                                                        onCheckedChange={() => toggleTypeActe(t.id)} />
+                                                    <span>{t.label}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                                {errors.type_acte_ids && <p className="text-xs text-danger-text">{errors.type_acte_ids}</p>}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annuler</Button>
+                    <Button variant="seal" onClick={submit} disabled={processing}>
+                        {isEdit ? 'Enregistrer' : 'Créer la lettre'}
                     </Button>
                 </DialogFooter>
             </DialogContent>
@@ -450,15 +604,158 @@ function CarteModele({ modele, can, onEdit }) {
     );
 }
 
+// ── Vue Table — courriers de transmission ───────────────────────────────────
+
+function TableModelesCourriers({ items, can, onEdit }) {
+    const [confirmState, setConfirmState] = useState(null);
+
+    const toggleActif = (m) => {
+        router.patch(`/modeles-courriers/${m.id}`, { est_actif: !m.est_actif }, { preserveScroll: true });
+    };
+    const supprimer = (m) => setConfirmState({
+        title: `Supprimer "${m.nom}" ?`,
+        description: 'Ce modèle de courrier sera définitivement supprimé.',
+        confirmLabel: 'Supprimer',
+        variant: 'destructive',
+        onConfirm: () => router.delete(`/modeles-courriers/${m.id}`, { preserveScroll: true }),
+    });
+    const dupliquer = (m) => {
+        router.post(`/modeles-courriers/${m.id}/dupliquer`, {}, { preserveScroll: true });
+    };
+
+    if (items.length === 0) {
+        return (
+            <Card>
+                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                    <Mail className="h-12 w-12 text-slate-200 mb-4" />
+                    <h3 className="font-serif text-heading text-slate-500">Aucun courrier de transmission</h3>
+                    <p className="text-sm text-slate-400 mt-1">
+                        {can.administrer ? "Créez la première lettre de transmission." : "Aucune lettre disponible pour l'instant."}
+                    </p>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    return (
+        <>
+            <ConfirmDialog
+                open={!!confirmState}
+                onClose={() => setConfirmState(null)}
+                title={confirmState?.title ?? ''}
+                description={confirmState?.description}
+                confirmLabel={confirmState?.confirmLabel}
+                variant={confirmState?.variant}
+                onConfirm={confirmState?.onConfirm ?? (() => {})}
+            />
+            <Card className="overflow-hidden">
+                <table className="table-notarial w-full">
+                    <thead>
+                        <tr>
+                            <th className="w-8"></th>
+                            <th>Nom</th>
+                            <th>Type doc</th>
+                            <th>Types d'actes liés</th>
+                            <th>Version</th>
+                            <th>Chemin fichier</th>
+                            <th>MAJ</th>
+                            <th className="text-center">Actif</th>
+                            {can.administrer && <th></th>}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {items.map(m => {
+                            const tdInfo = TYPE_DOC_MAP[m.type_document];
+                            const Icon = tdInfo?.icon ?? FileText;
+                            return (
+                                <tr key={m.id} className={cn(!m.est_actif && 'opacity-50')}>
+                                    <td>
+                                        <Icon className={cn('h-3.5 w-3.5', tdInfo ? tdInfo.color.split(' ')[1] : 'text-slate-400')} />
+                                    </td>
+                                    <td className="font-medium text-ink max-w-[220px] truncate" title={m.nom}>{m.nom}</td>
+                                    <td><TypeDocBadge type={m.type_document} /></td>
+                                    <td className="max-w-[260px]">
+                                        {m.applicable_tous ? (
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-seal-light/30 text-seal border border-seal/20">
+                                                Tous types d'actes
+                                            </span>
+                                        ) : (
+                                            <div className="flex flex-wrap gap-1">
+                                                {(m.typesActesLabels ?? []).map((label, i) => (
+                                                    <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                                                        {label}
+                                                    </span>
+                                                ))}
+                                                {(m.typesActesLabels ?? []).length === 0 && (
+                                                    <span className="text-[10px] text-slate-300">Aucun type lié</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td>
+                                        <span className="font-ref text-seal text-xs font-semibold">v{m.version}</span>
+                                    </td>
+                                    <td><CopyPathButton path={m.chemin_fichier} /></td>
+                                    <td className="text-slate-400 text-xs">{m.updated_at}</td>
+                                    <td className="text-center">
+                                        {can.administrer ? (
+                                            <Switch checked={m.est_actif} onCheckedChange={() => toggleActif(m)} />
+                                        ) : (
+                                            m.est_actif
+                                                ? <CheckCircle2 className="h-4 w-4 text-success mx-auto" />
+                                                : <XCircle className="h-4 w-4 text-slate-300 mx-auto" />
+                                        )}
+                                    </td>
+                                    {can.administrer && (
+                                        <td>
+                                            <div className="flex items-center gap-0.5">
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-ink" onClick={() => onEdit(m)}>
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>Modifier</TooltipContent>
+                                                </Tooltip>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-seal" onClick={() => dupliquer(m)}>
+                                                            <Copy className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>Dupliquer</TooltipContent>
+                                                </Tooltip>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger" onClick={() => supprimer(m)}>
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>Supprimer</TooltipContent>
+                                                </Tooltip>
+                                            </div>
+                                        </td>
+                                    )}
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </Card>
+        </>
+    );
+}
+
 // ── Page principale ──────────────────────────────────────────────────────────
 
 export default function ModelesIndex() {
     const {
-        modeles = [], typesActes = [], categories = [],
+        modeles = [], modelesCourriers = [], typesActes = [], categories = [],
         filters = {}, stats = {}, auth,
     } = usePage().props;
     const can = auth?.user?.can ?? {};
 
+    const [tab, setTab]               = useState('actes'); // 'actes' | 'courriers'
     const [search, setSearch]         = useState(filters.q             ?? '');
     const [categorie, setCategorie]   = useState(filters.categorie     ?? '');
     const [typeDoc, setTypeDoc]       = useState(filters.type_document ?? '');
@@ -467,6 +764,8 @@ export default function ModelesIndex() {
     const [vue, setVue]               = useState('table'); // 'table' | 'cartes'
     const [modalOpen, setModalOpen]   = useState(false);
     const [editModele, setEditModele] = useState(null);
+    const [courrierModalOpen, setCourrierModalOpen] = useState(false);
+    const [editCourrier, setEditCourrier]           = useState(null);
 
     const applyFilters = (overrides = {}) => {
         router.get('/modeles', {
@@ -487,6 +786,9 @@ export default function ModelesIndex() {
 
     const openEdit = (m) => { setEditModele(m); setModalOpen(true); };
     const closeModal = () => { setModalOpen(false); setEditModele(null); };
+
+    const openEditCourrier = (m) => { setEditCourrier(m); setCourrierModalOpen(true); };
+    const closeCourrierModal = () => { setCourrierModalOpen(false); setEditCourrier(null); };
 
     // Grouper par catégorie
     const grouped = modeles.reduce((acc, m) => {
@@ -513,12 +815,32 @@ export default function ModelesIndex() {
                             </p>
                         </div>
                         {can.administrer && (
-                            <Button variant="seal" onClick={() => { setEditModele(null); setModalOpen(true); }}>
-                                <Plus className="h-4 w-4" />
-                                Nouveau modèle
-                            </Button>
+                            tab === 'actes' ? (
+                                <Button variant="seal" onClick={() => { setEditModele(null); setModalOpen(true); }}>
+                                    <Plus className="h-4 w-4" />
+                                    Nouveau modèle
+                                </Button>
+                            ) : (
+                                <Button variant="seal" onClick={() => { setEditCourrier(null); setCourrierModalOpen(true); }}>
+                                    <Plus className="h-4 w-4" />
+                                    Nouveau courrier
+                                </Button>
+                            )
                         )}
                     </div>
+
+                    <Tabs value={tab} onValueChange={setTab}>
+                        <TabsList>
+                            <TabsTrigger value="actes">Actes</TabsTrigger>
+                            <TabsTrigger value="courriers">
+                                Courriers de transmission
+                                {modelesCourriers.length > 0 && (
+                                    <span className="ml-1.5 text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">{modelesCourriers.length}</span>
+                                )}
+                            </TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="actes" className="space-y-5 pt-4">
 
                     {/* ── Stats ────────────────────────────────────────────── */}
                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
@@ -707,6 +1029,13 @@ export default function ModelesIndex() {
                             ))}
                         </div>
                     )}
+
+                        </TabsContent>
+
+                        <TabsContent value="courriers" className="pt-4">
+                            <TableModelesCourriers items={modelesCourriers} can={can} onEdit={openEditCourrier} />
+                        </TabsContent>
+                    </Tabs>
                 </div>
 
                 <ModalModele
@@ -714,6 +1043,14 @@ export default function ModelesIndex() {
                     onClose={closeModal}
                     typesActes={typesActes}
                     modele={editModele}
+                />
+
+                <ModalModeleCourrier
+                    open={courrierModalOpen}
+                    onClose={closeCourrierModal}
+                    typesActes={typesActes}
+                    categories={categories}
+                    modele={editCourrier}
                 />
             </AppLayout>
     );

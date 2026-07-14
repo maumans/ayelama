@@ -6,6 +6,7 @@ use App\Models\Document;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
 use App\Models\ModeleActe;
+use App\Models\RevisionPoint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -98,6 +99,12 @@ class DocumentController extends Controller
             Storage::disk('public')->delete($document->chemin_fichier);
         }
 
+        // Le contenu change : la vérification déjà enregistrée pour ce document n'est
+        // plus fiable, on force une nouvelle évaluation en révision.
+        RevisionPoint::where('point_id', (string) $document->id)
+            ->whereHas('revision', fn ($q) => $q->where('dossier_id', $dossier->id))
+            ->delete();
+
         $chemin = $generatorService->genererDocument(
             $dossier,
             $modele->chemin_fichier,
@@ -126,6 +133,10 @@ class DocumentController extends Controller
         if ($document->chemin_fichier) {
             Storage::disk('public')->delete($document->chemin_fichier);
         }
+
+        RevisionPoint::where('point_id', (string) $document->id)
+            ->whereHas('revision', fn ($q) => $q->where('dossier_id', $document->dossier_id))
+            ->delete();
 
         $document->delete();
 

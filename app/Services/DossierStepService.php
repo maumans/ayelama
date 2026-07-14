@@ -5,9 +5,8 @@ namespace App\Services;
 use App\Enums\EtapeDossier;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
-use App\Models\ModeleActe;
+use App\Models\ModeleCourrier;
 use App\Models\Revision;
-use App\Models\TypeActe;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
@@ -157,16 +156,10 @@ class DossierStepService
     {
         $dossier->loadMissing('typeActe', 'courriers');
 
-        $couCerId = TypeActe::where('code', 'COU-CER')->value('id');
-        if (!$couCerId) {
-            return;
-        }
-
-        $categorie   = $dossier->typeActe?->categorie?->value;
-        $applicables = ModeleActe::where('type_acte_id', $couCerId)
+        $applicables = ModeleCourrier::with('typesActes')
             ->actif()
             ->get()
-            ->filter(fn (ModeleActe $m) => $categorie && $m->applicablePour($categorie));
+            ->filter(fn (ModeleCourrier $m) => $m->applicablePour($dossier->typeActe));
 
         if ($applicables->isEmpty()) {
             return;

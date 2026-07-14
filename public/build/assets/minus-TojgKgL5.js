@@ -1,1 +1,0 @@
-import{l as e}from"./button-NZZG61Eb.js";var t=e(`minus`,[[`path`,{d:`M5 12h14`,key:`1ays0h`}]]);export{t};

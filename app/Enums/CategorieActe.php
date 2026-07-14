@@ -13,7 +13,6 @@ enum CategorieActe: string
     case Mariage    = 'mariage';
     case Testament  = 'testament';
     case Procuration = 'procuration';
-    case Courrier   = 'courrier';
     case PriseEnCharge = 'prise_en_charge';
 
     public function label(): string
@@ -28,7 +27,6 @@ enum CategorieActe: string
             self::Mariage      => 'Contrat de mariage',
             self::Testament    => 'Testament',
             self::Procuration  => 'Procuration',
-            self::Courrier     => 'Courrier',
             self::PriseEnCharge => 'Prise en charge',
         };
     }
@@ -45,7 +43,6 @@ enum CategorieActe: string
             self::Mariage      => 'MAR',
             self::Testament    => 'TES',
             self::Procuration  => 'PRO',
-            self::Courrier     => 'COU',
             self::PriseEnCharge => 'PEC',
         };
     }

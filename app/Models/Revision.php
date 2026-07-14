@@ -37,19 +37,34 @@ class Revision extends Model
     }
 
     // Calculs
+    /**
+     * Points dont le document existe toujours sur le dossier — un document supprimé
+     * ou régénéré laisse un RevisionPoint orphelin en base (voir DocumentController::
+     * destroy()/regenerer() pour le nettoyage à la source) ; on l'exclut ici en plus
+     * pour que la liste globale (Revisions/Index.jsx) reste identique à ce que la
+     * fiche dossier calcule côté client à partir de ses documents actuels.
+     */
+    private function pointsValides()
+    {
+        $this->loadMissing(['points', 'dossier.documents']);
+        $idsDocuments = $this->dossier->documents->pluck('id')->map(fn ($id) => (string) $id);
+
+        return $this->points->whereIn('point_id', $idsDocuments);
+    }
+
     public function nombreConformes(): int
     {
-        return $this->points->where('etat', 'ok')->count();
+        return $this->pointsValides()->where('etat', 'ok')->count();
     }
 
     public function nombreNonConformes(): int
     {
-        return $this->points->where('etat', 'a_corriger')->count();
+        return $this->pointsValides()->where('etat', 'a_corriger')->count();
     }
 
     public function nombreEvalues(): int
     {
-        return $this->points->whereNotNull('etat')->count();
+        return $this->pointsValides()->whereNotNull('etat')->count();
     }
 
     public function estValidable(): bool

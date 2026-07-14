@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\CategorieActe;
 use App\Models\ModeleActe;
+use App\Models\ModeleCourrier;
 use App\Models\TypeActe;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -55,8 +56,26 @@ class ModeleActeController extends Controller
             ->take(5)
             ->toArray();
 
+        $modelesCourriers = ModeleCourrier::with('typesActes')
+            ->orderBy('nom')
+            ->get()
+            ->map(fn (ModeleCourrier $m) => [
+                'id'              => $m->id,
+                'nom'             => $m->nom,
+                'type_document'   => $m->type_document,
+                'typeDocLabel'    => $m->typeDocumentLabel(),
+                'chemin_fichier'  => $m->chemin_fichier,
+                'version'         => $m->version,
+                'est_actif'       => $m->est_actif,
+                'applicable_tous' => $m->applicable_tous,
+                'type_acte_ids'   => $m->typesActes->pluck('id'),
+                'typesActesLabels' => $m->typesActes->pluck('label'),
+                'updated_at'      => $m->updated_at?->format('d/m/Y'),
+            ]);
+
         return Inertia::render('Modeles/Index', [
-            'modeles'    => $modeles,
+            'modeles'          => $modeles,
+            'modelesCourriers' => $modelesCourriers,
             'typesActes' => TypeActe::orderBy('label')->get(['id', 'label', 'categorie']),
             'categories' => collect(CategorieActe::cases())->map(fn ($c) => [
                 'value' => $c->value,

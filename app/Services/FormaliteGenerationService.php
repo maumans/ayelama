@@ -22,15 +22,23 @@ class FormaliteGenerationService
     {
         $dossier->loadMissing('typeActe.baremes');
 
-        foreach ($dossier->typeActe->baremes()->actif()->genereFormalite()->get() as $bareme) {
+        $baremes = $dossier->typeActe->baremes()->actif()->genereFormalite()->get();
+
+        // Passe 1 : créer/mettre à jour chaque Formalite, indexée par bareme_id afin
+        // de pouvoir résoudre les dépendances (bareme->depend_de_bareme_id) ensuite.
+        $formaliteIdParBaremeId = [];
+
+        foreach ($baremes as $bareme) {
             $montantBase = $bareme->base_calcul === 'montant_fixe'
                 ? ($bareme->montant_fixe !== null ? (float) $bareme->montant_fixe : null)
                 : ($dossier->valeur !== null ? (float) $dossier->valeur : null);
 
             $formalite = Formalite::updateOrCreate(
-                ['dossier_id' => $dossier->id, 'organisme' => $bareme->organismeFormalite()],
+                ['dossier_id' => $dossier->id, 'bareme_id' => $bareme->id],
                 [
+                    'organisme'      => $bareme->organismeFormalite(),
                     'libelle'        => $bareme->libelle,
+                    'ordre'          => $bareme->ordre,
                     'statut'         => 'a_deposer',
                     // Bareme::taux est en pourcentage (0-100), Formalite::calculerMontant()
                     // attend une fraction (0-1) — conversion faite ici, jamais visible à l'admin.
@@ -45,7 +53,10 @@ class FormaliteGenerationService
                 ]
             );
 
-            if ($formalite->taux && $formalite->montant_base) {
+            if ($bareme->base_calcul === 'montant_fixe') {
+                // Pas de taux à appliquer : le montant calculé est le montant fixe lui-même.
+                $formalite->update(['montant_calcule' => $montantBase]);
+            } elseif ($formalite->taux && $formalite->montant_base) {
                 $formalite->calculerMontant();
             }
 
@@ -57,6 +68,22 @@ class FormaliteGenerationService
                         'est_fourni'   => false,
                     ]);
                 }
+            }
+
+            $formaliteIdParBaremeId[$bareme->id] = $formalite->id;
+        }
+
+        // Passe 2 : résoudre les dépendances entre démarches du même dossier.
+        foreach ($baremes as $bareme) {
+            if (!$bareme->depend_de_bareme_id) {
+                continue;
+            }
+
+            $formaliteId = $formaliteIdParBaremeId[$bareme->id] ?? null;
+            $dependFormaliteId = $formaliteIdParBaremeId[$bareme->depend_de_bareme_id] ?? null;
+
+            if ($formaliteId && $dependFormaliteId) {
+                Formalite::whereKey($formaliteId)->update(['depend_de_formalite_id' => $dependFormaliteId]);
             }
         }
     }

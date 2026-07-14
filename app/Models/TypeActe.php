@@ -31,19 +31,14 @@ class TypeActe extends Model
         return $this->hasMany(Dossier::class);
     }
 
-    public function grilles()
-    {
-        return $this->hasMany(RevisionGrille::class);
-    }
-
-    public function grilleActive()
-    {
-        return $this->hasOne(RevisionGrille::class)->where('est_active', true)->latest();
-    }
-
     public function modeles()
     {
         return $this->hasMany(ModeleActe::class)->where('est_actif', true);
+    }
+
+    public function modelesCourriers()
+    {
+        return $this->belongsToMany(ModeleCourrier::class, 'modele_courrier_type_acte');
     }
 
     public function baremes()

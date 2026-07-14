@@ -15,29 +15,51 @@ import {
 import {
     Tooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
     AlertCircle, Banknote, Building2, Check, CheckCheck,
-    CheckCircle2, Clock, FileText, Filter, Flame, MailCheck,
-    Package, Search, Upload, X, ArrowUpDown, Square,
+    Clock, FileText, Filter, Flame, MailCheck,
+    Package, Search, Upload, X, ArrowUpDown, Lock,
+    LayoutGrid, Table2, Download, ChevronRight,
 } from 'lucide-react';
+import { STATUT_META, organismeBadgeClass, organismeShortLabel } from '@/data/formaliteStatuts';
+import { ModalDepotFormalite } from '@/Components/Formalites/ModalDepotFormalite';
+import { ModalRetourFormalite } from '@/Components/Formalites/ModalRetourFormalite';
+import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 
 /* ─── constants ─────────────────────────────────────────── */
 
-const STATUT_META = {
-    a_deposer:   { label: 'À déposer',        badge: 'bg-slate-100 text-slate-600 border-slate-200',   border: 'border-l-slate-400' },
-    depose:      { label: 'Déposé',            badge: 'bg-blue-50 text-blue-700 border-blue-200',       border: 'border-l-blue-500' },
-    en_attente:  { label: 'En attente retour', badge: 'bg-amber-50 text-amber-700 border-amber-200',    border: 'border-l-amber-400' },
-    retour_recu: { label: 'Retour reçu',       badge: 'bg-green-50 text-green-700 border-green-200',    border: 'border-l-green-500' },
-    cloture:     { label: 'Clôturé',           badge: 'bg-ink/5 text-ink/40 border-ink/10',             border: 'border-l-ink/20' },
+const fmt = (n) => n ? Number(n).toLocaleString('fr-FR') : '0';
+const fmtCompact = (n) => {
+    const v = Number(n) || 0;
+    return v >= 1000 ? `${Math.round(v / 1000)} K` : String(v);
 };
 
-const fmt = (n) => n ? Number(n).toLocaleString('fr-FR') : '0';
+const ORGANISMES_ONGLETS = ['apip', 'impots', 'conservation_fonciere', 'cnss', 'greffe'];
+
+function formatDelai(f) {
+    if (f.joursRetardOuAvance == null) return { text: '—', cls: 'text-slate-400' };
+    const j = f.joursRetardOuAvance;
+    const termine = f.statut === 'retour_recu' || f.statut === 'cloture';
+
+    if (termine) {
+        return j <= 0
+            ? { text: `${Math.abs(j)}j ✓`, cls: 'text-success font-medium' }
+            : { text: `+${j}j`, cls: 'text-danger font-medium' };
+    }
+
+    return j > 0
+        ? { text: `+${j}j`, cls: 'text-danger font-medium' }
+        : { text: `${Math.abs(j)}j`, cls: 'text-slate-500' };
+}
 
 /* ─── FormaliteCard ──────────────────────────────────────── */
 
 function FormaliteCard({ formalite, showDossier = true }) {
     const [showPieces, setShowPieces] = useState(false);
     const [confirmState, setConfirmState] = useState(null);
+    const [depotOpen, setDepotOpen] = useState(false);
+    const [retourOpen, setRetourOpen] = useState(false);
     const meta = STATUT_META[formalite.statut] ?? STATUT_META.a_deposer;
     const pieces  = formalite.pieces ?? [];
     const fournis = pieces.filter(p => p.est_fourni).length;
@@ -45,8 +67,6 @@ function FormaliteCard({ formalite, showDossier = true }) {
     const patch = (data) =>
         router.patch(`/formalites/${formalite.id}`, data, { preserveScroll: true, onError: notifyValidationError });
 
-    const handleDepose  = () => patch({ statut: 'depose',      depose_at: new Date().toISOString().slice(0, 10) });
-    const handleRetour  = () => patch({ statut: 'retour_recu', retour_at: new Date().toISOString().slice(0, 10) });
     const handleCloture = () => setConfirmState({
         title: 'Clôturer cette formalité ?',
         description: 'La formalité sera marquée comme clôturée.',
@@ -55,8 +75,9 @@ function FormaliteCard({ formalite, showDossier = true }) {
         onConfirm: () => patch({ statut: 'cloture' }),
     });
     const peutGerer = !!formalite.peutGerer;
+    const peutDeposer = formalite.statut === 'a_deposer' || formalite.statut === 'rejete';
 
-    const handleToggle = (id, est_fourni) => peutGerer && patch({ pieces: [{ id, est_fourni: !est_fourni }] });
+    const handleToggle = (p) => peutGerer && patch({ pieces: [{ id: p.id, est_fourni: !p.est_fourni }] });
 
     const isUrgente  = formalite.estUrgente;
     const isDepassee = formalite.estDepassee;
@@ -78,6 +99,8 @@ function FormaliteCard({ formalite, showDossier = true }) {
             variant={confirmState?.variant}
             onConfirm={confirmState?.onConfirm ?? (() => {})}
         />
+        <ModalDepotFormalite open={depotOpen} onClose={() => setDepotOpen(false)} formalite={formalite} onTogglePiece={handleToggle} />
+        <ModalRetourFormalite open={retourOpen} onClose={() => setRetourOpen(false)} formalite={formalite} />
         <motion.div
             layout
             initial={{ opacity: 0, y: 6 }}
@@ -88,19 +111,24 @@ function FormaliteCard({ formalite, showDossier = true }) {
             {/* row 1 — organisme + badge */}
             <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-1">
                 <div className="flex items-center gap-2 min-w-0">
-                    <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    {formalite.ordre && <span className="text-[10px] text-slate-400 font-ref shrink-0">#{formalite.ordre}</span>}
+                    <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded border shrink-0', organismeBadgeClass(formalite.organisme))}>
+                        {organismeShortLabel(formalite.organisme, formalite.organismeLabel)}
+                    </span>
                     <span className="text-sm font-medium text-ink truncate">{formalite.libelle || formalite.organismeLabel}</span>
-                    {formalite.libelle && formalite.libelle !== formalite.organismeLabel && (
-                        <span className="text-[11px] text-slate-400 truncate">({formalite.organismeLabel})</span>
-                    )}
                     {(isDepassee || isUrgente) && (
                         <Flame className={`h-3.5 w-3.5 shrink-0 ${isDepassee ? 'text-danger' : 'text-amber-500'}`} />
                     )}
                 </div>
                 <Badge className={`text-[10px] px-1.5 py-0 shrink-0 border ${meta.badge}`}>
-                    {meta.label}
+                    {formalite.estBloquee ? 'Bloqué' : meta.label}
                 </Badge>
             </div>
+            {formalite.estBloquee && (
+                <div className="px-4 pb-1 -mt-0.5 text-[11px] text-slate-500 flex items-center gap-1">
+                    <Lock className="h-3 w-3" /> Attend : {formalite.dependDeLabel}
+                </div>
+            )}
 
             {/* row 2 — montant + dates */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-4 py-1">
@@ -156,30 +184,16 @@ function FormaliteCard({ formalite, showDossier = true }) {
                     </button>
                     <AnimatePresence>
                         {showPieces && (
-                            <motion.ul
+                            <motion.div
                                 initial={{ height: 0, opacity: 0 }}
                                 animate={{ height: 'auto', opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
-                                className="overflow-hidden mt-1.5 space-y-0.5"
+                                className="overflow-hidden mt-1.5 divide-y divide-slate-50"
                             >
                                 {pieces.map(p => (
-                                    <li
-                                        key={p.id}
-                                        onClick={() => handleToggle(p.id, p.est_fourni)}
-                                        className={cn(
-                                            'flex items-center gap-2 px-1 py-0.5 rounded',
-                                            peutGerer && 'cursor-pointer hover:bg-slate-50'
-                                        )}
-                                    >
-                                        {p.est_fourni
-                                            ? <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
-                                            : <Square className="h-3 w-3 text-slate-300 shrink-0" />}
-                                        <span className={`text-xs ${p.est_fourni ? 'line-through text-slate-400' : 'text-slate-600'}`}>
-                                            {p.label}
-                                        </span>
-                                    </li>
+                                    <PieceGedRow key={p.id} piece={p} peutGerer={peutGerer} onToggle={handleToggle} />
                                 ))}
-                            </motion.ul>
+                            </motion.div>
                         )}
                     </AnimatePresence>
                 </div>
@@ -187,14 +201,19 @@ function FormaliteCard({ formalite, showDossier = true }) {
 
             {/* row 4 — actions */}
             <div className="flex items-center gap-2 px-4 pb-3 pt-2 border-t border-slate-100 mt-1">
-                {peutGerer && formalite.statut === 'a_deposer' && (
-                    <Button size="sm" variant="outline" onClick={handleDepose} className="h-7 text-xs gap-1">
-                        <Upload className="h-3.5 w-3.5" /> Marquer déposé
+                {peutGerer && peutDeposer && !formalite.estBloquee && (
+                    <Button size="sm" variant="seal" onClick={() => setDepotOpen(true)} className="h-7 text-xs gap-1">
+                        <Upload className="h-3.5 w-3.5" /> {formalite.statut === 'rejete' ? 'Redéposer' : 'Préparer dépôt'}
                     </Button>
                 )}
                 {peutGerer && (formalite.statut === 'depose' || formalite.statut === 'en_attente') && (
-                    <Button size="sm" variant="success" onClick={handleRetour} className="h-7 text-xs gap-1">
-                        <MailCheck className="h-3.5 w-3.5" /> Retour reçu
+                    <Button
+                        size="sm"
+                        variant={isDepassee ? 'destructive' : 'success'}
+                        onClick={() => setRetourOpen(true)}
+                        className="h-7 text-xs gap-1"
+                    >
+                        <MailCheck className="h-3.5 w-3.5" /> Enregistrer un retour
                     </Button>
                 )}
                 {peutGerer && formalite.statut === 'retour_recu' && (
@@ -233,14 +252,129 @@ function FormaliteCard({ formalite, showDossier = true }) {
     );
 }
 
+/* ─── FormalitesTable (vue tableau, maquette "Tableau de bord Formaliste") ── */
+
+function FormaliteTableRow({ formalite }) {
+    const [confirmState, setConfirmState] = useState(null);
+    const [depotOpen, setDepotOpen] = useState(false);
+    const [retourOpen, setRetourOpen] = useState(false);
+    const meta = STATUT_META[formalite.statut] ?? STATUT_META.a_deposer;
+    const peutGerer = !!formalite.peutGerer;
+    const peutDeposer = formalite.statut === 'a_deposer' || formalite.statut === 'rejete';
+    const isDepassee = formalite.estDepassee;
+    const isCloture = formalite.statut === 'cloture';
+    const delai = formatDelai(formalite);
+
+    const patch = (data) =>
+        router.patch(`/formalites/${formalite.id}`, data, { preserveScroll: true, onError: notifyValidationError });
+
+    const handleCloture = () => setConfirmState({
+        title: 'Clôturer cette formalité ?',
+        description: 'La formalité sera marquée comme clôturée.',
+        confirmLabel: 'Clôturer',
+        variant: 'default',
+        onConfirm: () => patch({ statut: 'cloture' }),
+    });
+
+    return (
+        <tr className={isCloture ? 'opacity-50' : ''}>
+            <ConfirmDialog
+                open={!!confirmState}
+                onClose={() => setConfirmState(null)}
+                title={confirmState?.title ?? ''}
+                description={confirmState?.description}
+                confirmLabel={confirmState?.confirmLabel}
+                variant={confirmState?.variant}
+                onConfirm={confirmState?.onConfirm ?? (() => {})}
+            />
+            <ModalDepotFormalite open={depotOpen} onClose={() => setDepotOpen(false)} formalite={formalite} />
+            <ModalRetourFormalite open={retourOpen} onClose={() => setRetourOpen(false)} formalite={formalite} />
+            <td>
+                <button
+                    onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}`)}
+                    className="font-ref text-sm text-seal hover:underline"
+                >
+                    {formalite.dossier?.reference}
+                </button>
+            </td>
+            <td className="text-sm text-slate-600">{formalite.dossier?.clientPrincipal ?? '—'}</td>
+            <td>
+                <span className={cn('inline-flex text-[10px] font-medium px-2 py-0.5 rounded border', organismeBadgeClass(formalite.organisme))}>
+                    {organismeShortLabel(formalite.organisme, formalite.organismeLabel)}
+                </span>
+            </td>
+            <td className="text-sm text-slate-700">{formalite.libelle}</td>
+            <td>
+                <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', meta.badge)}>
+                    {formalite.estBloquee ? 'Bloqué' : meta.label}
+                </span>
+            </td>
+            <td className="font-ref text-sm text-slate-700">
+                {formalite.montant_calcule > 0 ? `${fmt(formalite.montant_calcule)} ${formalite.montant_paye != null ? '✓' : 'est.'}` : '—'}
+            </td>
+            <td className={cn('text-sm font-ref', delai.cls)}>{delai.text}</td>
+            <td>
+                {formalite.estBloquee ? (
+                    <span className="text-xs text-slate-400 flex items-center gap-1"><Lock className="h-3 w-3" /> Attend {formalite.dependDeLabel}</span>
+                ) : peutGerer && peutDeposer ? (
+                    <Button size="sm" variant="seal" className="h-7 text-xs" onClick={() => setDepotOpen(true)}>
+                        {formalite.statut === 'rejete' ? 'Redéposer' : 'Préparer dépôt'}
+                    </Button>
+                ) : peutGerer && (formalite.statut === 'depose' || formalite.statut === 'en_attente') ? (
+                    <Button size="sm" variant={isDepassee ? 'destructive' : 'success'} className="h-7 text-xs" onClick={() => setRetourOpen(true)}>
+                        Retour
+                    </Button>
+                ) : peutGerer && formalite.statut === 'retour_recu' ? (
+                    <Button size="sm" variant="outline" className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-50" onClick={handleCloture}>
+                        Clôturer
+                    </Button>
+                ) : (
+                    <button
+                        onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}`)}
+                        className="text-xs text-slate-400 hover:text-seal flex items-center gap-0.5"
+                    >
+                        Voir dossier <ChevronRight className="h-3 w-3" />
+                    </button>
+                )}
+            </td>
+        </tr>
+    );
+}
+
+function FormalitesTable({ items }) {
+    return (
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="table-notarial w-full">
+                <thead>
+                    <tr>
+                        <th>Dossier</th>
+                        <th>Client</th>
+                        <th>Organisme</th>
+                        <th>Démarche</th>
+                        <th>Statut</th>
+                        <th>Frais</th>
+                        <th>Délai</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {items.map(f => <FormaliteTableRow key={f.id} formalite={f} />)}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 /* ─── Page ───────────────────────────────────────────────── */
 
 export default function FormalitesIndex({ formalites, stats, statuts, filters: init }) {
+    const [vue, setVue] = useState('cartes');
     const [filters, setFilters] = useState({
-        q:        init?.q        ?? '',
-        statut:   init?.statut   ?? '',
-        urgentes: init?.urgentes ?? '',
-        sort:     init?.sort     ?? '',
+        q:         init?.q         ?? '',
+        statut:    init?.statut    ?? '',
+        organisme: init?.organisme ?? '',
+        urgentes:  init?.urgentes  ?? '',
+        sort:      init?.sort      ?? '',
     });
 
     const apply = useCallback((vals) => {
@@ -255,12 +389,16 @@ export default function FormalitesIndex({ formalites, stats, statuts, filters: i
     };
 
     const reset = () => {
-        const cleared = { q: '', statut: '', urgentes: '', sort: '' };
+        const cleared = { q: '', statut: '', organisme: '', urgentes: '', sort: '' };
         setFilters(cleared);
         router.get('/formalites', {}, { preserveState: true, replace: true });
     };
 
-    const hasFilters = filters.q || filters.statut || filters.urgentes || filters.sort;
+    const hasFilters = filters.q || filters.statut || filters.organisme || filters.urgentes || filters.sort;
+
+    const exportHref = '/formalites/export.csv?' + new URLSearchParams(
+        Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
+    ).toString();
 
     const data = formalites?.data ?? [];
 
@@ -281,22 +419,47 @@ export default function FormalitesIndex({ formalites, stats, statuts, filters: i
             <div className="p-6 max-w-5xl mx-auto space-y-5">
 
                 {/* header */}
-                <div>
-                    <h1 className="font-serif text-display text-ink">Formalités administratives</h1>
-                    <p className="text-sm text-slate-500 mt-1">
-                        {stats?.total ?? 0} démarche{(stats?.total ?? 0) !== 1 ? 's' : ''} en cours
-                        {(stats?.montantTotal ?? 0) > 0 && ` · ${fmt(stats.montantTotal)} GNF engagés`}
-                    </p>
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                        <h1 className="font-serif text-display text-ink">Formalités administratives</h1>
+                        <p className="text-sm text-slate-500 mt-1">
+                            {stats?.total ?? 0} démarche{(stats?.total ?? 0) !== 1 ? 's' : ''} en cours
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center rounded-lg border border-slate-200 p-0.5">
+                            <button
+                                onClick={() => setVue('cartes')}
+                                className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                                    vue === 'cartes' ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-50')}
+                            >
+                                <LayoutGrid className="h-3.5 w-3.5" /> Cartes
+                            </button>
+                            <button
+                                onClick={() => setVue('tableau')}
+                                className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                                    vue === 'tableau' ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-50')}
+                            >
+                                <Table2 className="h-3.5 w-3.5" /> Tableau
+                            </button>
+                        </div>
+                        <a href={exportHref}>
+                            <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                                <Download className="h-3.5 w-3.5" /> Export CSV
+                            </Button>
+                        </a>
+                    </div>
                 </div>
 
                 {/* stats */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                     {[
                         { label: 'Total actives', value: stats?.total      ?? 0, Icon: FileText,  cls: 'text-ink' },
                         { label: 'À déposer',     value: stats?.aDeposer   ?? 0, Icon: Upload,    cls: 'text-slate-500' },
                         { label: 'En cours',      value: stats?.enCours    ?? 0, Icon: Clock,     cls: 'text-blue-600' },
                         { label: 'Retour reçu',   value: stats?.retourRecu ?? 0, Icon: MailCheck, cls: 'text-green-600' },
                         { label: 'Urgentes',      value: stats?.urgentes   ?? 0, Icon: Flame,     cls: (stats?.urgentes ?? 0) > 0 ? 'text-danger' : 'text-slate-400' },
+                        { label: 'Frais engagés', value: fmtCompact(stats?.montantTotal ?? 0) + ' GNF', Icon: Banknote, cls: 'text-seal' },
                     ].map(({ label, value, Icon, cls }) => (
                         <div key={label} className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
                             <div className="flex items-center justify-between mb-1">
@@ -333,6 +496,20 @@ export default function FormalitesIndex({ formalites, stats, statuts, filters: i
                         </motion.div>
                     ))}
                 </AnimatePresence>
+
+                {/* onglets organisme */}
+                <Tabs value={filters.organisme || '__tous__'} onValueChange={v => setF('organisme', v === '__tous__' ? '' : v)}>
+                    <TabsList className="w-full justify-start overflow-x-auto">
+                        <TabsTrigger value="__tous__">
+                            Tous ({stats?.total ?? 0})
+                        </TabsTrigger>
+                        {ORGANISMES_ONGLETS.map(org => (
+                            <TabsTrigger key={org} value={org}>
+                                {organismeShortLabel(org)} ({stats?.parOrganisme?.[org] ?? 0})
+                            </TabsTrigger>
+                        ))}
+                    </TabsList>
+                </Tabs>
 
                 {/* filters */}
                 <div className="flex flex-wrap items-center gap-2">
@@ -407,6 +584,8 @@ export default function FormalitesIndex({ formalites, stats, statuts, filters: i
                             </button>
                         )}
                     </div>
+                ) : vue === 'tableau' ? (
+                    <FormalitesTable items={data} />
                 ) : (
                     <div className="space-y-6">
                         {Object.entries(grouped).map(([ref, group], di) => (

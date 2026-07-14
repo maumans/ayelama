@@ -28,7 +28,6 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
     }, []);
 
     const search = useCallback(async (q) => {
-        if (q.length < 2) { setResults([]); return; }
         if (abortRef.current) abortRef.current.abort();
         abortRef.current = new AbortController();
         setLoading(true);
@@ -87,11 +86,10 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
             {open && (
                 <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden">
                     <div className="max-h-56 overflow-y-auto">
-                        {!loading && query.length >= 2 && results.length === 0 && (
-                            <div className="px-3 py-2 text-xs text-slate-400">Aucun client trouvé pour « {query} »</div>
-                        )}
-                        {!loading && query.length < 2 && (
-                            <div className="px-3 py-2 text-xs text-slate-400">Saisissez au moins 2 caractères…</div>
+                        {!loading && results.length === 0 && (
+                            <div className="px-3 py-2 text-xs text-slate-400">
+                                {query.length > 0 ? `Aucun client trouvé pour « ${query} »` : 'Aucun client enregistré pour le moment.'}
+                            </div>
                         )}
                         {results.map(c => (
                             <button

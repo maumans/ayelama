@@ -23,9 +23,9 @@ import {
 import { cn } from '@/lib/utils';
 
 const EMPTY_BAREME_FORM = {
-    type_acte_id: '', organisme: 'Impots', libelle: '',
+    applicable_tous: false, type_acte_ids: [], organisme: 'Impots', libelle: '',
     taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '',
-    genere_formalite: false, obligatoire: true,
+    genere_formalite: false, depend_de_bareme_id: '',
     type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
 };
 
@@ -34,11 +34,12 @@ const ORGANISME_COLORS = {
     Impots:       'bg-amber-50 text-amber-800',
     Conservation: 'bg-green-50 text-green-700',
     CNSS:         'bg-purple-50 text-purple-700',
+    Greffe:       'bg-fuchsia-50 text-fuchsia-700',
     Notaire:      'bg-ink/10 text-ink',
     Autre:        'bg-slate-100 text-slate-600',
 };
 
-function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organismes }) {
+function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesActesAvecBaremes, organismes }) {
     const isEdit = Boolean(bareme);
     const [form, setForm] = useState(EMPTY_BAREME_FORM);
     const [nouvellePiece, setNouvellePiece] = useState('');
@@ -47,7 +48,8 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organism
     useEffect(() => {
         if (open) {
             setForm(isEdit ? {
-                type_acte_id:     String(bareme.type_acte_id ?? ''),
+                applicable_tous:  false,
+                type_acte_ids:    [],
                 organisme:        bareme.organisme ?? 'Impots',
                 libelle:          bareme.libelle ?? '',
                 taux:             bareme.taux ?? '',
@@ -55,7 +57,7 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organism
                 base_calcul:      bareme.base_calcul ?? 'valeur_acte',
                 description:      bareme.description ?? '',
                 genere_formalite: !!bareme.genere_formalite,
-                obligatoire:      bareme.obligatoire ?? true,
+                depend_de_bareme_id: bareme.depend_de_bareme_id ? String(bareme.depend_de_bareme_id) : '',
                 type_impot:       bareme.type_impot ?? '',
                 retour_attendu:   bareme.retour_attendu ?? '',
                 delai_heures:     bareme.delai_heures ?? '',
@@ -66,6 +68,14 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organism
         }
     }, [open, bareme?.id]);
 
+    // Démarches candidates dont celle-ci peut dépendre — uniquement celles du même
+    // type d'acte qui génèrent elles-mêmes une formalité (le blocage n'a de sens
+    // qu'entre démarches réellement générées pour ce type d'acte).
+    const demarchesDependance = isEdit
+        ? (typesActesAvecBaremes?.find(t => String(t.id) === String(bareme.type_acte_id))?.baremes ?? [])
+            .filter(b => b.genere_formalite && String(b.id) !== String(bareme.id))
+        : [];
+
     const ajouterPiece = () => {
         const label = nouvellePiece.trim();
         if (!label) return;
@@ -74,12 +84,25 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organism
     };
     const retirerPiece = (i) => setForm(f => ({ ...f, pieces_requises: f.pieces_requises.filter((_, idx) => idx !== i) }));
 
+    const toggleTypeActe = (id) => {
+        const key = String(id);
+        setForm(f => ({
+            ...f,
+            type_acte_ids: f.type_acte_ids.includes(key)
+                ? f.type_acte_ids.filter(v => v !== key)
+                : [...f.type_acte_ids, key],
+        }));
+    };
+
     const submit = () => {
+        const { applicable_tous, type_acte_ids, ...rest } = form;
         const payload = {
-            ...form,
+            ...rest,
             taux:         form.taux         !== '' ? parseFloat(form.taux)         : null,
             montant_fixe: form.montant_fixe !== '' ? parseFloat(form.montant_fixe) : null,
             delai_heures: form.delai_heures !== '' ? parseInt(form.delai_heures, 10) : null,
+            depend_de_bareme_id: form.depend_de_bareme_id !== '' ? parseInt(form.depend_de_bareme_id, 10) : null,
+            ...(isEdit ? {} : { applicable_tous, type_acte_ids }),
         };
         const opts = { onSuccess: () => onClose(), onError: setErrors };
         if (isEdit) {
@@ -89,6 +112,13 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organism
         }
     };
 
+    const groupesTypesActes = (typesActes ?? []).reduce((acc, t) => {
+        const key = t.categorieLabel ?? 'Autre';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(t);
+        return acc;
+    }, {});
+
     return (
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -97,29 +127,50 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organism
                 </DialogHeader>
 
                 <div className="space-y-4 py-2">
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                            <Label>Type d'acte</Label>
-                            <Select value={form.type_acte_id} onValueChange={v => setForm(f => ({ ...f, type_acte_id: v }))} disabled={isEdit}>
-                                <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
-                                <SelectContent>
-                                    {typesActes?.map(t => (
-                                        <SelectItem key={t.id} value={String(t.id)}>{t.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            {errors.type_acte_id && <p className="text-xs text-danger-text">{errors.type_acte_id}</p>}
-                        </div>
+                    <div className="space-y-1.5">
+                        <Label>Type{isEdit ? " d'acte" : "s d'acte"}</Label>
+                        {isEdit ? (
+                            <div className="text-sm text-slate-700 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50">
+                                {typesActes?.find(t => String(t.id) === String(bareme.type_acte_id))?.label ?? '—'}
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                                <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                                    <Checkbox checked={form.applicable_tous}
+                                        onCheckedChange={(checked) => setForm(f => ({ ...f, applicable_tous: checked === true }))} />
+                                    <span>Applicable à tous les types d'actes</span>
+                                </label>
+                                {!form.applicable_tous && (
+                                    <div className="max-h-48 overflow-y-auto space-y-3 pt-1 border-t border-slate-100">
+                                        {Object.entries(groupesTypesActes).map(([cat, items]) => (
+                                            <div key={cat}>
+                                                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">{cat}</p>
+                                                <div className="space-y-1.5">
+                                                    {items.map(t => (
+                                                        <label key={t.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                                            <Checkbox checked={form.type_acte_ids.includes(String(t.id))}
+                                                                onCheckedChange={() => toggleTypeActe(t.id)} />
+                                                            <span>{t.label}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {errors.type_acte_ids && <p className="text-xs text-danger-text">{errors.type_acte_ids}</p>}
+                            </div>
+                        )}
+                    </div>
 
-                        <div className="space-y-1.5">
-                            <Label>Organisme</Label>
-                            <Select value={form.organisme} onValueChange={v => setForm(f => ({ ...f, organisme: v }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    {organismes?.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                    <div className="space-y-1.5">
+                        <Label>Organisme</Label>
+                        <Select value={form.organisme} onValueChange={v => setForm(f => ({ ...f, organisme: v }))}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                {organismes?.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
                     </div>
 
                     <div className="space-y-1.5">
@@ -205,11 +256,24 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, organism
                                     </div>
                                 </div>
 
-                                <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
-                                    <Checkbox checked={form.obligatoire}
-                                        onCheckedChange={(checked) => setForm(f => ({ ...f, obligatoire: checked === true }))} />
-                                    Formalité obligatoire pour ce type d'acte
-                                </label>
+                                {isEdit && (
+                                    <div className="space-y-1.5">
+                                        <Label>Dépend de <span className="text-slate-400 text-xs">(optionnel — bloque cette démarche tant que l'autre n'a pas de retour)</span></Label>
+                                        <Select
+                                            value={form.depend_de_bareme_id || '__none__'}
+                                            onValueChange={v => setForm(f => ({ ...f, depend_de_bareme_id: v === '__none__' ? '' : v }))}
+                                        >
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="__none__">Aucune dépendance</SelectItem>
+                                                {demarchesDependance.map(d => (
+                                                    <SelectItem key={d.id} value={String(d.id)}>{d.organisme} — {d.libelle}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        {errors.depend_de_bareme_id && <p className="text-xs text-danger-text">{errors.depend_de_bareme_id}</p>}
+                                    </div>
+                                )}
 
                                 <div className="space-y-1.5">
                                     <Label>
@@ -344,6 +408,11 @@ function TypeActeRow({ typeActe, onEdit }) {
                                                     className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0 rounded-full bg-ink/10 text-ink font-medium align-middle">
                                                     <ClipboardCheck className="h-2.5 w-2.5" /> Formalité
                                                 </span>
+                                            )}
+                                            {b.depend_de_bareme_id && (
+                                                <div className="text-[10px] font-normal text-slate-400 mt-0.5">
+                                                    Dépend de : {typeActe.baremes?.find(x => String(x.id) === String(b.depend_de_bareme_id))?.libelle ?? '—'}
+                                                </div>
                                             )}
                                         </td>
                                         <td className="text-xs text-slate-500">
@@ -496,6 +565,7 @@ export default function ParametresBaremes() {
                 onClose={() => setModal({ open: false, bareme: null })}
                 bareme={modal.bareme}
                 typesActes={allTypesActes}
+                typesActesAvecBaremes={typesActes}
                 organismes={organismes}
             />
         </AppLayout>

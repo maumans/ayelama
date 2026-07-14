@@ -81,6 +81,19 @@ class Dossier extends Model
         return $this->hasMany(Partie::class)->orderBy('role');
     }
 
+    /**
+     * Rôles (valeurs `clientRole` de resources/js/data/questionnaires.js, stockées
+     * telles quelles dans Partie::role) considérés comme "le client demandeur" de
+     * l'office, par ordre de priorité décroissante — heuristique, pas un flag en
+     * base : aucune notion de "partie principale" n'existe dans le schéma actuel.
+     */
+    private const ROLES_CLIENT_PRIORITAIRES = [
+        'associe_unique', 'associe', 'gerant',
+        'acheteur', 'debiteur', 'bailleur', 'liquidateur',
+        'vendeur', 'locataire', 'creancier',
+        'actionnaire', 'administrateur', 'membre',
+    ];
+
     public function journal()
     {
         return $this->hasMany(JournalActivite::class)->orderByDesc('created_at');
@@ -164,5 +177,31 @@ class Dossier extends Model
         return $this->echeance
             && $this->echeance->toDateString() < now()->toDateString()
             && $this->etape !== EtapeDossier::Cloture;
+    }
+
+    public function partiePrincipale(): ?Partie
+    {
+        $this->loadMissing('parties');
+
+        foreach (self::ROLES_CLIENT_PRIORITAIRES as $role) {
+            $partie = $this->parties->firstWhere('role', $role);
+            if ($partie) {
+                return $partie;
+            }
+        }
+
+        return $this->parties->first();
+    }
+
+    public function clientPrincipalLabel(): ?string
+    {
+        $partie = $this->partiePrincipale();
+        if (!$partie) {
+            return null;
+        }
+
+        $this->loadMissing('parties.client');
+
+        return $partie->client?->nomComplet() ?: $partie->nom;
     }
 }

@@ -16,7 +16,12 @@ class ClientController extends Controller
         $q = trim((string) $request->get('q', ''));
 
         if (mb_strlen($q) < 2) {
-            return response()->json([]);
+            // Aucune recherche saisie : proposer les clients les plus récents
+            // plutôt que de renvoyer une liste vide, pour permettre de parcourir
+            // le répertoire sans avoir à connaître déjà le nom recherché.
+            $clients = Client::orderByDesc('created_at')->limit(20)->get();
+
+            return response()->json($clients);
         }
 
         $clients = Client::query()

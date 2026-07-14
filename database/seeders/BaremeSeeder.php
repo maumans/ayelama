@@ -137,7 +137,7 @@ class BaremeSeeder extends Seeder
         $societeTypes = TypeActe::where('categorie', 'societe')->pluck('id');
 
         foreach ($societeTypes as $typeActeId) {
-            $this->creerBaremes($typeActeId, [
+            $baremes = $this->creerBaremes($typeActeId, [
                 [
                     'organisme'    => 'Notaire',
                     'libelle'      => 'Honoraires forfaitaires',
@@ -147,12 +147,40 @@ class BaremeSeeder extends Seeder
                     'ordre'        => 1,
                 ],
                 [
+                    'organisme'    => 'Impots',
+                    'libelle'      => 'Enregistrement fiscal acte',
+                    'montant_fixe' => 70000.00,
+                    'base_calcul'  => 'montant_fixe',
+                    'description'  => "Droits d'enregistrement des statuts",
+                    'ordre'        => 2,
+                    'genere_formalite' => true,
+                    'type_impot'       => 'droits_enregistrement',
+                    'delai_heures'     => 24,
+                    'pieces_requises'  => ['Statuts signés', "Formulaire d'enregistrement"],
+                ],
+                [
                     'organisme'    => 'APIP',
-                    'libelle'      => 'Frais APIP + RCCM',
-                    'montant_fixe' => 390000.00,
+                    'libelle'      => 'Immatriculation RCCM',
+                    'montant_fixe' => 150000.00,
                     'base_calcul'  => 'montant_fixe',
                     'description'  => 'Frais de constitution APIP et immatriculation RCCM',
-                    'ordre'        => 2,
+                    'ordre'        => 3,
+                    'genere_formalite' => true,
+                    'retour_attendu'   => 'Extrait RCCM définitif',
+                    'delai_heures'     => 72,
+                    'pieces_requises'  => ['Statuts signés', 'Formulaire APIP', 'Copie CNI gérant'],
+                ],
+                [
+                    'organisme'    => 'APIP',
+                    'libelle'      => 'Obtention NIF',
+                    'montant_fixe' => 75000.00,
+                    'base_calcul'  => 'montant_fixe',
+                    'description'  => "Obtention du Numéro d'Identification Fiscale",
+                    'ordre'        => 4,
+                    'genere_formalite' => true,
+                    'retour_attendu'   => 'NIF attribué',
+                    'delai_heures'     => 72,
+                    'pieces_requises'  => ['Formulaire NIF', 'Copie statuts', 'Copie RCCM provisoire'],
                 ],
                 [
                     'organisme'    => 'Autre',
@@ -160,15 +188,7 @@ class BaremeSeeder extends Seeder
                     'montant_fixe' => 250000.00,
                     'base_calcul'  => 'montant_fixe',
                     'description'  => 'Publication de l\'avis de constitution dans le JAL',
-                    'ordre'        => 3,
-                ],
-                [
-                    'organisme'    => 'Impots',
-                    'libelle'      => "Droits d'enregistrement statuts + DNSV",
-                    'montant_fixe' => 200000.00,
-                    'base_calcul'  => 'montant_fixe',
-                    'description'  => 'Droits d\'enregistrement des statuts et de la DNSV (montant variable)',
-                    'ordre'        => 4,
+                    'ordre'        => 5,
                 ],
                 [
                     'organisme'    => 'Impots',
@@ -176,7 +196,24 @@ class BaremeSeeder extends Seeder
                     'montant_fixe' => 50000.00,
                     'base_calcul'  => 'montant_fixe',
                     'description'  => 'Timbres fiscaux et rôles selon nombre de pages',
-                    'ordre'        => 5,
+                    'ordre'        => 6,
+                ],
+            ]);
+
+            // Le dépôt des statuts au Greffe ne peut se faire qu'après réception
+            // de l'extrait RCCM définitif (retour de la démarche APIP correspondante).
+            $this->creerBaremes($typeActeId, [
+                [
+                    'organisme'    => 'Greffe',
+                    'libelle'      => 'Dépôt statuts au greffe',
+                    'montant_fixe' => 100000.00,
+                    'base_calcul'  => 'montant_fixe',
+                    'description'  => 'Dépôt des statuts définitifs auprès du greffe du tribunal de commerce',
+                    'ordre'        => 7,
+                    'genere_formalite'    => true,
+                    'depend_de_bareme_id' => $baremes['Immatriculation RCCM']->id,
+                    'delai_heures'        => 48,
+                    'pieces_requises'     => ['Extrait RCCM définitif'],
                 ],
             ]);
         }
@@ -226,11 +263,17 @@ class BaremeSeeder extends Seeder
 
     /**
      * Insère les barèmes pour un type d'acte donné, en évitant les doublons.
+     * Retourne les Bareme indexés par libellé, pour permettre à l'appelant de
+     * référencer leur id (ex. depend_de_bareme_id d'une démarche suivante).
+     *
+     * @return array<string, Bareme>
      */
-    private function creerBaremes(int $typeActeId, array $baremes): void
+    private function creerBaremes(int $typeActeId, array $baremes): array
     {
+        $resultat = [];
+
         foreach ($baremes as $bareme) {
-            Bareme::firstOrCreate(
+            $resultat[$bareme['libelle']] = Bareme::firstOrCreate(
                 [
                     'type_acte_id' => $typeActeId,
                     'organisme'    => $bareme['organisme'],
@@ -242,5 +285,7 @@ class BaremeSeeder extends Seeder
                 ])
             );
         }
+
+        return $resultat;
     }
 }

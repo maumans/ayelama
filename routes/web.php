@@ -3,10 +3,14 @@
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\CourrierController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DemandeController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DossierController;
 use App\Http\Controllers\FormaliteController;
+use App\Http\Controllers\IntakeController;
 use App\Http\Controllers\ModeleActeController;
+use App\Http\Controllers\ModeleCourrierController;
+use App\Http\Controllers\PartieController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RevisionController;
 use App\Http\Controllers\ParametresController;
@@ -19,6 +23,16 @@ Route::get('/', function () {
     return redirect()->route('dashboard');
 });
 
+// Demande externe (lien client public, sans authentification) — le jeton
+// lui-même est la capacité d'accès ; throttle pour limiter les abus.
+// Préfixe /intake distinct de /demandes (routes internes) pour éviter toute
+// collision d'URL entre le jeton public et l'id numérique de la demande.
+Route::middleware('throttle:20,1')->prefix('intake/{token}')->name('intake.')->group(function () {
+    Route::get('/', [IntakeController::class, 'show'])->name('show');
+    Route::post('/ocr', [IntakeController::class, 'ocr'])->name('ocr');
+    Route::post('/', [IntakeController::class, 'store'])->name('store');
+});
+
 Route::middleware(['auth', 'verified'])->group(function () {
 
     // Dashboard
@@ -29,6 +43,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/dossiers/{dossier:reference}/avancer', [DossierController::class, 'avancer'])->name('dossiers.avancer');
     Route::post('/dossiers/{dossier:reference}/generer-documents', [DossierController::class, 'genererDocuments'])->name('dossiers.generer_documents');
     Route::patch('/dossiers/{dossier:reference}/questionnaire', [DossierController::class, 'updateQuestionnaire'])->name('dossiers.questionnaire.update');
+
+    // Parties additionnelles (personnes non liées à un rôle du questionnaire)
+    Route::post('/dossiers/{dossier:reference}/parties', [PartieController::class, 'store'])->name('dossiers.parties.store');
+    Route::delete('/parties/{partie}', [PartieController::class, 'destroy'])->name('parties.destroy');
 
     // Documents
     Route::post('/dossiers/{dossier:reference}/documents', [DocumentController::class, 'store'])->name('dossiers.documents.store');
@@ -47,9 +65,23 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Formalités
     Route::get('/formalites', [FormaliteController::class, 'index'])->name('formalites.index');
+    Route::get('/formalites/export.csv', [FormaliteController::class, 'exportCsv'])->name('formalites.export');
     Route::post('/dossiers/{dossier:reference}/formalites', [FormaliteController::class, 'store'])->name('dossiers.formalites.store');
     Route::patch('/formalites/{formalite}', [FormaliteController::class, 'update'])->name('formalites.update');
+    Route::post('/formalites/{formalite}/deposer', [FormaliteController::class, 'deposer'])->name('formalites.deposer');
+    Route::post('/formalites/{formalite}/retour', [FormaliteController::class, 'retour'])->name('formalites.retour');
+    Route::get('/formalites/{formalite}/autres-retards', [FormaliteController::class, 'autresRetardsMemeOrganisme'])->name('formalites.autresRetards');
+    Route::post('/formalites/pieces/{piece}/televerser', [FormaliteController::class, 'televerserPiece'])->name('formalites.pieces.televerser');
+    Route::get('/formalites/pieces/{piece}/telecharger', [FormaliteController::class, 'telechargerPiece'])->name('formalites.pieces.telecharger');
     Route::delete('/formalites/{formalite}', [FormaliteController::class, 'destroy'])->name('formalites.destroy');
+
+    // Demandes externes (générer un lien, consulter, convertir en dossier)
+    Route::get('/demandes', [DemandeController::class, 'index'])->name('demandes.index');
+    Route::post('/demandes', [DemandeController::class, 'store'])->name('demandes.store');
+    Route::get('/demandes/{demande}', [DemandeController::class, 'show'])->name('demandes.show');
+    Route::get('/demandes/{demande}/scan', [DemandeController::class, 'scan'])->name('demandes.scan');
+    Route::post('/demandes/{demande}/convertir', [DemandeController::class, 'convertir'])->name('demandes.convertir');
+    Route::delete('/demandes/{demande}', [DemandeController::class, 'destroy'])->name('demandes.destroy');
 
     // Recherche globale
     Route::get('/search', [SearchController::class, 'index'])->name('search');
@@ -69,6 +101,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/modeles/{modele}', [ModeleActeController::class, 'update'])->name('modeles.update');
     Route::delete('/modeles/{modele}', [ModeleActeController::class, 'destroy'])->name('modeles.destroy');
 
+    // Modèles de courriers (lettres de transmission — étape Expédition)
+    Route::post('/modeles-courriers', [ModeleCourrierController::class, 'store'])->name('modeles_courriers.store');
+    Route::post('/modeles-courriers/{modeleCourrier}/dupliquer', [ModeleCourrierController::class, 'dupliquer'])->name('modeles_courriers.dupliquer');
+    Route::patch('/modeles-courriers/{modeleCourrier}', [ModeleCourrierController::class, 'update'])->name('modeles_courriers.update');
+    Route::delete('/modeles-courriers/{modeleCourrier}', [ModeleCourrierController::class, 'destroy'])->name('modeles_courriers.destroy');
+
     // Courriers
     Route::get('/courriers', [CourrierController::class, 'index'])->name('courriers.index');
     Route::post('/courriers', [CourrierController::class, 'store'])->name('courriers.store');
@@ -87,10 +125,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/types-actes', [ParametresController::class, 'typesActes'])->name('types_actes');
         Route::post('/types-actes', [ParametresController::class, 'storeTypeActe'])->name('types_actes.store');
         Route::patch('/types-actes/{typeActe}', [ParametresController::class, 'updateTypeActe'])->name('types_actes.update');
-        Route::get('/grilles', [ParametresController::class, 'grilles'])->name('grilles');
-        Route::post('/grilles', [ParametresController::class, 'storeGrille'])->name('grilles.store');
-        Route::put('/grilles/{grille}', [ParametresController::class, 'updateGrille'])->name('grilles.update');
-        Route::delete('/grilles/{grille}', [ParametresController::class, 'destroyGrille'])->name('grilles.destroy');
         Route::get('/baremes', [ParametresController::class, 'baremes'])->name('baremes');
         Route::post('/baremes', [ParametresController::class, 'storeBareme'])->name('baremes.store');
         Route::patch('/baremes/{bareme}', [ParametresController::class, 'updateBareme'])->name('baremes.update');

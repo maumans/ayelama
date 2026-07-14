@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateDossierRequest;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
 use App\Models\ModeleActe;
+use App\Models\ModeleCourrier;
 use App\Models\Partie;
 use App\Models\Questionnaire;
 use App\Models\TypeActe;
@@ -106,13 +107,14 @@ class DossierController extends Controller
         $this->authorize('create', Dossier::class);
 
         return Inertia::render('Dossiers/Create', [
-            'typesActes' => TypeActe::actif()->get()->groupBy(fn ($t) => $t->categorie->value)->map(fn ($group) => $group->map(fn ($t) => [
+            'typesActes' => TypeActe::actif()->with('modeles')->get()->groupBy(fn ($t) => $t->categorie->value)->map(fn ($group) => $group->map(fn ($t) => [
                 'id'          => $t->id,
                 'code'        => $t->code,
                 'label'       => $t->label,
                 'categorie'   => $t->categorie->value,
                 'delai_jours' => $t->delai_jours,
                 'description' => $t->description,
+                'modeles'     => $t->modeles->pluck('nom'),
             ])),
             'notaires'   => User::withRole('notaire')->where('actif', true)->get(['id', 'name', 'initiales']),
             'reviseurs'  => User::withRole('reviseur')->where('actif', true)->get(['id', 'name', 'initiales']),
@@ -126,9 +128,32 @@ class DossierController extends Controller
         \App\Services\FacturationService $facturationService,
         \App\Services\FormaliteGenerationService $formaliteGenerationService
     ) {
-        $typeActe = TypeActe::findOrFail($request->type_acte_id);
+        $dossier = $this->creerDossier(
+            $request->validated(),
+            $generatorService,
+            $facturationService,
+            $formaliteGenerationService
+        );
 
-        $dossier = DB::transaction(function () use ($request, $typeActe, $generatorService, $facturationService, $formaliteGenerationService) {
+        return redirect()->route('dossiers.show', $dossier->reference)
+            ->with('success', "Dossier {$dossier->reference} créé et documents générés avec succès.");
+    }
+
+    /**
+     * Création d'un dossier à partir d'un tableau de données déjà validées
+     * (même forme que StoreDossierRequest::rules()) — factorisé pour être
+     * réutilisé par DemandeController::convertir() (conversion d'une demande
+     * externe en dossier), sans dupliquer la transaction.
+     */
+    public function creerDossier(
+        array $data,
+        \App\Services\ActesGeneratorService $generatorService,
+        \App\Services\FacturationService $facturationService,
+        \App\Services\FormaliteGenerationService $formaliteGenerationService
+    ): Dossier {
+        $typeActe = TypeActe::findOrFail($data['type_acte_id']);
+
+        return DB::transaction(function () use ($data, $typeActe, $generatorService, $facturationService, $formaliteGenerationService) {
             $reference = $this->genererReference($typeActe);
 
             $dossier = Dossier::create([
@@ -136,22 +161,22 @@ class DossierController extends Controller
                 'type_acte_id'  => $typeActe->id,
                 'etape'         => EtapeDossier::Initialisation,
                 'redacteur_id'  => auth()->id(),
-                'reviseur_id'   => $request->reviseur_id,
-                'notaire_id'    => $request->notaire_id,
-                'formaliste_id' => $request->formaliste_id,
-                'objet'         => $request->objet,
-                'valeur'        => $request->valeur,
-                'echeance'      => $request->echeance,
-                'urgent'        => $request->boolean('urgent'),
-                'notes'         => $request->notes,
+                'reviseur_id'   => $data['reviseur_id'] ?? null,
+                'notaire_id'    => $data['notaire_id'],
+                'formaliste_id' => $data['formaliste_id'] ?? null,
+                'objet'         => $data['objet'],
+                'valeur'        => $data['valeur'] ?? null,
+                'echeance'      => $data['echeance'] ?? null,
+                'urgent'        => $data['urgent'] ?? false,
+                'notes'         => $data['notes'] ?? null,
             ]);
 
             Questionnaire::create([
                 'dossier_id' => $dossier->id,
-                'donnees'    => $request->donnees ?? [],
+                'donnees'    => $data['donnees'] ?? [],
             ]);
 
-            foreach ($request->parties ?? [] as $partieData) {
+            foreach ($data['parties'] ?? [] as $partieData) {
                 Partie::create(array_merge(['dossier_id' => $dossier->id], $partieData));
             }
 
@@ -194,9 +219,6 @@ class DossierController extends Controller
 
             return $dossier;
         });
-
-        return redirect()->route('dossiers.show', $dossier->reference)
-            ->with('success', "Dossier {$dossier->reference} créé et documents générés avec succès.");
     }
 
     public function edit(Dossier $dossier)
@@ -211,7 +233,8 @@ class DossierController extends Controller
         $dossier->load([
             'typeActe', 'redacteur', 'reviseur', 'notaire', 'formaliste',
             'questionnaire', 'documents', 'revision.reviseur', 'revision.points',
-            'formalites.pieces', 'parties.client', 'journal.user', 'factures.lignes',
+            'formalites.pieces', 'formalites.dependDe', 'formalites.dependants',
+            'parties.client', 'journal.user', 'factures.lignes',
             'courriers.redacteur',
         ]);
 
@@ -423,24 +446,10 @@ class DossierController extends Controller
                 ]),
                 'estValidable' => $d->revision->estValidable(),
             ] : null,
-            'formalites'  => $d->formalites->map(fn ($f) => [
-                'id'           => $f->id,
-                'organisme'    => $f->organisme,
-                'organismeLabel' => $f->labelOrganisme(),
-                'libelle'      => $f->labelAffiche(),
-                'statut'       => $f->statut?->value,
-                'montant_base' => $f->montant_base,
-                'taux'         => $f->taux,
-                'montant_calcule' => $f->montant_calcule,
-                'echeance_at'  => $f->echeance_at?->toDateTimeString(),
-                'estUrgente'   => $f->estUrgente(),
-                'estDepassee'  => $f->estDepassee(),
-                'pieces'       => $f->pieces->map(fn ($p) => [
-                    'id'         => $p->id,
-                    'label'      => $p->label,
-                    'est_fourni' => $p->est_fourni,
-                ]),
-            ]),
+            'formalites'  => $d->formalites
+                ->sortBy([['ordre', 'asc'], ['id', 'asc']])
+                ->values()
+                ->map(fn ($f) => $f->versArray(auth()->user())),
             'parties' => $d->parties->map(fn ($p) => [
                 'id'        => $p->id,
                 'nom'       => $p->nom,
@@ -502,24 +511,17 @@ class DossierController extends Controller
     }
 
     /**
-     * Modèles de courrier de transmission (type d'acte COU-CER) applicables à la
-     * catégorie du dossier — sert à la fois à l'onglet Expédition et au blocage de
-     * sortie d'étape (DossierStepService::verifierExpedition).
+     * Lettres de transmission (ModeleCourrier) applicables au type d'acte précis
+     * du dossier — sert à la fois à l'onglet Expédition et au blocage de sortie
+     * d'étape (DossierStepService::verifierExpedition).
      */
     private function courrierModelesApplicables(Dossier $d): \Illuminate\Support\Collection
     {
-        $couCerId = TypeActe::where('code', 'COU-CER')->value('id');
-        if (!$couCerId) {
-            return collect();
-        }
-
-        $categorie = $d->typeActe?->categorie?->value;
-
-        return ModeleActe::where('type_acte_id', $couCerId)
+        return ModeleCourrier::with('typesActes')
             ->actif()
             ->get()
-            ->filter(fn (ModeleActe $m) => $categorie && $m->applicablePour($categorie))
-            ->map(fn (ModeleActe $m) => ['id' => $m->id, 'nom' => $m->nom])
+            ->filter(fn (ModeleCourrier $m) => $m->applicablePour($d->typeActe))
+            ->map(fn (ModeleCourrier $m) => ['id' => $m->id, 'nom' => $m->nom])
             ->values();
     }
 }

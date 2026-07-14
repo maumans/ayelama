@@ -52,6 +52,42 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks) {
     return parties;
 }
 
+// Champs exposables au client via un lien de demande externe : les champs de la
+// section `clientRole` demandée (une seule entrée même si la section est un bloc
+// répétable — le client ne remplit que sa propre part, le personnel complète le
+// reste manuellement), plus tout champ marqué `publicIntake: true` ailleurs dans
+// le questionnaire (infos dossier non-identité que le client connaît aussi —
+// dénomination, objet social, description du bien… jamais les champs calculés
+// ou juridiques comme le RCCM d'une société en cours de création, la taxe de
+// plus-value ou le rang hypothécaire).
+export function getPublicIntakeFields(questionnaire, clientRole) {
+    const groups = groupFieldsBySection(questionnaire);
+    const roleGroup = clientRole ? groups.find(g => g.clientRole === clientRole) : null;
+
+    let roleFields = [];
+    let roleLabel = null;
+    let repeatableFieldId = null;
+    if (roleGroup) {
+        const first = roleGroup.fields[0];
+        if (first?.type === 'repeatable') {
+            roleFields = first.fields;
+            repeatableFieldId = first.id;
+        } else {
+            roleFields = roleGroup.fields;
+        }
+        roleLabel = roleGroup.name;
+    }
+
+    const extraFields = questionnaire.filter(f => f.publicIntake && f.type !== 'repeatable');
+
+    // `repeatableFieldId` non nul : le rôle correspond à un bloc répétable
+    // (ex. associés) — les valeurs saisies doivent être imbriquées dans un
+    // tableau à une entrée sous cette clé (donnees[repeatableFieldId] = [...]),
+    // pas posées à plat, sinon la Grille répétable du questionnaire interne ne
+    // les affichera pas après conversion en dossier.
+    return { roleFields, roleLabel, extraFields, repeatableFieldId };
+}
+
 // Liste des `clientRole` déclarés dans le schéma d'un questionnaire (sections
 // non-répétables + champs repeatable), qu'ils soient peuplés ou non. Sert au
 // backend à savoir quelles `Partie` remplacer sans toucher aux autres rôles.

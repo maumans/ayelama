@@ -11,7 +11,7 @@ class Bareme extends Model
         'type_acte_id', 'organisme', 'libelle',
         'taux', 'montant_fixe', 'base_calcul',
         'description', 'actif', 'ordre',
-        'genere_formalite', 'obligatoire', 'type_impot',
+        'genere_formalite', 'depend_de_bareme_id', 'type_impot',
         'retour_attendu', 'delai_heures', 'pieces_requises',
     ];
 
@@ -22,7 +22,6 @@ class Bareme extends Model
             'montant_fixe'     => 'decimal:2',
             'actif'            => 'boolean',
             'genere_formalite' => 'boolean',
-            'obligatoire'      => 'boolean',
             'pieces_requises'  => 'array',
         ];
     }
@@ -30,6 +29,11 @@ class Bareme extends Model
     public function typeActe()
     {
         return $this->belongsTo(TypeActe::class);
+    }
+
+    public function dependDe()
+    {
+        return $this->belongsTo(Bareme::class, 'depend_de_bareme_id');
     }
 
     public function scopeActif($query)
@@ -59,6 +63,7 @@ class Bareme extends Model
             'Conservation' => 'Conservation foncière',
             'CNSS'         => 'CNSS',
             'Notaire'      => 'Honoraires notaire',
+            'Greffe'       => 'Greffe',
             default        => $this->organisme,
         };
     }

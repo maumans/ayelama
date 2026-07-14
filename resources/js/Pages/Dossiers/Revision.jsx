@@ -11,13 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
-
-const STATUTS = {
-    en_attente: { label: 'En attente',          color: 'text-slate-500 bg-slate-50 border-slate-200' },
-    en_cours:   { label: 'En cours',            color: 'text-warning-text bg-warning-bg border-amber-200' },
-    valide:     { label: 'Validé',              color: 'text-success bg-success-bg border-green-200' },
-    renvoye:    { label: 'Renvoyé en correction', color: 'text-danger-text bg-danger-bg border-red-200' },
-};
+import { STATUT_META } from '@/data/revisionStatuts';
 
 const TYPE_DOC_LABELS = {
     acte_principal: 'Acte principal',
@@ -58,7 +52,7 @@ export default function Revision() {
     const [renvoyant, setRenvoyant] = useState(false);
 
     const revisionStatut = revision?.statut ?? 'en_attente';
-    const statutConf     = STATUTS[revisionStatut] ?? STATUTS.en_attente;
+    const statutConf     = STATUT_META[revisionStatut] ?? STATUT_META.en_attente;
 
     const docList      = documents ?? [];
     const docEvalues   = Object.values(etats).filter(e => e.etat !== null).length;
@@ -190,7 +184,7 @@ export default function Revision() {
                                 </div>
                                 <span className={cn(
                                     'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold border shrink-0',
-                                    statutConf.color
+                                    statutConf.badge
                                 )}>
                                     {statutConf.label}
                                 </span>

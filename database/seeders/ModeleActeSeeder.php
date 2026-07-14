@@ -465,100 +465,6 @@ class ModeleActeSeeder extends Seeder
                 'dest' => 'modeles/procuration/procuration-vente.docx',
             ],
 
-            // ════════════════════════════════════════════════════════════════
-            // COURRIER / TRANSMISSION (COU-CER) — tous .docx → tous actifs
-            // ════════════════════════════════════════════════════════════════
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Transmission vente bien immeuble',
-                'src'  => 'Courrier de transmission/TRANSMISSION VENTE BIEN IMMEUBLE.docx',
-                'dest' => 'modeles/courrier/transmission-vente-bien-immeuble.docx',
-                'categories_cibles' => ['vente'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Transmission actes (minute)',
-                'src'  => 'Courrier de transmission/TRANSMISSION ACTES (MINUTE).docx',
-                'dest' => 'modeles/courrier/transmission-actes-minute.docx',
-                'categories_cibles' => null, // générique, toutes catégories
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Transmission certificat authentique société',
-                'src'  => 'Courrier de transmission/TRANSMISSION C.AUTH. SOCIETE.docx',
-                'dest' => 'modeles/courrier/transmission-cauth-societe.docx',
-                'categories_cibles' => ['societe'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Transmission modification société',
-                'src'  => 'Courrier de transmission/Transmission Modification société.docx',
-                'dest' => 'modeles/courrier/transmission-modification-societe.docx',
-                'categories_cibles' => ['societe'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Transmission modification avec acte de dépôt du PV',
-                'src'  => 'Courrier de transmission/Transmission MODIF AVEC ACTE DE DEPOT DU PV.docx',
-                'dest' => 'modeles/courrier/transmission-modif-acte-depot-pv.docx',
-                'categories_cibles' => ['societe'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => "Transmission mainlevée d'hypothèque",
-                'src'  => "Courrier de transmission/Transmission Mainlevée d'hypo..docx",
-                'dest' => 'modeles/courrier/transmission-mainlevee-hypo.docx',
-                'categories_cibles' => ['hypotheque'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Accusé de réception banque',
-                'src'  => 'Courrier de transmission/Accusé de reception BANQUE.docx',
-                'dest' => 'modeles/courrier/accuse-reception-banque.docx',
-                'categories_cibles' => ['hypotheque'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Accusé de réception société',
-                'src'  => 'Courrier de transmission/Accusé reception SOCIETE.docx',
-                'dest' => 'modeles/courrier/accuse-reception-societe.docx',
-                'categories_cibles' => ['societe'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Accusé de réception contrat de prêt immobilier',
-                'src'  => 'Courrier de transmission/ACCUSEE RECEPTION CONTRAT DE PRET IMMOBILIER.docx',
-                'dest' => 'modeles/courrier/accuse-reception-pret-immobilier.docx',
-                'categories_cibles' => ['hypotheque'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Réquisition conservation foncière',
-                'src'  => 'Courrier de transmission/Réquisition  conservation foncière.docx',
-                'dest' => 'modeles/courrier/requisition-conservation-fonciere.docx',
-                'categories_cibles' => ['vente', 'hypotheque'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'lettre', 'version' => '1.0',
-                'nom'  => 'Mise en place de crédit',
-                'src'  => 'Courrier de transmission/MISE EN PLACE  DE CREDIT.docx',
-                'dest' => 'modeles/courrier/mise-en-place-credit.docx',
-                'categories_cibles' => ['hypotheque'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'acte_principal', 'version' => '1.0',
-                'nom'  => 'Contrat de prêt bancaire',
-                'src'  => 'Courrier de transmission/CONTRAT DE PRET LA BANQUE.docx',
-                'dest' => 'modeles/courrier/contrat-pret-banque.docx',
-                'categories_cibles' => ['hypotheque'],
-            ],
-            [
-                'code' => 'COU-CER', 'type_document' => 'recepisse', 'version' => '1.0',
-                'nom'  => 'Récépissé de dépôt de dossier',
-                'src'  => null,
-                'dest' => 'modeles/courrier/recepisse-depot.docx',
-                'categories_cibles' => null,
-            ],
         ];
 
         // ──────────────────────────────────────────────────────────────────────
@@ -601,12 +507,11 @@ class ModeleActeSeeder extends Seeder
             ModeleActe::firstOrCreate(
                 ['nom' => $m['nom'], 'type_acte_id' => $typeActeId],
                 [
-                    'type_document'     => $m['type_document'],
-                    'categories_cibles' => $m['categories_cibles'] ?? null,
-                    'chemin_fichier'    => $m['dest'],
-                    'version'           => $m['version'],
-                    'est_actif'         => $estActif,
-                    'updated_by'        => $admin?->id,
+                    'type_document'  => $m['type_document'],
+                    'chemin_fichier' => $m['dest'],
+                    'version'        => $m['version'],
+                    'est_actif'      => $estActif,
+                    'updated_by'     => $admin?->id,
                 ]
             );
         }

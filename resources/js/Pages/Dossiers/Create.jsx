@@ -6,32 +6,24 @@ import { NumberField } from '@/components/ui/number-field';
 import { PhoneField } from '@/components/ui/phone-field';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
-import { mapClientToPrefixedFields } from '@/lib/clientFields';
+import { mapClientToPrefixedFields, buildPartieFields } from '@/lib/clientFields';
 import { groupFieldsBySection, buildPartiesPayload } from '@/lib/partiesPayload';
 import { notifyValidationError } from '@/lib/toast';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Building2, Home, Scale, Briefcase, Heart, GitBranch,
-    FileText, Mail, ChevronLeft, ChevronRight, Check,
+    FileText, HeartHandshake, ScrollText, HandHeart, ChevronLeft, ChevronRight, Check,
     Users, ArrowRight, AlertCircle, PlusCircle, Edit2, Archive, Zap,
-    UserCog, ClipboardCheck, Key, Landmark, Banknote, StickyNote,
+    UserCog, ClipboardCheck, Key, Landmark, Banknote, StickyNote, Trash2,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
-
-const WIZARD_STEPS = [
-    { id: 'categorie', label: 'Catégorie', short: '1' },
-    { id: 'type', label: 'Type précis', short: '2' },
-    { id: 'questionnaire', label: 'Questionnaire', short: '3' },
-    { id: 'recapitulatif', label: 'Récapitulatif', short: '4' },
-];
 
 const SOCIETE_GROUPES = [
     {
@@ -63,6 +55,10 @@ const SOCIETE_GROUPES = [
     },
 ];
 
+// Métadonnées purement présentationnelles (icône/couleur/description courte) —
+// la vraie liste des types sélectionnables vient de la prop `typesActes`
+// (base de données), voir plus bas. Une catégorie n'est affichée que si elle a
+// au moins un type actif configuré.
 const categories = [
     {
         id: 'societe', label: 'Société', icon: Building2,
@@ -101,10 +97,24 @@ const categories = [
     },
     {
         id: 'succession', label: 'Successions', icon: GitBranch,
-        desc: 'Partage amiable ou judiciaire',
+        desc: 'Déclaration ou partage de succession',
         color: 'border-rose-200 hover:border-rose-400 hover:bg-rose-50/50',
         activeColor: 'border-rose-400 bg-rose-50',
         iconColor: 'text-rose-600',
+    },
+    {
+        id: 'mariage', label: 'Mariage', icon: HeartHandshake,
+        desc: 'Contrat de mariage, convention de divorce',
+        color: 'border-fuchsia-200 hover:border-fuchsia-400 hover:bg-fuchsia-50/50',
+        activeColor: 'border-fuchsia-400 bg-fuchsia-50',
+        iconColor: 'text-fuchsia-600',
+    },
+    {
+        id: 'testament', label: 'Testament', icon: ScrollText,
+        desc: 'Dispositions testamentaires',
+        color: 'border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/50',
+        activeColor: 'border-indigo-400 bg-indigo-50',
+        iconColor: 'text-indigo-600',
     },
     {
         id: 'procuration', label: 'Procuration', icon: FileText,
@@ -114,58 +124,27 @@ const categories = [
         iconColor: 'text-slate-600',
     },
     {
-        id: 'courrier', label: 'Courrier', icon: Mail,
-        desc: "Courrier de transmission, prise en charge",
-        color: 'border-stone-200 hover:border-stone-400 hover:bg-stone-50/50',
-        activeColor: 'border-stone-400 bg-stone-100',
-        iconColor: 'text-stone-600',
+        id: 'prise_en_charge', label: 'Prise en charge', icon: HandHeart,
+        desc: "Prise en charge d'un mineur, d'un adulte ou de frais",
+        color: 'border-teal-200 hover:border-teal-400 hover:bg-teal-50/50',
+        activeColor: 'border-teal-400 bg-teal-50',
+        iconColor: 'text-teal-600',
     },
 ];
 
-const typesByCategorie = {
-    societe: [
-        { id: 'creation_sarlu', groupe: 'creation',    label: 'Constitution SARLU', desc: 'Société à responsabilité limitée unipersonnelle', actes: ['Statuts SARLU', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
-        { id: 'creation_sarl',  groupe: 'creation',    label: 'Constitution SARL',  desc: 'Société à responsabilité limitée (multi-associés)', actes: ['Statuts SARL', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
-        { id: 'creation_sa',    groupe: 'creation',    label: 'Constitution SA',    desc: 'Société anonyme — capital min. 140 000 000 GNF', actes: ['Statuts SA', "PV AG constitutive", 'Attestation dépôt capital', 'DNSV', 'Insertion journal légal', 'RCCM'] },
-        { id: 'creation_sas',   groupe: 'creation',    label: 'Constitution SAS',   desc: 'Société par actions simplifiées (multi-associés)', actes: ['Statuts SAS', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
-        { id: 'creation_sasu',  groupe: 'creation',    label: 'Constitution SASU',  desc: 'SAS unipersonnelle', actes: ['Statuts SASU', 'Page de garde', 'Attestation dépôt capital', "Déclaration sur l'honneur", 'DNSV', 'Insertion journal légal', 'RCCM'] },
-        { id: 'creation_snc',   groupe: 'creation',    label: 'Constitution SNC',   desc: 'Société en nom collectif', actes: ['Statuts SNC', 'Déclaration sur l\'honneur', 'RCCM'] },
-        { id: 'creation_gie',   groupe: 'creation',    label: 'Constitution GIE',   desc: "Groupement d'intérêt économique", actes: ['Statuts GIE', 'DNSV', 'RCCM'] },
-        { id: 'modification',   groupe: 'modification', label: 'Modification de statuts', desc: 'Changement de capital, gérant, siège, objet…', actes: ['Fiche de modification (obligatoire)', "PV d'AGE", 'Statuts modifiés'] },
-        { id: 'dissolution',    groupe: 'dissolution',  label: 'Dissolution / Liquidation', desc: 'Dissolution amiable ou judiciaire', actes: ["PV d'AGE de dissolution", 'Acte de liquidation', 'Publication journal légal'] },
-    ],
-    vente: [
-        { id: 'vente_immeuble',   label: "Vente immobilière (avec TF)",  desc: 'Vente avec titre foncier',          actes: ['Contrat de vente', 'Page de garde', 'Tableau de bordereau', 'Facture', 'Facture plus-value'] },
-        { id: 'vente_sans_titre', label: "Vente immobilière (sans TF)",  desc: 'Vente sans titre foncier',          actes: ['Contrat de vente', 'Page de garde', 'Facture', 'Facture plus-value'] },
-        { id: 'vente_immeuble',   label: 'Cession fonds de commerce',    desc: 'Cession commerciale',               actes: ['Acte de cession', 'Bordereau'] },
-    ],
-    hypotheque: [
-        { id: 'hypotheque_conv', label: 'Hypothèque conventionnelle', desc: "Constitution de garantie hypothécaire en faveur d'une banque", actes: ["Contrat d'hypothèque", 'Bordereau de la Conservation Foncière', 'Page de garde', 'Facture'] },
-        { id: 'mainlevee',       label: "Mainlevée d'hypothèque",      desc: 'Radiation et mainlevée après remboursement du crédit',        actes: ["Acte de mainlevée", 'Bordereau de la Conservation Foncière', 'Facture'] },
-    ],
-    bail: [
-        { id: 'bail_habitation',   label: "Bail d'habitation",   desc: 'Location de logement à usage résidentiel',                   actes: ["Contrat de bail d'habitation", 'Page de garde', 'Facture'] },
-        { id: 'bail_commercial',   label: 'Bail commercial',     desc: 'Location de local à usage commercial ou professionnel',      actes: ['Contrat de bail commercial', 'Page de garde', 'Facture'] },
-        { id: 'bail_construction', label: 'Bail à construction', desc: 'Bail longue durée avec obligation de construire sur terrain', actes: ['Contrat de bail à construction', 'Page de garde', 'Facture'] },
-    ],
-    donation: [
-        { id: 'donation_entre_vifs', label: 'Donation entre vifs', desc: '', actes: ['Acte de donation', 'Acceptation du donataire'] },
-    ],
-    succession: [
-        { id: 'partage_amiable',    label: 'Partage amiable',    desc: '', actes: ['Acte de partage', "État des héritiers", "Attestation d'héritiers"] },
-        { id: 'partage_judiciaire', label: 'Partage judiciaire', desc: '', actes: ['Acte de partage judiciaire', 'Décision de justice'] },
-    ],
-    procuration: [
-        { id: 'procuration_speciale', label: 'Procuration spéciale',  desc: '', actes: ['Acte de procuration'] },
-        { id: 'procuration_generale', label: 'Procuration générale',  desc: '', actes: ['Acte de procuration générale'] },
-    ],
-    courrier: [
-        { id: 'courrier_transmission', label: 'Courrier de transmission', desc: '', actes: ['Lettre de transmission'] },
-    ],
-};
+// Particularité Société : les types reçus de la base sont répartis en 3
+// procédures (Création/Modification/Dissolution) — seuls SOC-MOD et SOC-DIS
+// sont des cas spéciaux, tout le reste (types actuels et futurs) est une
+// création par défaut.
+function societeGroupe(code) {
+    if (code === 'SOC-MOD') return 'modification';
+    if (code === 'SOC-DIS') return 'dissolution';
+    return 'creation';
+}
 
-function getQuestionnaire(typeId) {
-    return QUESTIONNAIRES[typeId] || [
+function getQuestionnaire(typeActe) {
+    const key = TYPE_ACTE_CODE_MAP[typeActe?.code];
+    return (key && QUESTIONNAIRES[key]) || [
         { id: 'client', label: 'Nom du client / partie', type: 'text', placeholder: 'Nom complet', required: true },
         { id: 'details', label: 'Détails', type: 'textarea', placeholder: 'Informations complémentaires', required: false },
     ];
@@ -222,6 +201,8 @@ export default function DossierCreate() {
     const [formValues, setFormValues] = useState({});
     const [clientLinks, setClientLinks] = useState({}); // { [clientRole]: clientObject }
     const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
+    const [autresPersonnes, setAutresPersonnes] = useState([]); // [{ client, role }] — pas liées à un rôle du questionnaire
+    const [creatingClientForAutreIndex, setCreatingClientForAutreIndex] = useState(null);
     const [objet, setObjet] = useState('');
     const [urgent, setUrgent] = useState(false);
     const [notes, setNotes] = useState('');
@@ -239,32 +220,20 @@ export default function DossierCreate() {
         if (scrollable) scrollable.scrollTop = 0;
     }, [step, sousGroupe, typeActe?.id]);
 
-    // Trouve le TypeActe serveur à partir de la clé questionnaire via TYPE_ACTE_CODE_MAP (inversé).
-    const findTypeActeId = () => {
-        if (!typeActe || !typesActes) return null;
-        const allTypes = Object.values(typesActes).flat();
-        // Codes DB associés à cette clé questionnaire
-        const codes = Object.entries(TYPE_ACTE_CODE_MAP)
-            .filter(([, qKey]) => qKey === typeActe.id)
-            .map(([code]) => code);
-        if (codes.length > 0) {
-            const match = allTypes.find(t => codes.includes(t.code));
-            if (match) return match.id;
-        }
-        // Fallback label matching
-        const match = allTypes.find(t =>
-            t.label.toLowerCase().includes(typeActe.label.toLowerCase().split(' ')[0])
-        );
-        return match?.id ?? null;
-    };
+    // `typeActe` est directement la ligne TypeActe de la base (id, code, label,
+    // description, modeles) — plus besoin de chercher son id serveur, il l'a déjà.
+    const findTypeActeId = () => typeActe?.id ?? null;
 
-    const stepName = WIZARD_STEPS[step].id;
-    const typesDisponibles = categorie
-        ? sousGroupe
-            ? (typesByCategorie[categorie.id] || []).filter(t => t.groupe === sousGroupe)
-            : (typesByCategorie[categorie.id] || [])
-        : [];
-    const questionnaire = typeActe ? getQuestionnaire(typeActe.id) : [];
+    const wizardSteps = [
+        { id: 'categorie', label: 'Catégorie' },
+        { id: 'questionnaire', label: categorie ? `Détails — ${categorie.label}` : 'Détails' },
+        { id: 'recapitulatif', label: 'Récapitulatif' },
+    ];
+    const typesActesCategorie = categorie ? (typesActes?.[categorie.id] ?? []) : [];
+    const typesDisponibles = categorie?.id === 'societe' && sousGroupe
+        ? typesActesCategorie.filter(t => societeGroupe(t.code) === sousGroupe)
+        : typesActesCategorie;
+    const questionnaire = typeActe ? getQuestionnaire(typeActe) : [];
     // Champs filtrés selon les valeurs actuelles (showIf)
     const visibleFields = getVisibleFields(questionnaire, formValues);
     const categorieSelected = categories.find(c => c.id === categorie?.id);
@@ -272,9 +241,27 @@ export default function DossierCreate() {
 
     const selectType = (type) => {
         setTypeActe(type);
-        const q = QUESTIONNAIRES[type.id] ?? [];
+        const key = TYPE_ACTE_CODE_MAP[type.code];
+        const q = (key && QUESTIONNAIRES[key]) || [];
         setFormValues(initRepeatableFields(q));
         setClientLinks({});
+    };
+
+    const selectTypeById = (id) => {
+        const type = typesDisponibles.find(t => String(t.id) === id);
+        if (type) selectType(type);
+        else setTypeActe(null);
+    };
+
+    // Procédure Société (Création/Modification/Dissolution) : Modification et
+    // Dissolution n'ont chacune qu'un seul type possible — on le sélectionne
+    // directement, pas besoin d'un second select pour un choix unique.
+    const selectProcedure = (groupe) => {
+        setSousGroupe(groupe || null);
+        setTypeActe(null);
+        if (!groupe) return;
+        const filtered = typesActesCategorie.filter(t => societeGroupe(t.code) === groupe);
+        if (filtered.length === 1) selectType(filtered[0]);
     };
 
     const applyClientToSection = (group, client) => {
@@ -293,10 +280,17 @@ export default function DossierCreate() {
         });
     };
 
+    // "Autres personnes" : présentes lors de la création du dossier mais pas
+    // liées à un rôle précis de l'acte (ex. accompagnateur, témoin).
+    const addAutrePersonne = () => setAutresPersonnes(prev => [...prev, { client: null, role: '' }]);
+    const removeAutrePersonne = (i) => setAutresPersonnes(prev => prev.filter((_, idx) => idx !== i));
+    const setAutrePersonneClient = (i, client) => setAutresPersonnes(prev => prev.map((p, idx) => idx === i ? { ...p, client } : p));
+    const setAutrePersonneRole = (i, role) => setAutresPersonnes(prev => prev.map((p, idx) => idx === i ? { ...p, role } : p));
+
     const canNext = () => {
         if (step === 0) return !!categorie;
-        if (step === 1) return !!typeActe;
-        if (step === 2) {
+        if (step === 1) {
+            if (!typeActe) return false;
             const required = visibleFields.filter(q => q.required && q.type !== 'repeatable');
             const scalarOk = required.every(q => formValues[q.id]);
             const repeatableOk = visibleFields
@@ -307,16 +301,8 @@ export default function DossierCreate() {
         return false;
     };
 
-    const next = () => { if (canNext() && step < 3) setStep(s => s + 1); };
-    const prev = () => {
-        if (step === 1 && sousGroupe !== null) {
-            setSousGroupe(null);
-            setTypeActe(null);
-        } else if (step > 0) {
-            setStep(s => s - 1);
-            if (step === 1) { setSousGroupe(null); setTypeActe(null); }
-        }
-    };
+    const next = () => { if (canNext() && step < 2) setStep(s => s + 1); };
+    const prev = () => { if (step > 0) setStep(s => s - 1); };
 
     const handleSubmit = () => {
         const typeActeId = findTypeActeId();
@@ -324,6 +310,9 @@ export default function DossierCreate() {
             setErrors({ type_acte_id: 'Type d\'acte introuvable. Vérifiez la configuration.' });
             return;
         }
+        const autresPartiesPayload = autresPersonnes
+            .filter(p => p.client && p.role.trim())
+            .map(p => ({ ...buildPartieFields(p.client, {}, ''), role: p.role.trim(), client_id: p.client.id }));
         setSubmitting(true);
         router.post('/dossiers', {
             type_acte_id: typeActeId,
@@ -334,7 +323,7 @@ export default function DossierCreate() {
             reviseur_id: reviseurId || undefined,
             formaliste_id: formalisteId || undefined,
             donnees: formValues,
-            parties: buildPartiesPayload(questionnaire, formValues, clientLinks),
+            parties: [...buildPartiesPayload(questionnaire, formValues, clientLinks), ...autresPartiesPayload],
         }, {
             onError: (errs) => { setErrors(errs); setSubmitting(false); notifyValidationError(errs); },
             onFinish: () => setSubmitting(false),
@@ -358,7 +347,7 @@ export default function DossierCreate() {
 
                 {/* Stepper wizard */}
                 <div className="flex items-center gap-2">
-                    {WIZARD_STEPS.map((s, i) => (
+                    {wizardSteps.map((s, i) => (
                         <React.Fragment key={s.id}>
                             <div className={cn(
                                 'flex items-center gap-2 cursor-default',
@@ -381,7 +370,7 @@ export default function DossierCreate() {
                                     {s.label}
                                 </span>
                             </div>
-                            {i < WIZARD_STEPS.length - 1 && (
+                            {i < wizardSteps.length - 1 && (
                                 <div className={cn('flex-1 h-px', i < step ? 'bg-success' : 'bg-slate-200')} />
                             )}
                         </React.Fragment>
@@ -391,7 +380,7 @@ export default function DossierCreate() {
                 {/* Contenu */}
                 <AnimatePresence mode="wait">
                     <motion.div
-                        key={step === 1 ? `${step}-${sousGroupe ?? 'root'}` : step}
+                        key={step}
                         initial={{ opacity: 0, x: 12 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -12 }}
@@ -403,7 +392,7 @@ export default function DossierCreate() {
                             <div className="space-y-3">
                                 <h2 className="font-serif text-heading text-ink">Sélectionnez une catégorie</h2>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                                    {categories.map((cat) => {
+                                    {categories.filter(cat => (typesActes?.[cat.id]?.length ?? 0) > 0).map((cat) => {
                                         const Icon = cat.icon;
                                         const isSelected = categorie?.id === cat.id;
                                         return (
@@ -427,148 +416,78 @@ export default function DossierCreate() {
                             </div>
                         )}
 
-                        {/* Étape 2 : Type précis */}
+                        {/* Étape 2 : Type précis + reste du formulaire, sur un seul écran */}
                         {step === 1 && (
                             <>
-                                {/* Société sans procédure choisie → 3 grandes cartes */}
-                                {categorie?.id === 'societe' && sousGroupe === null && (
-                                    <div className="space-y-3">
-                                        <h2 className="font-serif text-heading text-ink">
-                                            Procédure — <span className="text-slate-500">Société</span>
-                                        </h2>
-                                        <div className="space-y-3">
-                                            {SOCIETE_GROUPES.map((groupe) => {
-                                                const Icon = groupe.icon;
-                                                const count = typesByCategorie.societe.filter(t => t.groupe === groupe.id).length;
-                                                return (
-                                                    <button
-                                                        key={groupe.id}
-                                                        onClick={() => setSousGroupe(groupe.id)}
-                                                        className={cn(
-                                                            'w-full flex items-center gap-4 p-5 rounded-xl border-2 text-left transition-all bg-white',
-                                                            groupe.color
-                                                        )}
+                                <div className="space-y-3">
+                                    <h2 className="font-serif text-heading text-ink">
+                                        Type d'acte — <span className="text-slate-500">{categorieSelected?.label}</span>
+                                    </h2>
+                                    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-4">
+                                        <div className={cn('grid gap-4', categorie?.id === 'societe' && 'sm:grid-cols-2')}>
+                                            {categorie?.id === 'societe' && (
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="procedure">Procédure</Label>
+                                                    <select
+                                                        id="procedure"
+                                                        value={sousGroupe ?? ''}
+                                                        onChange={e => selectProcedure(e.target.value)}
+                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
                                                     >
-                                                        <div className={cn('h-12 w-12 rounded-xl flex items-center justify-center shrink-0', groupe.iconBg)}>
-                                                            <Icon className={cn('h-6 w-6', groupe.iconColor)} />
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="font-semibold text-slate-800 text-base">{groupe.label}</div>
-                                                            <div className="text-sm text-slate-500 mt-0.5 leading-snug">{groupe.desc}</div>
-                                                        </div>
-                                                        {groupe.id === 'creation' && (
-                                                            <Badge variant="secondary" className="shrink-0">{count} types</Badge>
-                                                        )}
-                                                        <ChevronRight className="h-5 w-5 text-slate-400 shrink-0" />
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
+                                                        <option value="">— Choisir —</option>
+                                                        {SOCIETE_GROUPES.map(g => (
+                                                            <option key={g.id} value={g.id}>{g.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
 
-                                {/* Société avec procédure choisie → breadcrumb + liste filtrée */}
-                                {categorie?.id === 'societe' && sousGroupe !== null && (
-                                    <div className="space-y-3">
-                                        <button
-                                            onClick={() => { setSousGroupe(null); setTypeActe(null); }}
-                                            className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors"
-                                        >
-                                            <ChevronLeft className="h-3.5 w-3.5" />
-                                            Retour aux procédures
-                                        </button>
-                                        <h2 className="font-serif text-heading text-ink">
-                                            Type d'acte — <span className="text-slate-500">{SOCIETE_GROUPES.find(g => g.id === sousGroupe)?.label}</span>
-                                        </h2>
-                                        <div className="space-y-2">
-                                            {typesDisponibles.map((type) => {
-                                                const isSelected = typeActe?.id === type.id;
-                                                return (
-                                                    <button
-                                                        key={type.id + type.label}
-                                                        onClick={() => selectType(type)}
-                                                        className={cn(
-                                                            'w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all',
-                                                            isSelected
-                                                                ? 'border-ink bg-ink/5'
-                                                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                                                        )}
+                                            {(categorie?.id !== 'societe' || sousGroupe) && typesDisponibles.length > 1 && (
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="type_acte">{categorie?.id === 'societe' ? 'Type de société' : "Type d'acte"}</Label>
+                                                    <select
+                                                        id="type_acte"
+                                                        value={typeActe?.id ?? ''}
+                                                        onChange={e => selectTypeById(e.target.value)}
+                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
                                                     >
-                                                        <div className={cn(
-                                                            'h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
-                                                            isSelected ? 'border-ink bg-ink' : 'border-slate-300'
-                                                        )}>
-                                                            {isSelected && <div className="h-2 w-2 rounded-full bg-white" />}
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="font-medium text-slate-800">{type.label}</div>
-                                                            {type.id === 'modification' && (
-                                                                <div className="flex items-center gap-1.5 mt-1 text-xs text-warning-text">
-                                                                    <AlertCircle className="h-3 w-3" />
-                                                                    Fiche de modification obligatoire
-                                                                </div>
-                                                            )}
-                                                            <div className="flex flex-wrap gap-1.5 mt-2">
-                                                                {type.actes.map(a => (
-                                                                    <span key={a} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{a}</span>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
+                                                        <option value="">— Choisir —</option>
+                                                        {typesDisponibles.map(t => (
+                                                            <option key={t.id} value={t.id}>{t.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
                                         </div>
-                                    </div>
-                                )}
 
-                                {/* Autre catégorie → liste plate */}
-                                {categorie?.id !== 'societe' && (
-                                    <div className="space-y-3">
-                                        <h2 className="font-serif text-heading text-ink">
-                                            Type d'acte — <span className="text-slate-500">{categorieSelected?.label}</span>
-                                        </h2>
-                                        <div className="space-y-2">
-                                            {typesDisponibles.map((type) => {
-                                                const isSelected = typeActe?.id === type.id;
-                                                return (
-                                                    <button
-                                                        key={type.id + type.label}
-                                                        onClick={() => selectType(type)}
-                                                        className={cn(
-                                                            'w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all',
-                                                            isSelected
-                                                                ? 'border-ink bg-ink/5'
-                                                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                                                        )}
-                                                    >
-                                                        <div className={cn(
-                                                            'h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
-                                                            isSelected ? 'border-ink bg-ink' : 'border-slate-300'
-                                                        )}>
-                                                            {isSelected && <div className="h-2 w-2 rounded-full bg-white" />}
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="font-medium text-slate-800">{type.label}</div>
-                                                            <div className="flex flex-wrap gap-1.5 mt-2">
-                                                                {type.actes.map(a => (
-                                                                    <span key={a} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{a}</span>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
+                                        {typeActe && (
+                                            <div className="pt-3 border-t border-slate-100 space-y-2">
+                                                {typeActe.code === 'SOC-MOD' && (
+                                                    <div className="flex items-center gap-1.5 text-xs text-warning-text">
+                                                        <AlertCircle className="h-3 w-3" />
+                                                        Fiche de modification obligatoire
+                                                    </div>
+                                                )}
+                                                {typeActe.description && (
+                                                    <p className="text-xs text-slate-500">{typeActe.description}</p>
+                                                )}
+                                                {typeActe.modeles.length > 0 && (
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {typeActe.modeles.map(m => (
+                                                            <span key={m} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{m}</span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </>
-                        )}
+                                </div>
 
-                        {/* Étape 3 : Questionnaire */}
-                        {step === 2 && (
-                            <div className="space-y-4">
+                                {/* Le reste du formulaire n'apparaît qu'une fois le type d'acte choisi */}
+                                {typeActe && (
+                                <div className="space-y-4 mt-4">
                                 <h2 className="font-serif text-heading text-ink">
-                                    Questionnaire — <span className="text-slate-500">{typeSelected?.label}</span>
+                                    Détails — <span className="text-slate-500">{typeSelected?.label}</span>
                                 </h2>
 
                                 {/* Champs obligatoires du dossier, organisés par sections */}
@@ -822,11 +741,51 @@ export default function DossierCreate() {
                                         </CardContent>
                                     </Card>
                                 )}
-                            </div>
+
+                                {/* Autres personnes présentes, non liées à un rôle précis de l'acte */}
+                                <Card>
+                                    <CardContent className="p-5 space-y-3">
+                                        <GroupHeader icon={Users} iconColor="text-slate-500" iconBg="bg-slate-50">
+                                            Autres personnes
+                                        </GroupHeader>
+                                        <p className="text-xs text-slate-400 -mt-2">
+                                            Personnes présentes pour la création du dossier mais qui ne sont pas
+                                            forcément liées à l'acte en cours (accompagnateur, témoin…).
+                                        </p>
+                                        {autresPersonnes.map((p, i) => (
+                                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3">
+                                                <div className="flex-1 space-y-2">
+                                                    <ClientPicker
+                                                        placeholder="Rechercher un client existant…"
+                                                        linked={p.client}
+                                                        onSelect={(client) => setAutrePersonneClient(i, client)}
+                                                        onUnlink={() => setAutrePersonneClient(i, null)}
+                                                        onCreateNew={() => setCreatingClientForAutreIndex(i)}
+                                                    />
+                                                    <Input
+                                                        placeholder="Qualité (ex : témoin, accompagnateur…)"
+                                                        value={p.role}
+                                                        onChange={e => setAutrePersonneRole(i, e.target.value)}
+                                                    />
+                                                </div>
+                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger mt-0.5"
+                                                    onClick={() => removeAutrePersonne(i)} title="Retirer">
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={addAutrePersonne}>
+                                            <PlusCircle className="h-3.5 w-3.5" /> Ajouter une personne
+                                        </Button>
+                                    </CardContent>
+                                </Card>
+                                </div>
+                                )}
+                            </>
                         )}
 
-                        {/* Étape 4 : Récapitulatif */}
-                        {step === 3 && (
+                        {/* Étape 3 : Récapitulatif */}
+                        {step === 2 && (
                             <div className="space-y-4">
                                 <h2 className="font-serif text-heading text-ink">Récapitulatif</h2>
                                 {errors.type_acte_id && (
@@ -882,17 +841,16 @@ export default function DossierCreate() {
                                             Actes à produire
                                         </h3>
                                         <div className="space-y-2">
-                                            {typeSelected?.actes.map((acte, i) => (
-                                                <div key={i} className="flex items-center gap-2 text-sm">
-                                                    <div className="h-1.5 w-1.5 rounded-full bg-seal shrink-0" />
-                                                    <span className={cn(
-                                                        'text-slate-700',
-                                                        acte.includes('obligatoire') && 'font-semibold text-warning-text'
-                                                    )}>
-                                                        {acte}
-                                                    </span>
-                                                </div>
-                                            ))}
+                                            {(typeSelected?.modeles?.length ?? 0) === 0 ? (
+                                                <p className="text-xs text-slate-400">Aucun modèle actif configuré pour ce type d'acte.</p>
+                                            ) : (
+                                                typeSelected.modeles.map((nom, i) => (
+                                                    <div key={i} className="flex items-center gap-2 text-sm">
+                                                        <div className="h-1.5 w-1.5 rounded-full bg-seal shrink-0" />
+                                                        <span className="text-slate-700">{nom}</span>
+                                                    </div>
+                                                ))
+                                            )}
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -909,7 +867,7 @@ export default function DossierCreate() {
                         Précédent
                     </Button>
 
-                    {step < 3 ? (
+                    {step < 2 ? (
                         <Button size="lg" onClick={next} disabled={!canNext()}>
                             Suivant
                             <ChevronRight className="h-4 w-4" />
@@ -930,6 +888,15 @@ export default function DossierCreate() {
                 onCreated={(client) => {
                     applyClientToSection(creatingClientForGroup, client);
                     setCreatingClientForGroup(null);
+                }}
+            />
+
+            <ModalNouveauClient
+                open={creatingClientForAutreIndex !== null}
+                onClose={() => setCreatingClientForAutreIndex(null)}
+                onCreated={(client) => {
+                    setAutrePersonneClient(creatingClientForAutreIndex, client);
+                    setCreatingClientForAutreIndex(null);
                 }}
             />
         </AppLayout>

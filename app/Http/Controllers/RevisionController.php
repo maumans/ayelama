@@ -20,7 +20,7 @@ class RevisionController extends Controller
         $today = now()->toDateString();
         $user  = auth()->user();
 
-        $query = Dossier::with(['typeActe', 'redacteur', 'revision.reviseur', 'revision.points'])
+        $query = Dossier::with(['typeActe', 'redacteur', 'revision.reviseur', 'revision.points', 'documents', 'parties.client'])
             ->visiblePar($user)
             ->enRevision()
             ->when($request->q, fn ($q, $s) => $q->where(fn ($qq) =>
@@ -60,16 +60,18 @@ class RevisionController extends Controller
                 'id'          => $d->id,
                 'reference'   => $d->reference,
                 'objet'       => $d->objet,
-                'typeActe'    => $d->typeActe?->label,
-                'redacteur'   => $d->redacteur?->name,
+                'typeActe'    => $d->typeActe ? ['label' => $d->typeActe->label, 'categorie' => $d->typeActe->categorie?->value, 'code' => $d->typeActe->code] : null,
+                'redacteur'   => $d->redacteur ? ['id' => $d->redacteur->id, 'name' => $d->redacteur->name, 'initiales' => $d->redacteur->initiales] : null,
+                'clientPrincipal' => $d->clientPrincipalLabel(),
                 'echeance'    => $d->echeance?->toDateString(),
                 'estEnRetard' => $d->estEnRetard(),
                 'revision'    => $d->revision ? [
                     'statut'       => $d->revision->statut?->value,
-                    'reviseur'     => $d->revision->reviseur?->name,
+                    'reviseur'     => $d->revision->reviseur ? ['id' => $d->revision->reviseur->id, 'name' => $d->revision->reviseur->name, 'initiales' => $d->revision->reviseur->initiales] : null,
                     'conformes'    => $d->revision->nombreConformes(),
                     'nonConformes' => $d->revision->nombreNonConformes(),
                     'evalues'      => $d->revision->nombreEvalues(),
+                    'estValidable' => $d->revision->estValidable(),
                 ] : null,
             ]),
             'stats'   => $stats,

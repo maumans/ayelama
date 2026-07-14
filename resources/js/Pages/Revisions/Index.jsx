@@ -14,15 +14,7 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-
-// ── Constantes ─────────────────────────────────────────────────────────────
-
-const STATUT_META = {
-    en_attente: { label: 'En attente', badge: 'bg-slate-100 text-slate-600 border-slate-200',   border: 'border-l-slate-300'  },
-    en_cours:   { label: 'En cours',   badge: 'bg-amber-50 text-amber-700 border-amber-200',    border: 'border-l-warning'    },
-    valide:     { label: 'Validée',    badge: 'bg-green-50 text-green-700 border-green-200',    border: 'border-l-success'    },
-    renvoye:    { label: 'Renvoyée',   badge: 'bg-red-50 text-red-700 border-red-200',          border: 'border-l-danger'     },
-};
+import { STATUT_META } from '@/data/revisionStatuts';
 
 // ── Barre de progression révision ──────────────────────────────────────────
 
@@ -303,17 +295,26 @@ export default function RevisionsIndex() {
                                                                 En retard
                                                             </span>
                                                         )}
+                                                        {d.revision?.estValidable && (
+                                                            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-success-bg text-success-text border border-green-200">
+                                                                <CheckCircle2 className="h-2.5 w-2.5" />
+                                                                Prêt à valider
+                                                            </span>
+                                                        )}
                                                     </div>
 
                                                     {/* Ligne 2 : objet */}
                                                     <p className="text-sm font-medium text-slate-800 mt-1 truncate">{d.objet}</p>
+                                                    {d.clientPrincipal && (
+                                                        <p className="text-xs text-slate-400 truncate">{d.clientPrincipal}</p>
+                                                    )}
 
                                                     {/* Ligne 3 : méta */}
                                                     <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
-                                                        {d.typeActe  && <span className="bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5 text-[10px]">{d.typeActe}</span>}
-                                                        {d.redacteur && <span>Réd. {d.redacteur}</span>}
-                                                        {d.revision?.reviseur && (
-                                                            <span className="text-amber-600">⊙ {d.revision.reviseur}</span>
+                                                        {d.typeActe?.label && <span className="bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5 text-[10px]">{d.typeActe.label}</span>}
+                                                        {d.redacteur?.name && <span>Réd. {d.redacteur.name}</span>}
+                                                        {d.revision?.reviseur?.name && (
+                                                            <span className="text-amber-600">⊙ {d.revision.reviseur.name}</span>
                                                         )}
                                                         {d.echeance  && (
                                                             <span className={cn(
