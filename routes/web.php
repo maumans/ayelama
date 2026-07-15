@@ -11,6 +11,7 @@ use App\Http\Controllers\FormaliteController;
 use App\Http\Controllers\IntakeController;
 use App\Http\Controllers\ModeleActeController;
 use App\Http\Controllers\ModeleCourrierController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PartieController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RevisionController;
@@ -38,6 +39,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+
+    // Notifications (cloche)
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::post('/notifications/{id}/lue', [NotificationController::class, 'markAsRead'])->name('notifications.read');
+    Route::post('/notifications/tout-lire', [NotificationController::class, 'markAllAsRead'])->name('notifications.readAll');
 
     // Dossiers (CRUD + actions workflow)
     Route::resource('dossiers', DossierController::class)->parameters(['dossiers' => 'dossier:reference']);
@@ -140,12 +146,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/apparence', [ParametresController::class, 'updateApparence'])->name('apparence.update');
         Route::post('/apparence/logo', [ParametresController::class, 'uploadLogo'])->name('apparence.logo');
         Route::delete('/apparence/logo', [ParametresController::class, 'deleteLogo'])->name('apparence.logo.delete');
+        Route::get('/securite', [ParametresController::class, 'securite'])->name('securite');
+        Route::post('/securite', [ParametresController::class, 'updateSecurite'])->name('securite.update');
     });
 
     // Profil
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    Route::delete('/profile/trusted-devices/{trustedDevice}', [ProfileController::class, 'revokeTrustedDevice'])->name('profile.trusted-devices.revoke');
 });
 
 require __DIR__.'/auth.php';

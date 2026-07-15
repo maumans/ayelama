@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { CheckCircle, XCircle, Plus, Pencil, Search, Users } from 'lucide-react';
 import { ROLE_META } from '@/data/roles';
 import { RoleBadgeList } from '@/components/ui/role-badge';
+import PasswordRequirements from '@/Components/PasswordRequirements';
 
 const EMPTY_FORM = { name: '', email: '', password: '', roles: [], initiales: '', telephone: '' };
 
@@ -80,6 +81,7 @@ function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
                         <div className="col-span-2 space-y-1">
                             <Label>{isEdit ? 'Nouveau mot de passe' : 'Mot de passe'} {isEdit && <span className="text-slate-400 text-[11px]">(laisser vide pour conserver)</span>}</Label>
                             <Input type="password" value={form.password} onChange={f('password')} required={!isEdit} autoComplete="new-password" />
+                            {(!isEdit || form.password) && <PasswordRequirements password={form.password} />}
                         </div>
                         <div className="col-span-2 space-y-1">
                             <Label>Rôles</Label>

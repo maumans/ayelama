@@ -179,8 +179,24 @@ function ExcelPreview({ downloadUrl, previewUrl }) {
     );
 }
 
-export default function DocumentPreviewModal({ doc, onClose, previewUrl: previewUrlProp, downloadUrl: downloadUrlProp }) {
+// Zone d'aperçu réutilisable (dispatch par type de fichier) — partagée entre le
+// modal plein écran ci-dessous et le panneau inline (DocumentInlinePreview.jsx),
+// pour ne jamais dupliquer la logique d'import dynamique docx-preview/xlsx.
+export function PreviewBody({ doc, previewUrl, downloadUrl }) {
     const kind = classifyPreview(doc?.chemin_fichier);
+    return (
+        <>
+            {kind === 'pdf' && (
+                <iframe src={previewUrl} className="w-full h-full border-0" title={doc?.nom} />
+            )}
+            {kind === 'docx' && <DocxPreview key={doc.id} downloadUrl={downloadUrl} previewUrl={previewUrl} />}
+            {kind === 'excel' && <ExcelPreview key={doc.id} downloadUrl={downloadUrl} previewUrl={previewUrl} />}
+            {kind === 'unsupported' && <UnavailableState downloadUrl={downloadUrl} />}
+        </>
+    );
+}
+
+export default function DocumentPreviewModal({ doc, onClose, previewUrl: previewUrlProp, downloadUrl: downloadUrlProp }) {
     const previewUrl  = previewUrlProp  ?? `/documents/${doc?.id}/preview`;
     const downloadUrl = downloadUrlProp ?? `/documents/${doc?.id}/download`;
 
@@ -223,12 +239,7 @@ export default function DocumentPreviewModal({ doc, onClose, previewUrl: preview
 
             {/* Zone d'aperçu */}
             <div className="flex-1 min-h-0 overflow-hidden" onClick={e => e.stopPropagation()}>
-                {kind === 'pdf' && (
-                    <iframe src={previewUrl} className="w-full h-full border-0" title={doc?.nom} />
-                )}
-                {kind === 'docx' && <DocxPreview key={doc.id} downloadUrl={downloadUrl} previewUrl={previewUrl} />}
-                {kind === 'excel' && <ExcelPreview key={doc.id} downloadUrl={downloadUrl} previewUrl={previewUrl} />}
-                {kind === 'unsupported' && <UnavailableState downloadUrl={downloadUrl} />}
+                <PreviewBody doc={doc} previewUrl={previewUrl} downloadUrl={downloadUrl} />
             </div>
         </div>
     );

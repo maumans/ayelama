@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProfileUpdateRequest;
+use App\Models\UserTrustedDevice;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,26 @@ class ProfileController extends Controller
         return Inertia::render('Profile/Edit', [
             'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
             'status' => session('status'),
+            'trustedDevices' => $request->user()->trustedDevices()->actif()->orderByDesc('last_used_at')->get()->map(fn ($d) => [
+                'id'           => $d->id,
+                'label'        => $d->label,
+                'ip_address'   => $d->ip_address,
+                'last_used_at' => $d->last_used_at?->diffForHumans(),
+                'expires_at'   => $d->expires_at->format('d/m/Y'),
+            ]),
         ]);
+    }
+
+    /**
+     * Révoque un appareil de confiance (fin de l'exemption OTP pour cet appareil).
+     */
+    public function revokeTrustedDevice(Request $request, UserTrustedDevice $trustedDevice): RedirectResponse
+    {
+        abort_unless($trustedDevice->user_id === $request->user()->id, 403);
+
+        $trustedDevice->delete();
+
+        return back()->with('success', 'Appareil révoqué.');
     }
 
     /**

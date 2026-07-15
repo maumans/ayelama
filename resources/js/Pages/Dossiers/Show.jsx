@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
     Check, Clock, AlertTriangle, FileText, Download, Eye,
     Building, Send, ClipboardCheck, Phone, MapPin,
@@ -41,7 +41,7 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { notifyValidationError } from '@/lib/toast';
-import DocumentPreviewModal from '@/Components/documents/DocumentPreviewModal';
+import DocumentInlinePreview from '@/Components/documents/DocumentInlinePreview';
 
 const STEPS = [
     { id: 'initialisation', label: 'Initialisation', short: 'Init.' },
@@ -1448,6 +1448,17 @@ export default function DossierShow() {
     const [ajoutPersonneOpen, setAjoutPersonneOpen] = useState(false);
     const [previewDoc, setPreviewDoc] = useState(null);
     const openPreview = (doc, previewUrl, downloadUrl) => setPreviewDoc({ doc, previewUrl, downloadUrl });
+    const previewRef = useRef(null);
+
+    // Ferme l'aperçu en cours quand on change d'onglet — sinon il resterait affiché
+    // sous un onglet sans rapport avec le document consulté.
+    useEffect(() => { setPreviewDoc(null); }, [activeTab]);
+
+    // Amène le panneau d'aperçu dans le champ de vision dès son ouverture, sans
+    // quoi l'utilisateur devrait défiler manuellement pour le voir apparaître.
+    useEffect(() => {
+        if (previewDoc) previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, [previewDoc]);
 
     // Révision — évaluation inline des documents (onglet "Révision")
     const [revisionEtats, setRevisionEtats] = useState(() => buildInitialRevisionEtats(dossier.documents, dossier.revision?.points));
@@ -2296,6 +2307,18 @@ export default function DossierShow() {
                             </Tabs>
                         </motion.div>
 
+                        <AnimatePresence>
+                            {previewDoc && (
+                                <DocumentInlinePreview
+                                    ref={previewRef}
+                                    doc={previewDoc.doc}
+                                    previewUrl={previewDoc.previewUrl}
+                                    downloadUrl={previewDoc.downloadUrl}
+                                    onClose={() => setPreviewDoc(null)}
+                                />
+                            )}
+                        </AnimatePresence>
+
                     </div>
                 </div>
 
@@ -2370,14 +2393,6 @@ export default function DossierShow() {
                         dossier={dossier}
                     />
                 </>
-            )}
-            {previewDoc && (
-                <DocumentPreviewModal
-                    doc={previewDoc.doc}
-                    previewUrl={previewDoc.previewUrl}
-                    downloadUrl={previewDoc.downloadUrl}
-                    onClose={() => setPreviewDoc(null)}
-                />
             )}
         </AppLayout>
     );

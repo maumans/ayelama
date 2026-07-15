@@ -15,7 +15,7 @@ class User extends Authenticatable
 
     protected $fillable = [
         'name', 'email', 'password',
-        'initiales', 'telephone', 'avatar', 'actif',
+        'initiales', 'telephone', 'avatar', 'actif', 'notifications_email',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -23,9 +23,10 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
-            'password'          => 'hashed',
-            'actif'             => 'boolean',
+            'email_verified_at'   => 'datetime',
+            'password'            => 'hashed',
+            'actif'               => 'boolean',
+            'notifications_email' => 'boolean',
         ];
     }
 
@@ -53,6 +54,16 @@ class User extends Authenticatable
     public function roles()
     {
         return $this->hasMany(UserRole::class);
+    }
+
+    public function otpCodes()
+    {
+        return $this->hasMany(UserOtpCode::class);
+    }
+
+    public function trustedDevices()
+    {
+        return $this->hasMany(UserTrustedDevice::class);
     }
 
     // Scopes

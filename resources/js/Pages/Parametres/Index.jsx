@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import {
     AlertTriangle, Check, CheckCircle, CheckCircle2, ChevronDown, ChevronUp,
     ClipboardCheck, ExternalLink, FileText, Palette, Pencil, Percent, Plus,
-    Scale, Search, Settings, Shield, Trash2, Upload, Users, X, XCircle,
+    Scale, Search, Settings, Shield, ShieldCheck, Trash2, Upload, Users, X, XCircle,
 } from 'lucide-react';
 import { ROLE_META } from '@/data/roles';
 import { RoleBadgeList } from '@/components/ui/role-badge';
@@ -49,6 +49,7 @@ const TABS = [
     { id: 'utilisateurs', label: 'Utilisateurs',       icon: Users         },
     { id: 'types-actes',  label: "Types d'actes",      icon: FileText      },
     { id: 'apparence',    label: 'Apparence',          icon: Palette       },
+    { id: 'securite',     label: 'Sécurité',           icon: ShieldCheck   },
 ];
 
 const CAT_BADGE_ALL = {
@@ -847,6 +848,69 @@ function TabApparence({ apparence = {} }) {
     );
 }
 
+function TabSecurite({ securite = {} }) {
+    const [form, setForm] = useState({
+        otp_enabled: securite.otp_enabled ?? false,
+        otp_duration_minutes: securite.otp_duration_minutes ?? 10,
+    });
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved]   = useState(false);
+
+    const save = (e) => {
+        e.preventDefault();
+        setSaving(true);
+        router.post('/parametres/securite', form, {
+            onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2500); },
+            onFinish: () => setSaving(false),
+        });
+    };
+
+    return (
+        <form onSubmit={save} className="space-y-5 max-w-lg">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800">
+                    Vérifiez qu'un envoi de test par email fonctionne (configuration SMTP) avant d'activer
+                    la double authentification, sinon les utilisateurs risquent d'être bloqués hors du système.
+                </p>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                    <div>
+                        <h3 className="text-sm font-semibold text-ink">Double authentification par email</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Demande un code de vérification envoyé par email à chaque connexion (sauf appareils de confiance).
+                        </p>
+                    </div>
+                    <Switch
+                        checked={form.otp_enabled}
+                        onCheckedChange={(checked) => setForm(p => ({ ...p, otp_enabled: checked === true }))}
+                    />
+                </div>
+
+                <div className="space-y-1.5">
+                    <Label>Durée de validité du code (minutes)</Label>
+                    <Input
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={form.otp_duration_minutes}
+                        onChange={(e) => setForm(p => ({ ...p, otp_duration_minutes: e.target.value }))}
+                        className="w-32"
+                    />
+                </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+                <Button type="submit" variant="seal" disabled={saving}>
+                    {saved ? <><Check className="h-4 w-4" /> Enregistré</> : saving ? 'Enregistrement…' : 'Enregistrer'}
+                </Button>
+            </div>
+        </form>
+    );
+}
+
 /* ═══════════════════════════════════════════════════════════
    Page principale
 ═══════════════════════════════════════════════════════════ */
@@ -856,6 +920,7 @@ export default function ParametresIndex({
     utilisateurs = [], roles = [],
     typesActes = [],
     apparence = {},
+    securite = {},
 }) {
     const [activeTab, setActiveTab] = useState('utilisateurs');
 
@@ -979,6 +1044,9 @@ export default function ParametresIndex({
                                 )}
                                 {activeTab === 'apparence' && (
                                     <TabApparence apparence={apparence} />
+                                )}
+                                {activeTab === 'securite' && (
+                                    <TabSecurite securite={securite} />
                                 )}
                             </motion.div>
                         </AnimatePresence>

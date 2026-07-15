@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -29,5 +30,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Revision::class, RevisionPolicy::class);
         Gate::policy(Courrier::class, CourrierPolicy::class);
         Gate::policy(Demande::class, DemandePolicy::class);
+
+        Password::defaults(fn () => Password::min(12)->mixedCase()->numbers()->symbols());
     }
 }

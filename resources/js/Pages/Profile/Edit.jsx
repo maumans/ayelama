@@ -3,8 +3,9 @@ import AppLayout from '@/Layouts/AppLayout';
 import DeleteUserForm from './Partials/DeleteUserForm';
 import UpdatePasswordForm from './Partials/UpdatePasswordForm';
 import UpdateProfileInformationForm from './Partials/UpdateProfileInformationForm';
+import TrustedDevicesForm from './Partials/TrustedDevicesForm';
 
-export default function Edit({ mustVerifyEmail, status }) {
+export default function Edit({ mustVerifyEmail, status, trustedDevices }) {
     return (
         <AppLayout breadcrumbs={[{ label: 'Mon profil' }]}>
             <Head title="Mon profil — Ayelema" />
@@ -19,6 +20,7 @@ export default function Edit({ mustVerifyEmail, status }) {
 
                 <UpdateProfileInformationForm mustVerifyEmail={mustVerifyEmail} status={status} />
                 <UpdatePasswordForm />
+                <TrustedDevicesForm trustedDevices={trustedDevices} />
                 <DeleteUserForm />
             </div>
         </AppLayout>

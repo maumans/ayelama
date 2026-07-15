@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('ayelema:alerter-echeances')->hourly();
+Schedule::command('ayelema:alerter-formalites')->hourly();

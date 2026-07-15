@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
 
 class ParametresController extends Controller
@@ -89,6 +90,7 @@ class ParametresController extends Controller
             'roles'             => $roles,
             'typesActes'        => $typesActes,
             'apparence'         => $settings,
+            'securite'          => $this->securiteSettings(),
         ]);
     }
 
@@ -118,7 +120,7 @@ class ParametresController extends Controller
         $data = $request->validate([
             'name'      => ['required', 'string', 'max:200'],
             'email'     => ['required', 'email', 'unique:users,email'],
-            'password'  => ['required', 'string', 'min:8'],
+            'password'  => ['required', Password::defaults()],
             'roles'     => ['required', 'array', 'min:1'],
             'roles.*'   => ['string', 'in:' . implode(',', array_column(RoleUtilisateur::cases(), 'value'))],
             'initiales' => ['nullable', 'string', 'max:5'],
@@ -143,7 +145,7 @@ class ParametresController extends Controller
         $data = $request->validate([
             'name'      => ['sometimes', 'string', 'max:200'],
             'email'     => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($user->id)],
-            'password'  => ['sometimes', 'nullable', 'string', 'min:8'],
+            'password'  => ['sometimes', 'nullable', Password::defaults()],
             'roles'     => ['sometimes', 'array', 'min:1'],
             'roles.*'   => ['string', 'in:' . implode(',', array_column(RoleUtilisateur::cases(), 'value'))],
             'initiales' => ['sometimes', 'string', 'max:5'],
@@ -454,6 +456,44 @@ class ParametresController extends Controller
         return back()->with('success', 'Logo supprimé.');
     }
 
+    // ── Sécurité (OTP / 2FA) ──────────────────────────────────────────────
+
+    private function securiteDefaults(): array
+    {
+        return [
+            'otp_enabled'          => false,
+            'otp_duration_minutes' => 10,
+        ];
+    }
+
+    private function securiteSettings(): array
+    {
+        $settings = array_merge($this->securiteDefaults(), Setting::all()->toArray());
+        $settings['otp_enabled'] = (bool) $settings['otp_enabled'];
+        $settings['otp_duration_minutes'] = (int) $settings['otp_duration_minutes'];
+
+        return $settings;
+    }
+
+    public function securite()
+    {
+        return Inertia::render('Parametres/Index', $this->buildIndexData([
+            'securite' => $this->securiteSettings(),
+        ]));
+    }
+
+    public function updateSecurite(Request $request)
+    {
+        $data = $request->validate([
+            'otp_enabled'          => ['required', 'boolean'],
+            'otp_duration_minutes' => ['required', 'integer', 'min:1', 'max:60'],
+        ]);
+
+        Setting::setMany($data);
+
+        return back()->with('success', 'Paramètres de sécurité mis à jour.');
+    }
+
     // ── Helper commun pour index() et apparence() ─────────────────────────
 
     private function buildIndexData(array $extra = []): array
@@ -468,6 +508,7 @@ class ParametresController extends Controller
 
         return array_merge([
             'apparence' => $settings,
+            'securite'  => $this->securiteSettings(),
         ], $extra);
     }
 }

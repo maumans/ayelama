@@ -6,7 +6,7 @@ import { NumberField } from '@/components/ui/number-field';
 import { PhoneField } from '@/components/ui/phone-field';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
-import { mapClientToPrefixedFields, buildPartieFields } from '@/lib/clientFields';
+import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName } from '@/lib/clientFields';
 import { groupFieldsBySection, buildPartiesPayload } from '@/lib/partiesPayload';
 import { notifyValidationError } from '@/lib/toast';
 import { Head, Link, router, usePage } from '@inertiajs/react';
@@ -16,6 +16,7 @@ import {
     FileText, HeartHandshake, ScrollText, HandHeart, ChevronLeft, ChevronRight, Check,
     Users, ArrowRight, AlertCircle, PlusCircle, Edit2, Archive, Zap,
     UserCog, ClipboardCheck, Key, Landmark, Banknote, StickyNote, Trash2,
+    CheckCircle2, Pencil, UserCircle2,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,6 +24,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 
 const SOCIETE_GROUPES = [
@@ -187,6 +190,55 @@ function GroupHeader({ icon: Icon, iconColor, iconBg, children }) {
                 <Icon className={cn('h-3.5 w-3.5', iconColor)} />
             </span>
             <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wider">{children}</h4>
+        </div>
+    );
+}
+
+// ── Étape 3 (Récapitulatif) — composants de présentation ────────────────────
+
+function RecapCard({ icon, iconColor = 'text-slate-500', iconBg = 'bg-slate-100', title, onEdit, children }) {
+    return (
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between mb-3">
+                <GroupHeader icon={icon} iconColor={iconColor} iconBg={iconBg}>{title}</GroupHeader>
+                {onEdit && (
+                    <button
+                        type="button"
+                        onClick={onEdit}
+                        className="flex items-center gap-1 text-xs text-slate-400 hover:text-seal transition-colors shrink-0"
+                    >
+                        <Pencil className="h-3 w-3" /> Modifier
+                    </button>
+                )}
+            </div>
+            {children}
+        </div>
+    );
+}
+
+function RecapField({ label, value, mono }) {
+    return (
+        <div>
+            <dt className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</dt>
+            <dd className={cn('text-sm text-slate-800 font-medium mt-0.5', mono && 'font-ref')}>{value}</dd>
+        </div>
+    );
+}
+
+function RecapPersonne({ person, role, color = 'bg-ink' }) {
+    return (
+        <div className="flex items-center gap-2">
+            <Avatar className="h-8 w-8">
+                <AvatarFallback className={cn('text-[10px] text-white', person ? color : 'bg-slate-300')}>
+                    {person ? (person.initiales ?? person.name?.slice(0, 2)) : <UserCircle2 className="h-4 w-4" />}
+                </AvatarFallback>
+            </Avatar>
+            <div>
+                <div className={cn('text-sm font-medium', person ? 'text-slate-800' : 'text-slate-400 italic')}>
+                    {person ? person.name : 'Non assigné'}
+                </div>
+                <div className="text-[10px] text-slate-400">{role}</div>
+            </div>
         </div>
     );
 }
@@ -785,9 +837,33 @@ export default function DossierCreate() {
                         )}
 
                         {/* Étape 3 : Récapitulatif */}
-                        {step === 2 && (
+                        {step === 2 && (() => {
+                            const notaireSelected = (notaires ?? []).find(n => String(n.id) === String(notaireId));
+                            const reviseurSelected = (reviseurs ?? []).find(r => String(r.id) === String(reviseurId));
+                            const formalisteSelected = (formalistes ?? []).find(f => String(f.id) === String(formalisteId));
+                            const autresValides = autresPersonnes.filter(p => p.client && p.role.trim());
+                            const sections = groupFieldsBySection(visibleFields)
+                                .map(group => ({
+                                    ...group,
+                                    fields: group.fields.filter(f => {
+                                        const v = formValues[f.id];
+                                        if (f.type === 'repeatable') return (v?.length ?? 0) > 0;
+                                        if (f.type === 'checkbox') return !!v;
+                                        return !!v || v === false;
+                                    }),
+                                }))
+                                .filter(group => group.fields.length > 0);
+
+                            return (
                             <div className="space-y-4">
-                                <h2 className="font-serif text-heading text-ink">Récapitulatif</h2>
+                                <div className="flex items-center justify-between">
+                                    <h2 className="font-serif text-heading text-ink">Récapitulatif</h2>
+                                    {!errors.type_acte_id && (
+                                        <span className="flex items-center gap-1.5 text-xs text-success font-medium">
+                                            <CheckCircle2 className="h-3.5 w-3.5" /> Prêt à créer — vérifiez les informations
+                                        </span>
+                                    )}
+                                </div>
                                 {errors.type_acte_id && (
                                     <div className="flex items-center gap-2 p-3 rounded-lg bg-danger-bg border border-red-200 text-danger-text text-sm">
                                         <AlertCircle className="h-4 w-4 shrink-0" />
@@ -795,67 +871,122 @@ export default function DossierCreate() {
                                     </div>
                                 )}
 
-                                <Card className="border-seal/30 bg-seal/5">
-                                    <CardContent className="p-5 space-y-4">
-                                        <div className="flex items-center gap-3">
-                                            {categorieSelected && (
-                                                <div className="h-10 w-10 rounded-xl bg-white flex items-center justify-center shadow-sm">
-                                                    <categorieSelected.icon className={cn('h-5 w-5', categorieSelected.iconColor)} />
-                                                </div>
-                                            )}
-                                            <div>
-                                                <div className="font-medium text-slate-800">{typeSelected?.label}</div>
-                                                <div className="text-xs text-slate-500">{categorieSelected?.label}</div>
+                                {/* Bandeau hero */}
+                                <div className="rounded-xl border border-seal/30 bg-seal/5 p-5 flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        {categorieSelected && (
+                                            <div className="h-12 w-12 rounded-xl bg-white flex items-center justify-center shadow-sm shrink-0">
+                                                <categorieSelected.icon className={cn('h-6 w-6', categorieSelected.iconColor)} />
+                                            </div>
+                                        )}
+                                        <div className="min-w-0">
+                                            <div className="font-serif text-lg text-ink truncate">{typeSelected?.label}</div>
+                                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded-full bg-white', categorieSelected?.iconColor)}>
+                                                    {categorieSelected?.label}
+                                                </span>
+                                                {urgent && (
+                                                    <Badge variant="warning" className="gap-1"><Zap className="h-2.5 w-2.5" /> Urgent</Badge>
+                                                )}
                                             </div>
                                         </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setStep(0)}
+                                        className="flex items-center gap-1 text-xs text-slate-500 hover:text-seal transition-colors shrink-0"
+                                    >
+                                        <Pencil className="h-3 w-3" /> Modifier
+                                    </button>
+                                </div>
 
-                                        {visibleFields.map(field => {
-                                            const value = formValues[field.id];
-                                            if (field.type === 'checkbox' && !value) return null;
-                                            if (!value && value !== false && value !== true) return null;
-                                            if (field.type === 'repeatable') {
-                                                return (
-                                                    <div key={field.id} className="pt-1">
-                                                        <p className="text-xs font-semibold text-seal uppercase tracking-wide mb-1">{field.label}</p>
-                                                        <RepeatableGroup fieldDef={field} value={value ?? []} onChange={() => {}} readOnly />
-                                                    </div>
-                                                );
-                                            }
-                                            if (field.type === 'checkbox') return null;
-                                            return (
-                                                <div key={field.id} className="flex gap-3 text-sm">
-                                                    <span className="text-slate-500 min-w-[140px] shrink-0">{field.label}</span>
-                                                    <span className={cn('text-slate-800 font-medium', field.mono && 'font-ref')}>
-                                                        {typeof value === 'boolean' ? (value ? 'Oui' : 'Non') : value}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
-                                    </CardContent>
-                                </Card>
+                                {/* Dossier */}
+                                <RecapCard icon={FileText} iconColor="text-blue-600" iconBg="bg-blue-50" title="Dossier" onEdit={() => setStep(1)}>
+                                    <div className="space-y-3">
+                                        <RecapField label="Objet" value={objet || '—'} />
+                                        {notes && <RecapField label="Notes" value={notes} />}
+                                    </div>
+                                </RecapCard>
 
-                                <Card>
-                                    <CardContent className="p-5">
-                                        <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                                            <FileText className="h-4 w-4 text-slate-400" />
-                                            Actes à produire
-                                        </h3>
-                                        <div className="space-y-2">
-                                            {(typeSelected?.modeles?.length ?? 0) === 0 ? (
-                                                <p className="text-xs text-slate-400">Aucun modèle actif configuré pour ce type d'acte.</p>
-                                            ) : (
-                                                typeSelected.modeles.map((nom, i) => (
-                                                    <div key={i} className="flex items-center gap-2 text-sm">
-                                                        <div className="h-1.5 w-1.5 rounded-full bg-seal shrink-0" />
-                                                        <span className="text-slate-700">{nom}</span>
+                                {/* Intervenants */}
+                                <RecapCard icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50" title="Intervenants" onEdit={() => setStep(1)}>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                        <RecapPersonne person={notaireSelected} role="Notaire" color="bg-stone-600" />
+                                        <RecapPersonne person={reviseurSelected} role="Réviseur" color="bg-seal" />
+                                        <RecapPersonne person={formalisteSelected} role="Formaliste" color="bg-ink" />
+                                    </div>
+                                </RecapCard>
+
+                                {/* Sections du questionnaire */}
+                                {sections.map((group, gi) => {
+                                    const meta = getSectionMeta(group.name);
+                                    const repeatables = group.fields.filter(f => f.type === 'repeatable');
+                                    const simples = group.fields.filter(f => f.type !== 'repeatable');
+                                    return (
+                                        <RecapCard
+                                            key={gi}
+                                            icon={meta.icon}
+                                            iconColor={meta.iconColor}
+                                            iconBg={meta.iconBg}
+                                            title={group.name || 'Détails'}
+                                            onEdit={() => setStep(1)}
+                                        >
+                                            <div className="space-y-4">
+                                                {simples.length > 0 && (
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                                                        {simples.map(field => {
+                                                            const value = formValues[field.id];
+                                                            return (
+                                                                <RecapField
+                                                                    key={field.id}
+                                                                    label={field.label}
+                                                                    mono={field.mono}
+                                                                    value={typeof value === 'boolean' ? (value ? 'Oui' : 'Non') : value}
+                                                                />
+                                                            );
+                                                        })}
                                                     </div>
-                                                ))
-                                            )}
+                                                )}
+                                                {repeatables.map(field => (
+                                                    <div key={field.id}>
+                                                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">{field.label}</p>
+                                                        <RepeatableGroup fieldDef={field} value={formValues[field.id] ?? []} onChange={() => {}} readOnly />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </RecapCard>
+                                    );
+                                })}
+
+                                {/* Autres personnes */}
+                                {autresValides.length > 0 && (
+                                    <RecapCard icon={Users} iconColor="text-slate-500" iconBg="bg-slate-100" title="Autres personnes" onEdit={() => setStep(1)}>
+                                        <div className="flex flex-wrap gap-2">
+                                            {autresValides.map((p, i) => (
+                                                <span key={i} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
+                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client)}</span>
+                                                    <span className="text-slate-400">· {p.role}</span>
+                                                </span>
+                                            ))}
                                         </div>
-                                    </CardContent>
-                                </Card>
+                                    </RecapCard>
+                                )}
+
+                                {/* Actes à produire */}
+                                <RecapCard icon={ClipboardCheck} iconColor="text-seal" iconBg="bg-seal-light" title="Actes à produire">
+                                    {(typeSelected?.modeles?.length ?? 0) === 0 ? (
+                                        <p className="text-xs text-slate-400">Aucun modèle actif configuré pour ce type d'acte.</p>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {typeSelected.modeles.map((nom, i) => (
+                                                <span key={i} className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">{nom}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </RecapCard>
                             </div>
-                        )}
+                            );
+                        })()}
 
                     </motion.div>
                 </AnimatePresence>

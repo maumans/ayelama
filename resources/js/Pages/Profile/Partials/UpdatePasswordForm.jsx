@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Lock, CheckCircle } from 'lucide-react';
+import PasswordRequirements from '@/Components/PasswordRequirements';
 
 export default function UpdatePasswordForm() {
     const passwordInput = useRef();
@@ -77,6 +78,7 @@ export default function UpdatePasswordForm() {
                             autoComplete="new-password"
                         />
                         {errors.password && <p className="text-xs text-red-600">{errors.password}</p>}
+                        <PasswordRequirements password={data.password} />
                     </div>
 
                     <div className="space-y-1.5">

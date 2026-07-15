@@ -3,7 +3,7 @@ import { Link, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     LayoutDashboard, FolderOpen, ClipboardCheck, Building2,
-    FileText, Users, Mail, Settings, Bell, Search,
+    FileText, Users, Mail, Settings, Search,
     ChevronLeft, ChevronRight, LogOut, User,
     Menu, Link2, Banknote
 } from 'lucide-react';
@@ -15,6 +15,8 @@ import { cn } from '@/lib/utils';
 import GlobalSearch from '@/components/GlobalSearch';
 import { Toaster } from '@/Components/ui/toaster';
 import { toast } from '@/lib/toast';
+import NotificationDropdown from '@/Components/NotificationDropdown';
+import { useRealtimeNotifications } from '@/hooks/useRealtimeNotifications';
 
 /* ── Helpers couleurs dynamiques ───────────────────────────────────── */
 
@@ -151,8 +153,9 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
         if (flash?.error) toast.error(flash.error);
     }, [flash?.error]);
 
-    const navItems    = buildNavItems(can, notifications);
-    const totalAlerts = (notifications?.urgentCount || 0) + (notifications?.revisionCount || 0);
+    const navItems = buildNavItems(can, notifications);
+
+    useRealtimeNotifications(user?.id);
 
     const initials = user?.initiales
         || (user?.name ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'U');
@@ -374,19 +377,7 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                         </button>
 
                         {/* Notifications */}
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <button className="relative p-1.5 rounded-md text-slate-500 hover:bg-slate-100 transition-colors">
-                                    <Bell className="h-5 w-5" />
-                                    {totalAlerts > 0 && (
-                                        <span className="absolute top-1 right-1 h-2 w-2 bg-warning rounded-full" />
-                                    )}
-                                </button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {totalAlerts > 0 ? `${totalAlerts} alerte(s) en attente` : 'Aucune alerte'}
-                            </TooltipContent>
-                        </Tooltip>
+                        <NotificationDropdown unreadCount={notifications?.unreadCount || 0} />
 
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>

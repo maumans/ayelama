@@ -3,6 +3,7 @@ import GuestLayout from '@/Layouts/GuestLayout';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import PasswordRequirements from '@/Components/PasswordRequirements';
 
 export default function ResetPassword({ token, email }) {
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -52,6 +53,7 @@ export default function ResetPassword({ token, email }) {
                         autoFocus
                     />
                     {errors.password && <p className="mt-1 text-xs text-red-600">{errors.password}</p>}
+                    <PasswordRequirements password={data.password} />
                 </div>
 
                 <div className="space-y-1.5">
