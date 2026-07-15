@@ -6,13 +6,15 @@ import {
     Building, Send, ClipboardCheck, Phone, MapPin,
     ArrowRight, CheckCircle2, Plus, Trash2, Upload, PenSquare, X,
     MailCheck, CheckCheck, Square, Pencil, RefreshCw, Zap,
-    XCircle, Shield, Mail, Lock, Banknote,
+    XCircle, Shield, Mail, Lock, Banknote, Wallet, Receipt,
 } from 'lucide-react';
 import { STATUT_META as FORMALITE_STATUT_META, organismeBadgeClass, organismeShortLabel } from '@/data/formaliteStatuts';
 import { STATUT_META as REVISION_STATUT_META } from '@/data/revisionStatuts';
 import { ModalDepotFormalite } from '@/Components/Formalites/ModalDepotFormalite';
 import { ModalRetourFormalite } from '@/Components/Formalites/ModalRetourFormalite';
 import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
+import { ModalEnregistrerPaiement } from '@/Components/Facturation/ModalEnregistrerPaiement';
+import { ModalGenererRecu } from '@/Components/Facturation/ModalGenererRecu';
 import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { DateField } from '@/components/ui/date-field';
@@ -1095,7 +1097,13 @@ function getStepBlockers(dossier) {
     }
 }
 
-function FacturationTab({ dossier }) {
+const fmtGNF = (n) => Number(n || 0).toLocaleString('fr-FR');
+
+function FacturationTab({ dossier, can }) {
+    const [paiementOpen, setPaiementOpen] = useState(false);
+    const [recuOpen, setRecuOpen] = useState(false);
+    const peutGerer = !!can?.gererFacturation;
+
     if (!dossier.factures?.length) {
         return (
             <Card>
@@ -1108,72 +1116,181 @@ function FacturationTab({ dossier }) {
         );
     }
 
-    const facture = dossier.factures[0];
+    const facture = dossier.factures[dossier.factures.length - 1];
+    const paiements = facture.paiements ?? [];
+    const soldeRestant = facture.soldeRestant ?? 0;
 
     return (
-        <Card>
-            <CardHeader className="pb-3 border-b border-slate-100 flex flex-row justify-between items-center">
-                <div>
-                    <CardTitle>Note de frais / Facture</CardTitle>
-                    <p className="text-xs text-slate-500 mt-1">Générée automatiquement d'après les barèmes</p>
-                </div>
-                <div className="flex gap-2">
-                    {/* Placeholder for future print/download actions */}
-                    <Button variant="outline" size="sm" className="h-8 gap-1" title="Bientôt disponible">
-                        <Download className="h-3.5 w-3.5" /> Exporter PDF
-                    </Button>
-                </div>
-            </CardHeader>
-            <CardContent className="pt-5 space-y-6">
-                {/* En-tête facture */}
-                <div className="flex justify-between items-start">
-                    <div>
-                        <div className="font-medium text-slate-800 text-sm">{facture.objet}</div>
-                        <div className="text-xs text-slate-500 mt-0.5">Assiette de calcul : {Number(facture.assiette_chiffres).toLocaleString('fr-GN')} GNF</div>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-sm font-semibold text-seal">N° {facture.note_numero}</div>
-                        <div className="text-xs text-slate-500 mt-0.5">{new Date(facture.note_date).toLocaleDateString('fr-FR')}</div>
-                    </div>
-                </div>
+        <div className="space-y-5">
+            <ModalEnregistrerPaiement open={paiementOpen} onClose={() => setPaiementOpen(false)} dossierReference={dossier.reference} />
+            <ModalGenererRecu open={recuOpen} onClose={() => setRecuOpen(false)} paiements={paiements} />
 
-                {/* Tableau des lignes */}
-                <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs text-left">
-                            <tr>
-                                <th className="px-4 py-2 font-medium">Désignation</th>
-                                <th className="px-4 py-2 font-medium text-right w-24">Qté</th>
-                                <th className="px-4 py-2 font-medium text-right w-36">Montant (GNF)</th>
-                                <th className="px-4 py-2 font-medium text-right w-36">Total (GNF)</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {facture.lignes?.map((ligne, i) => (
-                                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-4 py-3 text-slate-700">{ligne.designation}</td>
-                                    <td className="px-4 py-3 text-slate-500 text-right">{ligne.quantite}</td>
-                                    <td className="px-4 py-3 text-slate-600 text-right font-ref">
-                                        {Number(ligne.montant).toLocaleString('fr-GN')}
-                                    </td>
-                                    <td className="px-4 py-3 text-slate-800 font-medium text-right font-ref">
-                                        {(ligne.quantite * ligne.montant).toLocaleString('fr-GN')}
+            {/* Tuiles de synthèse */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Card><CardContent className="p-4">
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wide">Honoraires facturés</div>
+                    <div className="text-lg font-semibold text-ink font-ref mt-0.5">{fmtGNF(facture.total_chiffres)} GNF</div>
+                </CardContent></Card>
+                <Card><CardContent className="p-4">
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wide">Provisions reçues</div>
+                    <div className="text-lg font-semibold text-success font-ref mt-0.5">{fmtGNF(facture.totalPaye)} GNF</div>
+                </CardContent></Card>
+                <Card><CardContent className="p-4">
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wide">Solde restant dû</div>
+                    <div className={cn('text-lg font-semibold font-ref mt-0.5', soldeRestant > 0 ? 'text-warning-text' : 'text-success')}>
+                        {fmtGNF(soldeRestant)} GNF
+                    </div>
+                </CardContent></Card>
+            </div>
+
+            <Card>
+                <CardHeader className="pb-3 border-b border-slate-100 flex flex-row justify-between items-center">
+                    <div>
+                        <CardTitle>Note de frais / Facture</CardTitle>
+                        <p className="text-xs text-slate-500 mt-1">Générée automatiquement d'après les barèmes</p>
+                    </div>
+                    <div className="flex gap-2">
+                        {peutGerer && (
+                            <Button variant="seal" size="sm" className="h-8 gap-1" onClick={() => setPaiementOpen(true)}>
+                                <Wallet className="h-3.5 w-3.5" /> Enregistrer paiement
+                            </Button>
+                        )}
+                        <Button variant="outline" size="sm" className="h-8 gap-1" title="Bientôt disponible">
+                            <Download className="h-3.5 w-3.5" /> Exporter PDF
+                        </Button>
+                    </div>
+                </CardHeader>
+                <CardContent className="pt-5 space-y-6">
+                    {/* En-tête facture */}
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <div className="font-medium text-slate-800 text-sm">{facture.objet}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">Assiette de calcul : {fmtGNF(facture.assiette_chiffres)} GNF</div>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-sm font-semibold text-seal">N° {facture.note_numero}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">{facture.note_date}</div>
+                        </div>
+                    </div>
+
+                    {/* Tableau des lignes */}
+                    <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs text-left">
+                                <tr>
+                                    <th className="px-4 py-2 font-medium">Désignation</th>
+                                    <th className="px-4 py-2 font-medium text-right w-24">Qté</th>
+                                    <th className="px-4 py-2 font-medium text-right w-36">Montant (GNF)</th>
+                                    <th className="px-4 py-2 font-medium text-right w-36">Total (GNF)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {facture.lignes?.map((ligne, i) => (
+                                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-4 py-3 text-slate-700">{ligne.designation}</td>
+                                        <td className="px-4 py-3 text-slate-500 text-right">{ligne.quantite}</td>
+                                        <td className="px-4 py-3 text-slate-600 text-right font-ref">{fmtGNF(ligne.montant)}</td>
+                                        <td className="px-4 py-3 text-slate-800 font-medium text-right font-ref">{fmtGNF(ligne.total)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                            <tfoot className="bg-slate-50 border-t border-slate-200">
+                                <tr>
+                                    <td colSpan={3} className="px-4 py-3 text-right font-semibold text-slate-700">TOTAL À PAYER</td>
+                                    <td className="px-4 py-3 text-right font-bold text-seal font-ref text-base">
+                                        {fmtGNF(facture.total_chiffres)} GNF
                                     </td>
                                 </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Mouvements */}
+            <Card>
+                <CardHeader className="pb-3 border-b border-slate-100">
+                    <CardTitle>Mouvements</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4">
+                    {paiements.length === 0 && soldeRestant <= 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-4">Aucun mouvement enregistré.</p>
+                    ) : (
+                        <table className="w-full text-sm">
+                            <thead className="text-slate-500 text-xs text-left border-b border-slate-100">
+                                <tr>
+                                    <th className="py-2 font-medium">Date</th>
+                                    <th className="py-2 font-medium">Type</th>
+                                    <th className="py-2 font-medium text-right">Montant</th>
+                                    <th className="py-2 font-medium text-right">Statut</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {paiements.map(p => (
+                                    <tr key={p.id}>
+                                        <td className="py-2.5 text-slate-600">{p.date_paiement}</td>
+                                        <td className="py-2.5 text-slate-700">
+                                            Paiement{p.moyen_paiement && ` (${p.moyen_paiement})`}
+                                        </td>
+                                        <td className="py-2.5 text-right font-ref text-success font-medium">+{fmtGNF(p.montant)}</td>
+                                        <td className="py-2.5 text-right">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-success-bg text-success-text border border-green-200">
+                                                Reçu
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {soldeRestant > 0 && (
+                                    <tr>
+                                        <td className="py-2.5 text-slate-400">—</td>
+                                        <td className="py-2.5 text-slate-700">Reste à payer</td>
+                                        <td className="py-2.5 text-right font-ref text-warning-text font-medium">{fmtGNF(soldeRestant)}</td>
+                                        <td className="py-2.5 text-right">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                                Attente
+                                            </span>
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Reçus émis */}
+            <Card>
+                <CardHeader className="pb-3 border-b border-slate-100 flex flex-row justify-between items-center">
+                    <CardTitle>Reçus émis</CardTitle>
+                    {peutGerer && (
+                        <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setRecuOpen(true)}>
+                            <Receipt className="h-3.5 w-3.5" /> Nouveau reçu
+                        </Button>
+                    )}
+                </CardHeader>
+                <CardContent className="pt-4">
+                    {paiements.filter(p => p.recu).length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-4">Aucun reçu émis pour l'instant.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {paiements.filter(p => p.recu).map(p => (
+                                <div key={p.recu.id} className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-slate-200">
+                                    <div>
+                                        <div className="text-sm font-medium text-slate-800">Reçu N° {p.recu.numero}</div>
+                                        <div className="text-xs text-slate-400 mt-0.5">{p.recu.date_emission} · {fmtGNF(p.montant)} GNF</div>
+                                    </div>
+                                    <a href={p.recu.url_telechargement}>
+                                        <Button variant="outline" size="sm" className="h-8 gap-1">
+                                            <Download className="h-3.5 w-3.5" /> PDF
+                                        </Button>
+                                    </a>
+                                </div>
                             ))}
-                        </tbody>
-                        <tfoot className="bg-slate-50 border-t border-slate-200">
-                            <tr>
-                                <td colSpan={3} className="px-4 py-3 text-right font-semibold text-slate-700">TOTAL À PAYER</td>
-                                <td className="px-4 py-3 text-right font-bold text-seal font-ref text-base">
-                                    {Number(facture.total_chiffres).toLocaleString('fr-GN')} GNF
-                                </td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </CardContent>
-        </Card>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        </div>
     );
 }
 
@@ -1320,7 +1437,10 @@ function ModalAjouterPersonne({ open, onClose, reference }) {
 
 export default function DossierShow() {
     const { dossier, can, reviseurs, formalistes, notaires } = usePage().props;
-    const [activeTab, setActiveTab] = useState(() => ETAPE_TAB[dossier?.etape?.value] ?? 'informations');
+    const [activeTab, setActiveTab] = useState(() => {
+        const requested = new URLSearchParams(window.location.search).get('tab');
+        return requested || ETAPE_TAB[dossier?.etape?.value] || 'informations';
+    });
     const [avancing, setAvancing] = useState(false);
     const [avancerErrors, setAvancerErrors] = useState([]);
     const [editDossierOpen, setEditDossierOpen] = useState(false);
@@ -1350,11 +1470,16 @@ export default function DossierShow() {
     };
 
     // Bascule automatiquement sur l'onglet correspondant dès que l'étape change
-    // (avancer, ou renvoyer en correction qui fait reculer le dossier) — couvre
-    // aussi l'ouverture initiale du dossier via l'initialiseur de useState ci-dessus.
+    // en cours de session (avancer, ou renvoyer en correction qui fait reculer
+    // le dossier) — ignore le montage initial pour ne pas écraser un onglet
+    // demandé explicitement via ?tab= ou l'étape courante (voir l'initialiseur
+    // de useState ci-dessus).
+    const etapePrecedenteRef = useRef(etape);
     useEffect(() => {
-        setActiveTab(ETAPE_TAB[etape] ?? 'informations');
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        if (etapePrecedenteRef.current !== etape) {
+            setActiveTab(ETAPE_TAB[etape] ?? 'informations');
+            etapePrecedenteRef.current = etape;
+        }
     }, [etape]);
 
     const blockers = can?.avancer ? getStepBlockers(dossier) : [];
@@ -1937,13 +2062,15 @@ export default function DossierShow() {
                                                             </div>
                                                         )}
 
-                                                        {(isNok || etatDoc.commentaire) && (
+                                                        {(can?.reviser || etatDoc.commentaire) && (
                                                             <div className="mt-3">
-                                                                {isNok && (
-                                                                    <span className="text-xs text-slate-400">
-                                                                        Commentaire <span className="text-danger">*</span> — obligatoire pour un document à corriger
-                                                                    </span>
-                                                                )}
+                                                                <span className="text-xs text-slate-400">
+                                                                    {isNok ? (
+                                                                        <>Commentaire <span className="text-danger">*</span> — obligatoire pour un document à corriger</>
+                                                                    ) : (
+                                                                        'Commentaire (optionnel)'
+                                                                    )}
+                                                                </span>
                                                                 <textarea
                                                                     value={etatDoc.commentaire}
                                                                     onChange={e => setRevisionCommentaire(docId, e.target.value)}
@@ -2132,7 +2259,7 @@ export default function DossierShow() {
 
                                 {/* Onglet Facturation */}
                                 <TabsContent value="facturation">
-                                    <FacturationTab dossier={dossier} />
+                                    <FacturationTab dossier={dossier} can={can} />
                                 </TabsContent>
 
                                 {/* Onglet Journal */}

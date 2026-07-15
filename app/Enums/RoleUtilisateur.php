@@ -8,6 +8,7 @@ enum RoleUtilisateur: string
     case Reviseur     = 'reviseur';
     case Notaire      = 'notaire';
     case Formaliste   = 'formaliste';
+    case Comptable    = 'comptable';
     case Administrateur = 'administrateur';
 
     public function label(): string
@@ -17,6 +18,7 @@ enum RoleUtilisateur: string
             self::Reviseur       => 'Réviseur / Responsable',
             self::Notaire        => 'Notaire (Maître)',
             self::Formaliste     => 'Formaliste',
+            self::Comptable      => 'Comptable',
             self::Administrateur => 'Administrateur',
         };
     }
@@ -43,5 +45,11 @@ enum RoleUtilisateur: string
     public static function peuventGererFormalites(): array
     {
         return [self::Formaliste, self::Notaire, self::Administrateur];
+    }
+
+    /** @return self[] */
+    public static function peuventGererFacturation(): array
+    {
+        return [self::Comptable, self::Notaire, self::Administrateur];
     }
 }

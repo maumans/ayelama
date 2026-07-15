@@ -234,7 +234,7 @@ function FormaliteCard({ formalite, showDossier = true }) {
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <button
-                                onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}`)}
+                                onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}?tab=formalites`)}
                                 className="text-[10px] text-slate-400 hover:text-seal transition-colors flex items-center gap-1"
                             >
                                 <FileText className="h-3 w-3" />
@@ -291,7 +291,7 @@ function FormaliteTableRow({ formalite }) {
             <ModalRetourFormalite open={retourOpen} onClose={() => setRetourOpen(false)} formalite={formalite} />
             <td>
                 <button
-                    onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}`)}
+                    onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}?tab=formalites`)}
                     className="font-ref text-sm text-seal hover:underline"
                 >
                     {formalite.dossier?.reference}
@@ -330,7 +330,7 @@ function FormaliteTableRow({ formalite }) {
                     </Button>
                 ) : (
                     <button
-                        onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}`)}
+                        onClick={() => router.visit(`/dossiers/${formalite.dossier.reference}?tab=formalites`)}
                         className="text-xs text-slate-400 hover:text-seal flex items-center gap-0.5"
                     >
                         Voir dossier <ChevronRight className="h-3 w-3" />
@@ -598,7 +598,7 @@ export default function FormalitesIndex({ formalites, stats, statuts, filters: i
                                 {/* dossier header */}
                                 <div className="flex items-center gap-2 mb-2.5">
                                     <button
-                                        onClick={() => group.meta?.reference && router.visit(`/dossiers/${group.meta.reference}`)}
+                                        onClick={() => group.meta?.reference && router.visit(`/dossiers/${group.meta.reference}?tab=formalites`)}
                                         className="font-ref text-sm text-seal hover:underline flex items-center gap-1.5"
                                     >
                                         <FileText className="h-3.5 w-3.5" />

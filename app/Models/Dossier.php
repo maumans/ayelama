@@ -144,7 +144,10 @@ class Dossier extends Model
 
     public function scopeVisiblePar($query, User $user)
     {
-        if ($user->hasRole(RoleUtilisateur::Administrateur)) {
+        // Le Comptable n'est jamais assigné à un dossier (pas de champ comptable_id) —
+        // sa mission (facturation/encaissements) est par nature transversale à tous les
+        // dossiers, comme l'Administrateur.
+        if ($user->hasRole(RoleUtilisateur::Administrateur) || $user->hasRole(RoleUtilisateur::Comptable)) {
             return $query;
         }
 

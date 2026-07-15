@@ -96,6 +96,13 @@ class DossierPolicy
             || $dossier->notaire_id === $user->id;
     }
 
+    public function gererFacturation(User $user, Dossier $dossier): bool
+    {
+        if (!$user->actif) return false;
+
+        return $user->hasAnyRole(RoleUtilisateur::peuventGererFacturation());
+    }
+
     public function genererCourriers(User $user, Dossier $dossier): bool
     {
         if (!$user->actif) return false;
@@ -109,6 +116,7 @@ class DossierPolicy
     private function estAssigne(User $user, Dossier $dossier): bool
     {
         return $user->hasRole(RoleUtilisateur::Administrateur)
+            || $user->hasRole(RoleUtilisateur::Comptable)
             || $dossier->redacteur_id === $user->id
             || $dossier->reviseur_id === $user->id
             || $dossier->notaire_id === $user->id

@@ -58,6 +58,15 @@ class UserSeeder extends Seeder
                 'actif'      => true,
             ],
             [
+                'name'       => 'Mariame Sylla',
+                'email'      => 'mariame.sylla@notaire-guinee.com',
+                'password'   => Hash::make('password'),
+                'roles'      => [RoleUtilisateur::Comptable],
+                'initiales'  => 'MS',
+                'telephone'  => '+224 621 00 00 06',
+                'actif'      => true,
+            ],
+            [
                 'name'       => 'Administrateur',
                 'email'      => 'admin@ayelama.gn',
                 'password'   => Hash::make('password'),

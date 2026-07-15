@@ -5,7 +5,7 @@ import {
     LayoutDashboard, FolderOpen, ClipboardCheck, Building2,
     FileText, Users, Mail, Settings, Bell, Search,
     ChevronLeft, ChevronRight, LogOut, User,
-    Menu, Link2
+    Menu, Link2, Banknote
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -123,6 +123,7 @@ function buildNavItems(can, notifications) {
         { href: '/dossiers',   label: 'Dossiers',          icon: FolderOpen,      show: true },
         { href: '/revisions',  label: 'Révisions',         icon: ClipboardCheck,  show: can?.reviser || can?.administrer, badge: notifications?.revisionCount || null },
         { href: '/formalites', label: 'Formalités',        icon: Building2,       show: can?.gererFormalites || can?.administrer, badge: notifications?.urgentCount || null },
+        { href: '/facturation', label: 'Facturation',      icon: Banknote,        show: can?.gererFacturation || can?.administrer, badge: notifications?.factureImpayeCount || null },
         { href: '/modeles',    label: "Modèles d'actes",   icon: FileText,        show: true },
         { href: '/repertoire', label: 'Répertoire',        icon: Users,           show: true },
         { href: '/courriers',  label: 'Courriers',         icon: Mail,            show: true },

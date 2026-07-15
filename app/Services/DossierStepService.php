@@ -3,11 +3,14 @@
 namespace App\Services;
 
 use App\Enums\EtapeDossier;
+use App\Models\Courrier;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
 use App\Models\ModeleCourrier;
 use App\Models\Revision;
 use App\Models\User;
+use App\Services\ActesGeneratorService;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class DossierStepService
@@ -43,6 +46,13 @@ class DossierStepService
             }
         }
 
+        // Générer automatiquement les lettres de transmission applicables en
+        // arrivant en Expédition — toutes les données du dossier sont déjà
+        // définitives à ce stade, aucune raison d'attendre un clic manuel.
+        if ($etapeSuivante === EtapeDossier::Expedition) {
+            $this->genererLettresTransmission($dossier, $user);
+        }
+
         JournalActivite::enregistrer(
             $dossier,
             "Dossier avancé de « {$ancienneEtape->label()} » à « {$etapeSuivante->label()} »",
@@ -52,6 +62,54 @@ class DossierStepService
         );
 
         return $dossier->fresh();
+    }
+
+    /**
+     * Génère une fois chaque lettre de transmission applicable (celles pas
+     * déjà générées, identifiées par leur nom) — même logique que
+     * CourrierController::genererDepuisModele(), déclenchée automatiquement
+     * plutôt que sur clic.
+     */
+    private function genererLettresTransmission(Dossier $dossier, User $user): void
+    {
+        $dossier->loadMissing('typeActe', 'questionnaire', 'courriers');
+
+        $modeles = ModeleCourrier::with('typesActes')
+            ->actif()
+            ->get()
+            ->filter(fn (ModeleCourrier $m) => $m->applicablePour($dossier->typeActe));
+
+        if ($modeles->isEmpty()) {
+            return;
+        }
+
+        $dejaGenerees = $dossier->courriers->where('type', 'transmission')->pluck('objet')->all();
+        $generatorService = app(ActesGeneratorService::class);
+
+        foreach ($modeles as $modele) {
+            if (in_array($modele->nom, $dejaGenerees, true)) {
+                continue;
+            }
+
+            $chemin = $generatorService->genererDocument($dossier, $modele->chemin_fichier, Str::slug($modele->nom));
+
+            $annee     = now()->year;
+            $count     = Courrier::whereYear('created_at', $annee)->count() + 1;
+            $reference = 'COU-' . $annee . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+
+            Courrier::create([
+                'reference'      => $reference,
+                'dossier_id'     => $dossier->id,
+                'redacteur_id'   => $user->id,
+                'destinataire'   => '',
+                'objet'          => $modele->nom,
+                'type'           => 'transmission',
+                'statut'         => 'brouillon',
+                'chemin_fichier' => $chemin,
+            ]);
+        }
+
+        JournalActivite::enregistrer($dossier, 'Lettres de transmission générées automatiquement', 'expedition', [], $user);
     }
 
     public function reculer(Dossier $dossier, User $user, ?string $motif = null): Dossier

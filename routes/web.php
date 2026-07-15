@@ -6,6 +6,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DemandeController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DossierController;
+use App\Http\Controllers\FactureController;
 use App\Http\Controllers\FormaliteController;
 use App\Http\Controllers\IntakeController;
 use App\Http\Controllers\ModeleActeController;
@@ -74,6 +75,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/formalites/pieces/{piece}/televerser', [FormaliteController::class, 'televerserPiece'])->name('formalites.pieces.televerser');
     Route::get('/formalites/pieces/{piece}/telecharger', [FormaliteController::class, 'telechargerPiece'])->name('formalites.pieces.telecharger');
     Route::delete('/formalites/{formalite}', [FormaliteController::class, 'destroy'])->name('formalites.destroy');
+
+    // Facturation
+    Route::get('/facturation', [FactureController::class, 'index'])->name('facturation.index');
+    Route::post('/dossiers/{dossier:reference}/paiements', [FactureController::class, 'enregistrerPaiement'])->name('dossiers.paiements.store');
+    Route::post('/paiements/{paiement}/recu', [FactureController::class, 'genererRecu'])->name('paiements.recu.generer');
+    Route::get('/recus/{recu}/telecharger', [FactureController::class, 'telechargerRecu'])->name('recus.telecharger');
 
     // Demandes externes (générer un lien, consulter, convertir en dossier)
     Route::get('/demandes', [DemandeController::class, 'index'])->name('demandes.index');

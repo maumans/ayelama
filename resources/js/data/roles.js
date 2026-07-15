@@ -6,6 +6,7 @@ export const ROLES = [
     { value: 'reviseur',       label: 'Réviseur',   cls: 'bg-purple-50 text-purple-700 border-purple-200' },
     { value: 'clerc',          label: 'Clerc',      cls: 'bg-blue-50 text-blue-700 border-blue-200' },
     { value: 'formaliste',     label: 'Formaliste', cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+    { value: 'comptable',      label: 'Comptable',  cls: 'bg-teal-50 text-teal-700 border-teal-200' },
 ];
 
 export const ROLE_META = Object.fromEntries(ROLES.map(r => [r.value, r]));

@@ -234,7 +234,8 @@ class DossierController extends Controller
             'typeActe', 'redacteur', 'reviseur', 'notaire', 'formaliste',
             'questionnaire', 'documents', 'revision.reviseur', 'revision.points',
             'formalites.pieces', 'formalites.dependDe', 'formalites.dependants',
-            'parties.client', 'journal.user', 'factures.lignes',
+            'parties.client', 'journal.user',
+            'factures.lignes', 'factures.paiements.recu', 'factures.paiements.enregistrePar',
             'courriers.redacteur',
         ]);
 
@@ -245,6 +246,7 @@ class DossierController extends Controller
                 'avancer'         => auth()->user()->can('avancer', $dossier),
                 'reviser'         => auth()->user()->can('reviser', $dossier),
                 'gererFormalites' => auth()->user()->can('gererFormalites', $dossier),
+                'gererFacturation' => auth()->user()->can('gererFacturation', $dossier),
                 'genererDocuments' => auth()->user()->can('genererDocuments', $dossier),
                 'genererCourriers' => auth()->user()->can('genererCourriers', $dossier),
                 'reassigner'      => auth()->user()->can('reassigner', $dossier),
@@ -479,19 +481,7 @@ class DossierController extends Controller
                 'user'       => $j->user ? ['name' => $j->user->name, 'initiales' => $j->user->initiales] : null,
                 'created_at' => $j->created_at->diffForHumans(),
             ]),
-            'factures' => $d->factures->map(fn ($f) => [
-                'id'                => $f->id,
-                'note_numero'       => $f->note_numero,
-                'note_date'         => $f->note_date ? $f->note_date->toIso8601String() : null,
-                'objet'             => $f->objet,
-                'assiette_chiffres' => (float) $f->assiette_chiffres,
-                'total_chiffres'    => (float) $f->total_chiffres,
-                'lignes'            => $f->lignes->map(fn ($l) => [
-                    'designation' => $l->designation,
-                    'quantite'    => $l->quantite,
-                    'montant'     => (float) $l->montant,
-                ]),
-            ]),
+            'factures' => $d->factures->map(fn ($f) => $f->versArray()),
             'courriers' => $d->courriers->map(fn ($c) => [
                 'id'             => $c->id,
                 'reference'      => $c->reference,

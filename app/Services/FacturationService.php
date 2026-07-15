@@ -7,6 +7,7 @@ use App\Models\Dossier;
 use App\Models\Facture;
 use App\Models\LigneFacture;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Service de facturation automatique.
@@ -35,6 +36,15 @@ class FacturationService
      */
     public function genererFacture(Dossier $dossier, ?float $assiette = null, string $objet = ''): Facture
     {
+        // La régénération supprime la facture existante (voir plus bas) — refusée dès
+        // qu'un paiement a déjà été enregistré dessus, pour ne jamais perdre
+        // l'historique des encaissements du dossier.
+        if ($dossier->factures()->whereHas('paiements')->exists()) {
+            throw ValidationException::withMessages([
+                'facture' => ["Impossible de régénérer la facture : des paiements ont déjà été enregistrés sur ce dossier."],
+            ]);
+        }
+
         // Essayer de déduire l'assiette du questionnaire si non fournie
         if ($assiette === null) {
             $assiette = $this->deduireAssiette($dossier);

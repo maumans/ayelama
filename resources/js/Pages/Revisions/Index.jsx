@@ -274,7 +274,7 @@ export default function RevisionsIndex() {
                                             'hover:shadow-md transition-all cursor-pointer group border-l-4',
                                             meta.border
                                         )}
-                                        onClick={() => router.visit(`/dossiers/${d.reference}/revision`)}
+                                        onClick={() => router.visit(`/dossiers/${d.reference}?tab=revision`)}
                                     >
                                         <CardContent className="p-4">
                                             <div className="flex items-start gap-4">

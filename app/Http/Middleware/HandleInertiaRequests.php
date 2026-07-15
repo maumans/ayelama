@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Enums\RoleUtilisateur;
 use App\Models\Dossier;
+use App\Models\Facture;
 use App\Models\Setting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -55,10 +56,14 @@ class HandleInertiaRequests extends Middleware
 
         $urgentCount = 0;
         $revisionCount = 0;
+        $factureImpayeCount = 0;
 
         if ($user) {
             $urgentCount   = Dossier::echeanceUrgente()->count();
             $revisionCount = Dossier::enRevision()->count();
+            $factureImpayeCount = Facture::with('paiements')->get()
+                ->filter(fn ($f) => $f->soldeRestant() > 0)
+                ->count();
         }
 
         return [
@@ -78,13 +83,15 @@ class HandleInertiaRequests extends Middleware
                         'reviser'         => $user->hasAnyRole(RoleUtilisateur::peuventReviser()),
                         'signer'          => $user->hasAnyRole(RoleUtilisateur::peuventSigner()),
                         'gererFormalites' => $user->hasAnyRole(RoleUtilisateur::peuventGererFormalites()),
+                        'gererFacturation' => $user->hasAnyRole(RoleUtilisateur::peuventGererFacturation()),
                         'administrer'     => $user->hasRole(RoleUtilisateur::Administrateur),
                     ],
                 ] : null,
             ],
             'notifications' => [
-                'urgentCount'   => $urgentCount,
-                'revisionCount' => $revisionCount,
+                'urgentCount'        => $urgentCount,
+                'revisionCount'      => $revisionCount,
+                'factureImpayeCount' => $factureImpayeCount,
             ],
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
