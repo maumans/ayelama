@@ -15,12 +15,13 @@ const STATUT_LABELS = {
 };
 
 export default function DemandeShow() {
-    const { demande, notaires, reviseurs, formalistes } = usePage().props;
+    const { demande, notaires, reviseurs, formalistes, defauts } = usePage().props;
 
     const [objet, setObjet] = useState(demande.objet ?? '');
-    const [notaireId, setNotaireId] = useState('');
-    const [reviseurId, setReviseurId] = useState('');
-    const [formalisteId, setFormalisteId] = useState('');
+    // Pré-sélectionnés depuis Paramètres > Assignations (mêmes défauts que Dossiers/Create).
+    const [notaireId, setNotaireId] = useState(defauts?.notaire_id ? String(defauts.notaire_id) : '');
+    const [reviseurId, setReviseurId] = useState(defauts?.reviseur_id ? String(defauts.reviseur_id) : '');
+    const [formalisteId, setFormalisteId] = useState(defauts?.formaliste_id ? String(defauts.formaliste_id) : '');
     const [urgent, setUrgent] = useState(false);
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);

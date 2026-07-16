@@ -7,6 +7,7 @@ import {
     ArrowRight, CheckCircle2, Plus, Trash2, Upload, PenSquare, X,
     MailCheck, CheckCheck, Square, Pencil, RefreshCw, Zap,
     XCircle, Shield, Mail, Lock, Banknote, Wallet, Receipt,
+    History, Users,
 } from 'lucide-react';
 import { STATUT_META as FORMALITE_STATUT_META, organismeBadgeClass, organismeShortLabel } from '@/data/formaliteStatuts';
 import { STATUT_META as REVISION_STATUT_META } from '@/data/revisionStatuts';
@@ -399,7 +400,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
 
 // ── Composant : onglet Informations ─────────────────────────────────────────
 
-function InformationsTab({ dossier, can, onEditQuest }) {
+function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPersonne, onSupprimerPersonne }) {
     const questKey    = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
     const questFields = QUESTIONNAIRES[questKey] ?? [];
     const hasQuestData = dossier.questionnaire && Object.keys(dossier.questionnaire).length > 0;
@@ -490,20 +491,88 @@ function InformationsTab({ dossier, can, onEditQuest }) {
     };
 
     return (
-        <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                <CardTitle>Fiche dossier — {dossier.typeActe?.label}</CardTitle>
-                {can?.update && (
-                    <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onEditQuest}>
-                        <PenSquare className="h-3.5 w-3.5" />
-                        Modifier le questionnaire
-                    </Button>
-                )}
-            </CardHeader>
-            <CardContent>
-                {renderQuestContent()}
-            </CardContent>
-        </Card>
+        <div className="space-y-5">
+            <Card>
+                <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                    <CardTitle>Fiche dossier — {dossier.typeActe?.label}</CardTitle>
+                    {can?.update && (
+                        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onEditQuest}>
+                            <PenSquare className="h-3.5 w-3.5" />
+                            Modifier le questionnaire
+                        </Button>
+                    )}
+                </CardHeader>
+                <CardContent>
+                    {renderQuestContent()}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-seal" />
+                        Personnes associées au dossier
+                    </CardTitle>
+                    {can?.update && (
+                        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onAjouterPersonne}>
+                            <Plus className="h-3.5 w-3.5" /> Ajouter une personne
+                        </Button>
+                    )}
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    {!dossier.parties?.length ? (
+                        <p className="text-sm text-slate-400 italic py-2">Aucune partie enregistrée.</p>
+                    ) : dossier.parties.map((partie, i) => {
+                        const estLibre = !managedRoles.includes(partie.role);
+                        return (
+                            <Card key={i}>
+                                <CardContent className="p-4">
+                                    <div className="flex items-start gap-4">
+                                        <Avatar className="h-10 w-10 shrink-0">
+                                            <AvatarFallback className="bg-ink text-white text-sm">
+                                                {partie.initiales ?? partie.nom?.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                                            </AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div>
+                                                <div className="font-medium text-slate-800">{partie.nom}</div>
+                                                <Badge variant="secondary" className="mt-1">{partie.role}</Badge>
+                                            </div>
+                                            <div className="space-y-1 text-xs text-slate-500">
+                                                {partie.cni && (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <FileText className="h-3 w-3 shrink-0" />
+                                                        <span className="font-ref">{partie.cni}</span>
+                                                    </div>
+                                                )}
+                                                {partie.telephone && (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Phone className="h-3 w-3 shrink-0" />
+                                                        {partie.telephone}
+                                                    </div>
+                                                )}
+                                                {partie.adresse && (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <MapPin className="h-3 w-3 shrink-0" />
+                                                        {partie.adresse}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {can?.update && estLibre && (
+                                            <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger shrink-0"
+                                                onClick={() => onSupprimerPersonne(partie)} title="Retirer cette personne">
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </Button>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        );
+                    })}
+                </CardContent>
+            </Card>
+        </div>
     );
 }
 
@@ -1361,6 +1430,28 @@ const ETAPE_TAB = {
     cloture:        'informations',
 };
 
+// Ordre du workflow — sert à estomper les onglets pas encore pertinents pour
+// l'étape courante (ex. "Formalités" avant que le dossier n'atteigne cette
+// étape) sans jamais les rendre inaccessibles : la traçabilité complète reste
+// utile (audit, anticipation), seule la hiérarchie visuelle change.
+const ETAPE_ORDER = ['initialisation', 'edition', 'revision', 'formalites', 'expedition', 'cloture'];
+
+// Étape minimale à partir de laquelle chaque onglet devient pleinement pertinent.
+// Les onglets absents de cette table (informations, facturation) sont
+// transversaux et ne sont jamais estompés.
+const TAB_STAGE = {
+    documents:   'edition',
+    revision:    'revision',
+    formalites:  'formalites',
+    expedition:  'expedition',
+};
+
+function tabPasEncoreAtteint(tabValue, etapeActuelle) {
+    const stage = TAB_STAGE[tabValue];
+    if (!stage) return false;
+    return ETAPE_ORDER.indexOf(stage) > ETAPE_ORDER.indexOf(etapeActuelle);
+}
+
 // Ajoute une personne au dossier en dehors des rôles gérés par le questionnaire
 // (ex. accompagnateur, témoin) — persiste immédiatement via un endpoint dédié,
 // indépendant du flux de sauvegarde du questionnaire.
@@ -1446,6 +1537,7 @@ export default function DossierShow() {
     const [editDossierOpen, setEditDossierOpen] = useState(false);
     const [editQuestOpen, setEditQuestOpen] = useState(false);
     const [ajoutPersonneOpen, setAjoutPersonneOpen] = useState(false);
+    const [historiqueOpen, setHistoriqueOpen] = useState(false);
     const [previewDoc, setPreviewDoc] = useState(null);
     const openPreview = (doc, previewUrl, downloadUrl) => setPreviewDoc({ doc, previewUrl, downloadUrl });
     const previewRef = useRef(null);
@@ -1664,6 +1756,11 @@ export default function DossierShow() {
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                                            <Button variant="outline" size="sm" className="h-8 gap-1.5"
+                                                onClick={() => setHistoriqueOpen(true)} title="Historique du dossier">
+                                                <History className="h-3.5 w-3.5" />
+                                                Historique
+                                            </Button>
                                             {can?.update && (
                                                 <Button variant="outline" size="sm" className="h-8 gap-1.5"
                                                     onClick={() => setEditDossierOpen(true)} title="Modifier le dossier">
@@ -1801,45 +1898,55 @@ export default function DossierShow() {
                             <Tabs value={activeTab} onValueChange={setActiveTab}>
                                 <TabsList className="w-full justify-start overflow-x-auto">
                                     <TabsTrigger value="informations">Informations</TabsTrigger>
-                                    <TabsTrigger value="documents">
-                                        Actes & documents
-                                        {dossier.documents?.length > 0 && (
-                                            <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
-                                                {dossier.documents.length}
-                                            </span>
-                                        )}
+                                    <TabsTrigger value="documents" className={cn(tabPasEncoreAtteint('documents', etape) && 'opacity-40')}>
+                                        <span className="flex items-center gap-1.5">
+                                            Actes & documents
+                                            {dossier.documents?.length > 0 && (
+                                                <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
+                                                    {dossier.documents.length}
+                                                </span>
+                                            )}
+                                            {etape === 'edition' && activeTab !== 'documents' && (
+                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
+                                            )}
+                                        </span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="revision">
+                                    <TabsTrigger value="revision" className={cn(tabPasEncoreAtteint('revision', etape) && 'opacity-40')}>
                                         <span className="flex items-center gap-1.5">
                                             Révision
                                             {dossier.revision?.statut === 'en_cours' && (
                                                 <span className="h-1.5 w-1.5 rounded-full bg-warning" />
                                             )}
+                                            {etape === 'revision' && activeTab !== 'revision' && (
+                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
+                                            )}
                                         </span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="formalites">
-                                        Formalités
-                                        {dossier.formalites?.length > 0 && (
-                                            <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
-                                                {dossier.formalites.length}
-                                            </span>
-                                        )}
+                                    <TabsTrigger value="formalites" className={cn(tabPasEncoreAtteint('formalites', etape) && 'opacity-40')}>
+                                        <span className="flex items-center gap-1.5">
+                                            Formalités
+                                            {dossier.formalites?.length > 0 && (
+                                                <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
+                                                    {dossier.formalites.length}
+                                                </span>
+                                            )}
+                                            {etape === 'formalites' && activeTab !== 'formalites' && (
+                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
+                                            )}
+                                        </span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="expedition">
-                                        Expédition
-                                        {dossier.courriers?.length > 0 && (
-                                            <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
-                                                {dossier.courriers.length}
-                                            </span>
-                                        )}
-                                    </TabsTrigger>
-                                    <TabsTrigger value="parties">
-                                        Parties
-                                        {dossier.parties?.length > 0 && (
-                                            <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
-                                                {dossier.parties.length}
-                                            </span>
-                                        )}
+                                    <TabsTrigger value="expedition" className={cn(tabPasEncoreAtteint('expedition', etape) && 'opacity-40')}>
+                                        <span className="flex items-center gap-1.5">
+                                            Expédition
+                                            {dossier.courriers?.length > 0 && (
+                                                <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
+                                                    {dossier.courriers.length}
+                                                </span>
+                                            )}
+                                            {etape === 'expedition' && activeTab !== 'expedition' && (
+                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
+                                            )}
+                                        </span>
                                     </TabsTrigger>
                                     <TabsTrigger value="facturation">
                                         Facturation
@@ -1849,7 +1956,6 @@ export default function DossierShow() {
                                             </span>
                                         )}
                                     </TabsTrigger>
-                                    <TabsTrigger value="journal">Journal</TabsTrigger>
                                 </TabsList>
 
                                 {/* Onglet Informations */}
@@ -1859,6 +1965,9 @@ export default function DossierShow() {
                                         dossier={dossier}
                                         can={can}
                                         onEditQuest={() => setEditQuestOpen(true)}
+                                        managedRoles={managedRoles}
+                                        onAjouterPersonne={() => setAjoutPersonneOpen(true)}
+                                        onSupprimerPersonne={supprimerPersonne}
                                     />
                                 </TabsContent>
 
@@ -2195,114 +2304,9 @@ export default function DossierShow() {
                                     />
                                 </TabsContent>
 
-                                {/* Onglet Parties */}
-                                <TabsContent value="parties">
-                                    <div className="space-y-3">
-                                        {can?.update && (
-                                            <div className="flex justify-end">
-                                                <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setAjoutPersonneOpen(true)}>
-                                                    <Plus className="h-3.5 w-3.5" /> Ajouter une personne
-                                                </Button>
-                                            </div>
-                                        )}
-
-                                        {!dossier.parties?.length ? (
-                                            <Card>
-                                                <CardContent className="p-6 text-center py-12">
-                                                    <p className="text-slate-400 text-sm">Aucune partie enregistrée.</p>
-                                                </CardContent>
-                                            </Card>
-                                        ) : dossier.parties.map((partie, i) => {
-                                            const estLibre = !managedRoles.includes(partie.role);
-                                            return (
-                                                <Card key={i}>
-                                                    <CardContent className="p-4">
-                                                        <div className="flex items-start gap-4">
-                                                            <Avatar className="h-10 w-10 shrink-0">
-                                                                <AvatarFallback className="bg-ink text-white text-sm">
-                                                                    {partie.initiales ?? partie.nom?.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                                                                </AvatarFallback>
-                                                            </Avatar>
-                                                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                                <div>
-                                                                    <div className="font-medium text-slate-800">{partie.nom}</div>
-                                                                    <Badge variant="secondary" className="mt-1">{partie.role}</Badge>
-                                                                </div>
-                                                                <div className="space-y-1 text-xs text-slate-500">
-                                                                    {partie.cni && (
-                                                                        <div className="flex items-center gap-1.5">
-                                                                            <FileText className="h-3 w-3 shrink-0" />
-                                                                            <span className="font-ref">{partie.cni}</span>
-                                                                        </div>
-                                                                    )}
-                                                                    {partie.telephone && (
-                                                                        <div className="flex items-center gap-1.5">
-                                                                            <Phone className="h-3 w-3 shrink-0" />
-                                                                            {partie.telephone}
-                                                                        </div>
-                                                                    )}
-                                                                    {partie.adresse && (
-                                                                        <div className="flex items-center gap-1.5">
-                                                                            <MapPin className="h-3 w-3 shrink-0" />
-                                                                            {partie.adresse}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                            {can?.update && estLibre && (
-                                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger shrink-0"
-                                                                    onClick={() => supprimerPersonne(partie)} title="Retirer cette personne">
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </Button>
-                                                            )}
-                                                        </div>
-                                                    </CardContent>
-                                                </Card>
-                                            );
-                                        })}
-                                    </div>
-                                    <ModalAjouterPersonne
-                                        open={ajoutPersonneOpen}
-                                        onClose={() => setAjoutPersonneOpen(false)}
-                                        reference={reference}
-                                    />
-                                </TabsContent>
-
                                 {/* Onglet Facturation */}
                                 <TabsContent value="facturation">
                                     <FacturationTab dossier={dossier} can={can} />
-                                </TabsContent>
-
-                                {/* Onglet Journal */}
-                                <TabsContent value="journal">
-                                    <Card>
-                                        <CardHeader className="pb-3">
-                                            <CardTitle>Journal d'activité</CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="space-y-0 px-0 pb-0">
-                                            {!dossier.journal?.length ? (
-                                                <div className="px-5 py-8 text-center text-sm text-slate-400">Aucune activité enregistrée</div>
-                                            ) : (
-                                                dossier.journal.map((entry, i) => (
-                                                    <div key={i} className="flex gap-4 px-5 py-3 border-b border-slate-50 last:border-0">
-                                                        <div className="shrink-0">
-                                                            {entry.user ? (
-                                                                <div className="h-5 w-5 rounded-full bg-ink text-white flex items-center justify-center text-[8px] font-semibold">
-                                                                    {entry.user.initiales ?? '?'}
-                                                                </div>
-                                                            ) : (
-                                                                <div className="h-5 w-5 rounded-full bg-slate-100" />
-                                                            )}
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <span className="text-slate-800 text-sm">{entry.action}</span>
-                                                            <div className="text-xs text-slate-400 mt-0.5">{entry.created_at}</div>
-                                                        </div>
-                                                    </div>
-                                                ))
-                                            )}
-                                        </CardContent>
-                                    </Card>
                                 </TabsContent>
                             </Tabs>
                         </motion.div>
@@ -2372,6 +2376,14 @@ export default function DossierShow() {
                             </div>
                         </>
                     )}
+                    <Separator />
+                    <button
+                        onClick={() => setHistoriqueOpen(true)}
+                        className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-seal transition-colors"
+                    >
+                        <History className="h-3.5 w-3.5" />
+                        Voir l'historique complet
+                    </button>
                 </div>
 
             </div>
@@ -2392,8 +2404,50 @@ export default function DossierShow() {
                         onClose={() => setEditQuestOpen(false)}
                         dossier={dossier}
                     />
+                    <ModalAjouterPersonne
+                        open={ajoutPersonneOpen}
+                        onClose={() => setAjoutPersonneOpen(false)}
+                        reference={reference}
+                    />
                 </>
             )}
+
+            {/* Historique — regroupe l'ancien onglet "Journal", accessible depuis
+                l'en-tête et le panneau latéral plutôt que noyé dans la barre
+                d'onglets (qui débordait sur les écrans étroits). */}
+            <Dialog open={historiqueOpen} onOpenChange={setHistoriqueOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <History className="h-4 w-4 text-seal" />
+                            Historique du dossier
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6">
+                        {!dossier.journal?.length ? (
+                            <div className="py-8 text-center text-sm text-slate-400">Aucune activité enregistrée</div>
+                        ) : (
+                            dossier.journal.map((entry, i) => (
+                                <div key={i} className="flex gap-4 py-3 border-b border-slate-50 last:border-0">
+                                    <div className="shrink-0">
+                                        {entry.user ? (
+                                            <div className="h-5 w-5 rounded-full bg-ink text-white flex items-center justify-center text-[8px] font-semibold">
+                                                {entry.user.initiales ?? '?'}
+                                            </div>
+                                        ) : (
+                                            <div className="h-5 w-5 rounded-full bg-slate-100" />
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <span className="text-slate-800 text-sm">{entry.action}</span>
+                                        <div className="text-xs text-slate-400 mt-0.5">{entry.created_at}</div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </AppLayout>
     );
 }

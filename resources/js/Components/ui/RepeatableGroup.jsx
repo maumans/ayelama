@@ -21,7 +21,7 @@ import { mapClientToRepeatableItem } from '@/lib/clientFields';
  *   onChange   — callback(newArray) appelé à chaque modification
  *   readOnly   — si true, affiche sans contrôles d'édition
  */
-export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false }) {
+export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false, poolClients = [], onClientCreated }) {
     const { fields = [], min = 1, max = 10, label, clientRole } = fieldDef;
     const [creatingForIndex, setCreatingForIndex] = useState(null);
 
@@ -120,6 +120,7 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                     onUnlink={() => unlinkClient(idx)}
                                     onSelect={(client) => applyClient(idx, client)}
                                     onCreateNew={() => setCreatingForIndex(idx)}
+                                    poolClients={poolClients}
                                 />
                             </div>
                         )}
@@ -203,6 +204,7 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                     onCreated={(client) => {
                         applyClient(creatingForIndex, client);
                         setCreatingForIndex(null);
+                        onClientCreated?.(client);
                     }}
                 />
             )}

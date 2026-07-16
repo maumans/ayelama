@@ -83,6 +83,10 @@ export function mapClientToRepeatableItem(client, fieldIds) {
     set('domicile', adresse);
     set('cni', client.type === 'physique' ? client.piece_numero : client.rccm);
     set('piece_numero', client.type === 'physique' ? client.piece_numero : client.rccm);
+    set('piece_type', client.piece_type);
+    set('piece_delivree_le', client.piece_delivree_le);
+    set('piece_delivree_a', client.piece_delivree_a);
+    set('piece_expire_le', client.piece_expire_le);
     set('ne_a', client.ne_a);
     set('date_naissance', client.date_naissance);
 

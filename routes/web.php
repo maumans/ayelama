@@ -148,6 +148,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::delete('/apparence/logo', [ParametresController::class, 'deleteLogo'])->name('apparence.logo.delete');
         Route::get('/securite', [ParametresController::class, 'securite'])->name('securite');
         Route::post('/securite', [ParametresController::class, 'updateSecurite'])->name('securite.update');
+        Route::post('/defauts', [ParametresController::class, 'updateDefauts'])->name('defauts.update');
     });
 
     // Profil

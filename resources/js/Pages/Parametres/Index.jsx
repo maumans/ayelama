@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import {
     AlertTriangle, Check, CheckCircle, CheckCircle2, ChevronDown, ChevronUp,
     ClipboardCheck, ExternalLink, FileText, Palette, Pencil, Percent, Plus,
-    Scale, Search, Settings, Shield, ShieldCheck, Trash2, Upload, Users, X, XCircle,
+    Scale, Search, Settings, Shield, ShieldCheck, Trash2, Upload, UserCog, Users, X, XCircle,
 } from 'lucide-react';
 import { ROLE_META } from '@/data/roles';
 import { RoleBadgeList } from '@/components/ui/role-badge';
@@ -48,6 +48,7 @@ const CAT_BADGE = {
 const TABS = [
     { id: 'utilisateurs', label: 'Utilisateurs',       icon: Users         },
     { id: 'types-actes',  label: "Types d'actes",      icon: FileText      },
+    { id: 'assignations', label: 'Assignations',       icon: UserCog       },
     { id: 'apparence',    label: 'Apparence',          icon: Palette       },
     { id: 'securite',     label: 'Sécurité',           icon: ShieldCheck   },
 ];
@@ -848,6 +849,81 @@ function TabApparence({ apparence = {} }) {
     );
 }
 
+/* ═══════════════════════════════════════════════════════════
+   Tab: Assignations par défaut (notaire/réviseur/formaliste)
+═══════════════════════════════════════════════════════════ */
+
+function TabAssignations({ defauts = {}, utilisateurs = [] }) {
+    const utilisateursParRole = (role) => utilisateurs.filter(u => (u.roles ?? []).includes(role));
+    const notaires = utilisateursParRole('notaire');
+    const reviseurs = utilisateursParRole('reviseur');
+    const formalistes = utilisateursParRole('formaliste');
+
+    const [form, setForm] = useState({
+        default_notaire_id: defauts.notaire_id ? String(defauts.notaire_id) : '',
+        default_reviseur_id: defauts.reviseur_id ? String(defauts.reviseur_id) : '',
+        default_formaliste_id: defauts.formaliste_id ? String(defauts.formaliste_id) : '',
+    });
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved]   = useState(false);
+
+    const save = (e) => {
+        e.preventDefault();
+        setSaving(true);
+        router.post('/parametres/defauts', {
+            default_notaire_id: form.default_notaire_id || null,
+            default_reviseur_id: form.default_reviseur_id || null,
+            default_formaliste_id: form.default_formaliste_id || null,
+        }, {
+            onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2500); },
+            onFinish: () => setSaving(false),
+        });
+    };
+
+    const champSelect = (label, cle, options) => (
+        <div className="space-y-1.5">
+            <Label>{label}</Label>
+            <select
+                value={form[cle]}
+                onChange={e => setForm(p => ({ ...p, [cle]: e.target.value }))}
+                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+            >
+                <option value="">Aucun par défaut</option>
+                {options.map(u => (
+                    <option key={u.id} value={u.id}>{u.name}{u.initiales ? ` (${u.initiales})` : ''}</option>
+                ))}
+            </select>
+            {options.length === 0 && (
+                <p className="text-xs text-amber-600">Aucun utilisateur actif avec ce rôle pour l'instant.</p>
+            )}
+        </div>
+    );
+
+    return (
+        <form onSubmit={save} className="space-y-5 max-w-lg">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
+                <UserCog className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-blue-800">
+                    Ces personnes seront pré-sélectionnées automatiquement à la création d'un nouveau dossier
+                    (ou à la conversion d'une demande client) — modifiable au cas par cas avant validation.
+                </p>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                {champSelect('Notaire en charge par défaut', 'default_notaire_id', notaires)}
+                {champSelect('Réviseur par défaut', 'default_reviseur_id', reviseurs)}
+                {champSelect('Formaliste par défaut', 'default_formaliste_id', formalistes)}
+            </div>
+
+            <div className="flex items-center gap-3">
+                <Button type="submit" variant="seal" disabled={saving}>
+                    {saved ? <><Check className="h-4 w-4" /> Enregistré</> : saving ? 'Enregistrement…' : 'Enregistrer'}
+                </Button>
+            </div>
+        </form>
+    );
+}
+
 function TabSecurite({ securite = {} }) {
     const [form, setForm] = useState({
         otp_enabled: securite.otp_enabled ?? false,
@@ -921,6 +997,7 @@ export default function ParametresIndex({
     typesActes = [],
     apparence = {},
     securite = {},
+    defauts = {},
 }) {
     const [activeTab, setActiveTab] = useState('utilisateurs');
 
@@ -1041,6 +1118,9 @@ export default function ParametresIndex({
                                 )}
                                 {activeTab === 'types-actes' && (
                                     <TabTypesActes typesActes={typesActes} />
+                                )}
+                                {activeTab === 'assignations' && (
+                                    <TabAssignations defauts={defauts} utilisateurs={utilisateurs} />
                                 )}
                                 {activeTab === 'apparence' && (
                                     <TabApparence apparence={apparence} />

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Dossier;
+use App\Models\JournalActivite;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpWord\TemplateProcessor;
 use PhpOffice\PhpWord\PhpWord;
@@ -28,7 +29,7 @@ class ActesGeneratorService
         $templateAbsPath = Storage::disk('local')->path($storagePath);
 
         if (file_exists($templateAbsPath)) {
-            $this->genererDepuisModele($dossier, $templateAbsPath, $outputAbsolutePath);
+            $this->genererDepuisModele($dossier, $templateAbsPath, $outputAbsolutePath, $outputName);
         } else {
             $this->creerDocumentPlaceholder($dossier, $outputAbsolutePath, $outputName);
         }
@@ -38,16 +39,46 @@ class ActesGeneratorService
 
     // ── Génération réelle ────────────────────────────────────────────────────
 
-    private function genererDepuisModele(Dossier $dossier, string $templateAbsPath, string $outputAbsPath): void
+    private function genererDepuisModele(Dossier $dossier, string $templateAbsPath, string $outputAbsPath, string $outputName): void
     {
         $tp = new TemplateProcessor($templateAbsPath);
 
         $this->remplirConstantesOffice($tp);
         $this->remplirInfosDossier($tp, $dossier);
         $this->remplirQuestionnaire($tp, $dossier);
+        $this->consignerChampsManquants($tp, $dossier, $outputName);
         $this->effacerMacrosResiduelles($tp);
 
         $tp->saveAs($outputAbsPath);
+    }
+
+    /**
+     * Un champ du modèle sans valeur correspondante n'est PAS bloquant (le document est
+     * quand même généré, avec ce passage laissé vide par `effacerMacrosResiduelles`) — mais
+     * ça ne doit plus rester silencieux : on le consigne dans l'historique du dossier pour
+     * que le rédacteur/notaire s'en aperçoive avant signature plutôt qu'à la relecture papier.
+     */
+    private function consignerChampsManquants(TemplateProcessor $tp, Dossier $dossier, string $outputName): void
+    {
+        $manquants = array_values(array_unique($tp->getVariables()));
+        if (empty($manquants)) {
+            return;
+        }
+
+        // La liste complète part dans `meta` (JSON, non contraint) ; le résumé texte doit lui
+        // rester sous la limite de la colonne `action` (varchar 255) — un bloc répétable avec
+        // plusieurs items peut facilement produire des dizaines de champs manquants.
+        $resume = implode(', ', $manquants);
+        if (mb_strlen($resume) > 150) {
+            $resume = mb_substr($resume, 0, 150) . '…';
+        }
+
+        JournalActivite::enregistrer(
+            $dossier,
+            "Document « {$outputName} » généré avec " . count($manquants) . " champ(s) resté(s) vide(s) faute de donnée : {$resume}",
+            'creation',
+            ['document' => $outputName, 'champs_manquants' => $manquants]
+        );
     }
 
     private function remplirConstantesOffice(TemplateProcessor $tp): void
@@ -99,6 +130,8 @@ class ActesGeneratorService
     {
         $donnees = $dossier->questionnaire?->donnees ?? [];
 
+        $this->deriverPersonnesParDefaut($donnees, $dossier->typeActe?->code);
+
         foreach ($donnees as $cle => $valeur) {
             if (is_array($valeur) && array_is_list($valeur)) {
                 // Bloc répétable (associés, gérants, administrateurs…)
@@ -138,6 +171,73 @@ class ActesGeneratorService
                 $tp->setValue("{$pfx}.adresse", htmlspecialchars($adresse, ENT_XML1 | ENT_COMPAT, 'UTF-8'));
             }
         }
+
+        // Terme du bail (baux habitation/commercial/construction) : les modèles écrivent
+        // « … commence à courir le [date_prise_effet] pour se terminer le [date_fin] », mais
+        // le questionnaire ne demande que la durée en années — la date de fin ne serait donc
+        // jamais fournie. On la déduit ici plutôt que de l'ajouter comme un champ de plus à saisir.
+        $dateEffet = $donnees['bail.date_prise_effet'] ?? null;
+        $duree     = $donnees['bail.duree_chiffres'] ?? null;
+        if ($dateEffet && $duree && !isset($donnees['bail.date_fin'])) {
+            try {
+                $dateFin = \Illuminate\Support\Carbon::createFromFormat('d/m/Y', $dateEffet)
+                    ->addYears((int) $duree)
+                    ->format('d/m/Y');
+                $tp->setValue('bail.date_fin', $dateFin);
+            } catch (\Exception) {
+                // Date saisie dans un format inattendu — laisser le placeholder vide plutôt que planter.
+            }
+        }
+    }
+
+    /**
+     * SARLU (`creation_sarlu`) et SASU (`creation_sasu`) proposent une case à cocher
+     * « le gérant/président est une personne différente de l'associé unique », décochée
+     * par défaut car c'est le cas le plus fréquent — l'associé unique se nomme lui-même
+     * gérant/président. Une case à cocher jamais touchée par l'utilisateur n'existe même
+     * pas dans `donnees` (React ne l'ajoute qu'au premier clic) : on ne peut donc PAS se
+     * fier à sa présence pour savoir si la dérivation s'applique, seulement au code du
+     * type d'acte. Tant qu'elle reste décochée (ou absente), les champs ger.xxx /
+     * soc.president_xxx ne sont jamais collectés : sans cette dérivation, les paragraphes
+     * du modèle qui les utilisent (ex. statuts-sarlu.docx : "Dès à présent,
+     * ${ger.civilite} ${ger.prenom_nom}…") seraient générés vides.
+     */
+    private function deriverPersonnesParDefaut(array &$donnees, ?string $typeActeCode): void
+    {
+        if ($typeActeCode === 'SOC-SARLU' && empty($donnees['ger.est_different'])) {
+            foreach ($donnees as $cle => $valeur) {
+                if (!str_starts_with($cle, 'pp.')) {
+                    continue;
+                }
+                $cleGer = 'ger.' . substr($cle, 3);
+                if (empty($donnees[$cleGer])) {
+                    $donnees[$cleGer] = $valeur;
+                }
+            }
+        }
+
+        if ($typeActeCode === 'SOC-SASU' && empty($donnees['soc.president_est_different'])) {
+            $map = [
+                'soc.president_civilite'     => 'pp.civilite',
+                'soc.president_nom'          => 'pp.prenom_nom',
+                'soc.president_piece_numero' => 'pp.piece_numero',
+            ];
+            foreach ($map as $cleDestination => $cleSource) {
+                if (empty($donnees[$cleDestination]) && !empty($donnees[$cleSource])) {
+                    $donnees[$cleDestination] = $donnees[$cleSource];
+                }
+            }
+            if (empty($donnees['soc.president_adresse'])) {
+                $adresse = implode(', ', array_filter([
+                    $donnees['pp.quartier'] ?? null,
+                    $donnees['pp.commune'] ?? null,
+                    $donnees['pp.demeurant_ville'] ?? null,
+                ]));
+                if ($adresse !== '') {
+                    $donnees['soc.president_adresse'] = $adresse;
+                }
+            }
+        }
     }
 
     /**
@@ -147,8 +247,12 @@ class ActesGeneratorService
      *   ${associes}  …  ${/associes}
      * Et les champs internes : ${associes.nom}, ${associes.parts_chiffres}, etc.
      *
-     * PhpWord clonera le bloc autant de fois qu'il y a d'items, puis setValue
-     * remplira chaque occurrence avec la notation indexée : ${associes#1.nom}, etc.
+     * PhpWord clonera le bloc autant de fois qu'il y a d'items. Avec `cloneBlock(...,
+     * $indexVariables: true)`, chaque variable ${associes.nom} du bloc N est renommée en
+     * ${associes.nom#N} — l'index est ajouté à LA FIN du nom de variable complet, pas
+     * inséré entre le nom du bloc et le champ (voir TemplateProcessor::indexClonedVariables
+     * dans PhpWord, qui fait `preg_replace('/\$\{([^:]*?)(:.*?)?\}/', '${\1#N\2}', ...)`).
+     * D'où la clé "{$bloc}.{$champ}#{$index}" ci-dessous, et surtout pas "{$bloc}#{$index}.{$champ}".
      */
     private function remplirBlocRepetable(TemplateProcessor $tp, string $bloc, array $items, array $allDonnees): void
     {
@@ -175,12 +279,12 @@ class ActesGeneratorService
                 if (str_ends_with($champ, '_chiffres') && is_numeric($valeur)) {
                     $champLettres = str_replace('_chiffres', '_lettres', $champ);
                     if (!isset($item[$champLettres])) {
-                        $tp->setValue("{$bloc}#{$index}.{$champLettres}", NombreEnLettres::convertir((float) $valeur));
+                        $tp->setValue("{$bloc}.{$champLettres}#{$index}", NombreEnLettres::convertir((float) $valeur));
                     }
                 }
 
                 $tp->setValue(
-                    "{$bloc}#{$index}.{$champ}",
+                    "{$bloc}.{$champ}#{$index}",
                     htmlspecialchars($valeur, ENT_XML1 | ENT_COMPAT, 'UTF-8')
                 );
             }

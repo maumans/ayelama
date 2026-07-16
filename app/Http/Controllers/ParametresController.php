@@ -91,6 +91,7 @@ class ParametresController extends Controller
             'typesActes'        => $typesActes,
             'apparence'         => $settings,
             'securite'          => $this->securiteSettings(),
+            'defauts'           => Setting::defaultAssignees(),
         ]);
     }
 
@@ -494,6 +495,21 @@ class ParametresController extends Controller
         return back()->with('success', 'Paramètres de sécurité mis à jour.');
     }
 
+    // ── Assignations par défaut (notaire/réviseur/formaliste pré-sélectionnés) ────
+
+    public function updateDefauts(Request $request)
+    {
+        $data = $request->validate([
+            'default_notaire_id'    => ['nullable', 'integer', Rule::exists('users', 'id')],
+            'default_reviseur_id'   => ['nullable', 'integer', Rule::exists('users', 'id')],
+            'default_formaliste_id' => ['nullable', 'integer', Rule::exists('users', 'id')],
+        ]);
+
+        Setting::setMany($data);
+
+        return back()->with('success', 'Assignations par défaut mises à jour.');
+    }
+
     // ── Helper commun pour index() et apparence() ─────────────────────────
 
     private function buildIndexData(array $extra = []): array
@@ -509,6 +525,7 @@ class ParametresController extends Controller
         return array_merge([
             'apparence' => $settings,
             'securite'  => $this->securiteSettings(),
+            'defauts'   => Setting::defaultAssignees(),
         ], $extra);
     }
 }

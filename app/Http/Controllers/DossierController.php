@@ -12,6 +12,7 @@ use App\Models\ModeleActe;
 use App\Models\ModeleCourrier;
 use App\Models\Partie;
 use App\Models\Questionnaire;
+use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
 use App\Services\DossierStepService;
@@ -119,6 +120,7 @@ class DossierController extends Controller
             'notaires'   => User::withRole('notaire')->where('actif', true)->get(['id', 'name', 'initiales']),
             'reviseurs'  => User::withRole('reviseur')->where('actif', true)->get(['id', 'name', 'initiales']),
             'formalistes' => User::withRole('formaliste')->where('actif', true)->get(['id', 'name', 'initiales']),
+            'defauts'    => Setting::defaultAssignees(),
         ]);
     }
 

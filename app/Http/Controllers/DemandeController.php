@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreDossierRequest;
 use App\Mail\DemandeLienMail;
 use App\Models\Demande;
+use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
 use App\Services\ActesGeneratorService;
@@ -112,6 +113,7 @@ class DemandeController extends Controller
             'notaires'    => User::withRole('notaire')->where('actif', true)->get(['id', 'name']),
             'reviseurs'   => User::withRole('reviseur')->where('actif', true)->get(['id', 'name']),
             'formalistes' => User::withRole('formaliste')->where('actif', true)->get(['id', 'name']),
+            'defauts'     => Setting::defaultAssignees(),
         ]);
     }
 

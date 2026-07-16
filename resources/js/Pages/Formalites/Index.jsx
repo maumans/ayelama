@@ -30,10 +30,6 @@ import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 /* ─── constants ─────────────────────────────────────────── */
 
 const fmt = (n) => n ? Number(n).toLocaleString('fr-FR') : '0';
-const fmtCompact = (n) => {
-    const v = Number(n) || 0;
-    return v >= 1000 ? `${Math.round(v / 1000)} K` : String(v);
-};
 
 const ORGANISMES_ONGLETS = ['apip', 'impots', 'conservation_fonciere', 'cnss', 'greffe'];
 
@@ -459,7 +455,7 @@ export default function FormalitesIndex({ formalites, stats, statuts, filters: i
                         { label: 'En cours',      value: stats?.enCours    ?? 0, Icon: Clock,     cls: 'text-blue-600' },
                         { label: 'Retour reçu',   value: stats?.retourRecu ?? 0, Icon: MailCheck, cls: 'text-green-600' },
                         { label: 'Urgentes',      value: stats?.urgentes   ?? 0, Icon: Flame,     cls: (stats?.urgentes ?? 0) > 0 ? 'text-danger' : 'text-slate-400' },
-                        { label: 'Frais engagés', value: fmtCompact(stats?.montantTotal ?? 0) + ' GNF', Icon: Banknote, cls: 'text-seal' },
+                        { label: 'Frais engagés', value: fmt(stats?.montantTotal ?? 0) + ' GNF', Icon: Banknote, cls: 'text-seal' },
                     ].map(({ label, value, Icon, cls }) => (
                         <div key={label} className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
                             <div className="flex items-center justify-between mb-1">

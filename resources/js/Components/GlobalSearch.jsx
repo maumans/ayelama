@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { router } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, FolderOpen, Users, ArrowRight, X } from 'lucide-react';
@@ -80,7 +81,11 @@ export default function GlobalSearch() {
         if (e.key === 'Enter' && results[selected]) navigate(results[selected].href);
     };
 
-    return (
+    // Portail vers <body> : évite que le positionnement `fixed` du modal se
+    // retrouve piégé par un ancêtre qui établit involontairement un nouveau
+    // "containing block" (transform/filter/will-change), ce qui décalait la
+    // palette au lieu de la centrer sur tout le viewport.
+    return createPortal(
         <AnimatePresence>
             {open && (
                 <>
@@ -187,6 +192,7 @@ export default function GlobalSearch() {
                     </motion.div>
                 </>
             )}
-        </AnimatePresence>
+        </AnimatePresence>,
+        document.body
     );
 }

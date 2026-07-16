@@ -98,6 +98,8 @@ resources/js/
 │   └── questionnaires.js           # Config partagée : QUESTIONNAIRES + TYPE_ACTE_CODE_MAP
 ├── Components/                     # (capital C — Windows insensible à la casse)
 │   ├── GlobalSearch.jsx            # Palette ⌘K (fetch JSON /search)
+│   ├── PasswordRequirements.jsx    # Checklist live (12 car., maj/min, chiffre, spécial) — Register/Reset/Profil/Utilisateurs
+│   ├── NotificationDropdown.jsx    # Vraie liste de notifications (remplace l'ancien Tooltip de la cloche)
 │   └── ui/                         # Composants shadcn/ui adaptés
 │       ├── button.jsx              # Variantes: default, seal, outline, ghost, success, warning, destructive
 │       ├── badge.jsx
@@ -115,16 +117,18 @@ resources/js/
 │       ├── separator.jsx
 │       └── switch.jsx
 ├── Layouts/
-│   └── AppLayout.jsx               # Layout global (sidebar + topbar, collapse, mobile)
+│   └── AppLayout.jsx               # Layout global (sidebar + topbar, collapse, mobile, NotificationDropdown)
+├── hooks/
+│   └── useRealtimeNotifications.js # Écoute Echo/Pusher (canal privé App.Models.User.{id}) → badge + notif navigateur
 └── Pages/
     ├── Dashboard.jsx               # KPIs réels, file d'attente, alertes, activité, catégories
     ├── Welcome.jsx
-    ├── Auth/                       # Login, Register, etc. (Breeze)
-    ├── Profile/                    # Profil utilisateur (Breeze)
+    ├── Auth/                       # Login, Register, etc. (Breeze) + VerifyOtp.jsx (challenge 2FA)
+    ├── Profile/                    # Profil utilisateur (Breeze) + Partials/TrustedDevicesForm.jsx (appareils de confiance)
     ├── Dossiers/
     │   ├── Index.jsx               # Liste paginée, recherche, filtres étape/catégorie
-    │   ├── Show.jsx                # Fiche dossier (stepper + 6 onglets + 2 modals édition)
-    │   ├── Create.jsx              # Wizard 4 étapes → POST /dossiers (questionnaire sectionné)
+    │   ├── Show.jsx                # Fiche dossier (stepper + onglets contextuels + dialog Historique + 2 modals édition)
+    │   ├── Create.jsx               # Wizard 4 étapes → POST /dossiers (questionnaire sectionné)
     │   └── Revision.jsx            # Grille de contrôle → PUT /dossiers/{ref}/revision
     ├── Revisions/
     │   └── Index.jsx               # File révisions en attente
@@ -173,7 +177,9 @@ app/
 │   ├── Banque.php                  # belongsTo(Dossier) — bloc hypothèque/crédit
 │   ├── Bareme.php                  # belongsTo(TypeActe), scope actif(), calculerMontant(valeurActe) — taux% ou montant_fixe
 │   ├── Courrier.php                # reference, dossier(), redacteur()→User, scopes brouillon()/envoye(), typeLabel()
-│   └── Setting.php                 # clé/valeur (PK string 'key'), get/set/setMany/all statiques
+│   ├── Setting.php                 # clé/valeur (PK string 'key'), get/set/setMany/all statiques
+│   ├── UserOtpCode.php             # code OTP (hash sha256), attempts, expires_at, consumed_at — table dédiée éphémère
+│   └── UserTrustedDevice.php       # appareil de confiance (30j), token_hash, scope actif() — révocable depuis le profil
 ├── Policies/
 │   ├── DossierPolicy.php           # viewAny, view, create (Clerc+Notaire+Admin), update, delete, avancer, reviser, gererFormalites
 │   └── RevisionPolicy.php          # view, update, valider, renvoyer
@@ -181,7 +187,11 @@ app/
 │   ├── DossierStepService.php      # avancer(), reculer(), verifierPrerequis() — adapté aux 6 étapes
 │   ├── ActesGeneratorService.php   # genererDocument() — PhpWord TemplateProcessor, moteur générique clé/valeur (gère déjà bien./bq./bail. sans code dédié)
 │   ├── FacturationService.php      # genererFacture(), simuler() — génère Facture+LigneFacture depuis les Bareme actifs du type d'acte, deduireAssiette()
-│   └── NombreEnLettres.php         # convertir(float, devise) → majuscules FR (milliers, millions, milliards)
+│   ├── NombreEnLettres.php         # convertir(float, devise) → majuscules FR (milliers, millions, milliards)
+│   └── TwoFactorAuthenticationService.php  # generateAndSend(), verify(), resend(), rememberDevice(), isDeviceTrusted()
+├── Console/Commands/
+│   ├── AlerterEcheances.php        # ayelema:alerter-echeances — hourly, anti-doublon 12h
+│   └── AlerterFormalites.php       # ayelema:alerter-formalites — hourly, même logique anti-doublon
 ├── Http/
 │   ├── Controllers/
 │   │   ├── DashboardController.php
@@ -193,21 +203,32 @@ app/
 │   │   ├── SearchController.php    # index → JSON {results:[]}
 │   │   ├── RepertoireController.php# index, autocomplete → JSON
 │   │   ├── CourrierController.php  # index (filtres/stats/recherche), store, update (gère envoye_at), destroy
-│   │   ├── ParametresController.php# index, utilisateurs, storeUtilisateur, updateUtilisateur, typesActes, updateTypeActe, baremes, storeBareme, updateBareme, destroyBareme
-│   │   └── ProfileController.php
+│   │   ├── ParametresController.php# index, utilisateurs, storeUtilisateur, updateUtilisateur, typesActes, updateTypeActe, baremes, storeBareme, updateBareme, destroyBareme, securite, updateSecurite
+│   │   ├── NotificationController.php # index, markAsRead, markAllAsRead — vraie liste (table notifications), pas seulement les compteurs
+│   │   ├── ProfileController.php   # edit/update/destroy + revokeTrustedDevice (appareils de confiance)
+│   │   └── Auth/
+│   │       ├── AuthenticatedSessionController.php  # store() : login différé si otp_enabled + appareil non fiable
+│   │       └── TwoFactorChallengeController.php    # create/store/resend — challenge OTP (routes guest, session non authentifiée)
 │   ├── Middleware/
-│   │   ├── HandleInertiaRequests.php  # partage auth.user.can, notifications
+│   │   ├── HandleInertiaRequests.php  # partage auth.user.can, notifications (dont unreadNotificationsCount)
 │   │   └── RoleMiddleware.php         # alias 'role:' dans bootstrap/app.php
 │   └── Requests/
 │       ├── StoreDossierRequest.php    # authorize via DossierPolicy::create
-│       └── UpdateDossierRequest.php   # objet, valeur, echeance, notaire_id, reviseur_id, formaliste_id
+│       ├── UpdateDossierRequest.php   # objet, valeur, echeance, notaire_id, reviseur_id, formaliste_id
+│       └── Auth/LoginRequest.php      # authenticate() : Auth::validate() (ne connecte pas), retourne le User pour le flux OTP
 └── Notifications/
-    ├── EcheanceDossierNotification.php
-    └── RevisionEnAttenteNotification.php
+    ├── EcheanceDossierNotification.php     # ShouldQueue, via() database+mail+broadcast conditionnel
+    ├── RevisionEnAttenteNotification.php    # idem
+    ├── NouvelleDemandeNotification.php      # idem
+    ├── FormaliteUrgenteNotification.php     # idem — déclenchée par AlerterFormalites (formalite urgente/dépassée)
+    └── TwoFactorCodeNotification.php        # mail seul, volontairement PAS ShouldQueue (voir décision #28)
 ```
 
 ```
 routes/web.php                      # Toutes les routes Inertia + actions workflow
+routes/auth.php                     # Breeze + routes two-factor.challenge/verify/resend (login différé OTP)
+routes/channels.php                 # Broadcast::channel('App.Models.User.{id}', ...) — canal privé Pusher
+routes/console.php                  # Scheduler hourly : ayelema:alerter-echeances, ayelema:alerter-formalites
 database/
 ├── migrations/                     # 13 migrations (toutes les tables)
 └── seeders/
@@ -330,7 +351,7 @@ Documents reçus/                                   # (ajouté 2026-07-06) 64 fi
 
 - [x] **Dashboard** — stats réelles (enCours, enRevision, echeancesProches, formalitesUrgentes), file d'attente, alertes urgentes, activité récente, répartition par catégorie
 - [x] **Dossiers/Index** — liste paginée (25/page), recherche texte, filtres étape + catégorie, pagination avec `prev_page_url` / `next_page_url`
-- [x] **Dossiers/Show** — en-tête dossier, stepper workflow, 6 onglets (informations, documents, révision, formalités, parties, journal) tous avec données réelles, panneau latéral droit, 2 modals d'édition (dossier + questionnaire)
+- [x] **Dossiers/Show** — en-tête dossier, stepper workflow, onglets contextuels (informations, documents, révision, formalités, expédition, facturation) tous avec données réelles ; l'onglet "Parties" a été fusionné dans "Informations" (gestion des personnes désormais inline) et l'ancien onglet "Journal" a été renommé **Historique**, sorti de la barre d'onglets et déplacé dans un dialog dédié (bouton, pas onglet) ; les onglets propres à une étape non encore atteinte sont estompés (`opacity-40`) plutôt que masqués — jamais rendus inaccessibles, juste visuellement désaccentués (voir [décision #29](#8-décisions-techniques)) ; panneau latéral droit, 2 modals d'édition (dossier + questionnaire)
 - [x] **Dossiers/Create** — wizard 4 étapes, `findTypeActeId()` pour mapper vers la DB, `router.post('/dossiers', {...})`, champs objet + notaire + réviseur + formaliste, questionnaire affiché par sections (Société / Associé unique / Gérant)
 - [x] **Dossiers/Revision** — grille de contrôle, sauvegarde partielle (`PUT`), valider (`POST`), renvoyer avec motif (`POST`), dialog de confirmation, DEFAULT_GROUPES si pas de grille en DB
 - [x] **Formalites/Index** — groupé par dossier, `PATCH` pour marquer déposé/retour reçu/toggle pièce
@@ -347,12 +368,25 @@ Documents reçus/                                   # (ajouté 2026-07-06) 64 fi
 - [x] `GlobalSearch.jsx` — palette React avec AbortController (annule requêtes obsolètes)
 - [x] Intégré dans AppLayout, déclenché par bouton topbar ou ⌘K/Ctrl+K
 
-### ✅ Complété — Module 8 : Notifications & Alertes
+### ✅ Complété — Module 8 : Notifications & Alertes (email + temps réel + push)
 
-- [x] `EcheanceDossierNotification`, `RevisionEnAttenteNotification` (database channel)
-- [x] `AlerterEcheances` Artisan command
+- [x] `EcheanceDossierNotification`, `RevisionEnAttenteNotification`, `NouvelleDemandeNotification`, `FormaliteUrgenteNotification` — toutes `ShouldQueue`, canal `mail` (via `toMail()` fluent, conditionné à `notifications_email`) + canal `broadcast` (temps réel) + `database` (historique)
+- [x] `AlerterEcheances` + `AlerterFormalites` (Artisan commands, hourly, anti-doublon 12h)
 - [x] Planificateur hourly dans `routes/console.php`
-- [x] Compteurs urgentes/révision dans topbar via `HandleInertiaRequests`
+- [x] Temps réel via **Pusher** (Channels) — `routes/channels.php` (canal privé `App.Models.User.{id}`), `laravel-echo`/`pusher-js` initialisés dans `resources/js/bootstrap.js`, écoute dans `resources/js/hooks/useRealtimeNotifications.js` (badge instantané + notification navigateur native si permission accordée — voir [décision #27](#8-décisions-techniques) pour les limites de ce mécanisme)
+- [x] `NotificationController` (index/markAsRead/markAllAsRead) + `NotificationDropdown.jsx` — vraie liste déroulante avec marquage lu, remplace l'ancien `Tooltip` statique dans `AppLayout.jsx`
+- [x] Compteurs urgentes/révision + `unreadNotificationsCount` dans topbar via `HandleInertiaRequests`
+- [x] SMTP configuré (Hostinger) et clés Pusher renseignées dans `.env` (non placeholders)
+
+### ✅ Complété — Module Sécurité : politique de mot de passe + 2FA par email (OTP)
+
+- [x] Politique de mot de passe forte centralisée : `Password::defaults()` dans `AppServiceProvider::boot()` (12 car. min., majuscule, minuscule, chiffre, caractère spécial) — fixée en dur, non paramétrable (voir [décision #26](#8-décisions-techniques))
+- [x] `PasswordRequirements.jsx` — checklist live intégrée à Register, ResetPassword, Profil (changement mdp), création/édition utilisateur admin
+- [x] `ParametresController::storeUtilisateur/updateUtilisateur` corrigés pour utiliser `Password::defaults()` (contournaient auparavant la politique avec un simple `min:8`)
+- [x] 2FA OTP par email, durée paramétrable (`Setting` : `otp_enabled`, `otp_duration_minutes`) — connexion différée (`LoginRequest::authenticate()` ne connecte plus directement, voir [décision #23](#8-décisions-techniques))
+- [x] `TwoFactorAuthenticationService` — génération/envoi/vérification/renvoi du code (6 chiffres, hash sha256, throttle), gestion des appareils de confiance
+- [x] Appareil de confiance (30 jours) — table `user_trusted_devices`, cookie signé, case à cocher sur `VerifyOtp.jsx`, révocation depuis `Profile/Edit.jsx` (`TrustedDevicesForm.jsx`)
+- [x] Section "Sécurité" dans `Parametres/Index.jsx` (`TabSecurite`) — toggle `otp_enabled`, durée en minutes, avertissement SMTP
 
 ### ✅ Complété — Module 9 : Répertoire clients
 
@@ -456,7 +490,8 @@ Reste à implémenter :
 ### Tables (toutes créées et migrées)
 
 ```
-users — id, name, email, password, role(enum), initiales, telephone, avatar, actif, timestamps
+users — id, name, email, password, role(enum), initiales, telephone, avatar, actif,
+        notifications_email(bool, défaut true), timestamps
 
 dossiers — id, reference(unique), type_acte_id, etape(enum), redacteur_id, reviseur_id,
            notaire_id, formaliste_id, objet, valeur, echeance, notes,
@@ -532,6 +567,15 @@ lignes_factures — id, facture_id, designation, quantite, montant, timestamps
 settings — key(string, PK), value(text, nullable), timestamps
            -- seed par défaut : office_nom, office_sous_titre, couleur_primaire,
            -- couleur_accent, couleur_fond, logo_path
+           -- clés Sécurité (ajoutées 2026-07-15) : otp_enabled, otp_duration_minutes
+
+-- Ajoutées le 2026-07-15 (2FA OTP + appareils de confiance) :
+
+user_otp_codes — id, user_id, code_hash, attempts, expires_at, consumed_at,
+                 last_sent_at, ip_address, timestamps
+
+user_trusted_devices — id, user_id, token_hash(unique), label, ip_address,
+                       last_used_at, expires_at, timestamps
 ```
 
 ### Relations clés
@@ -549,6 +593,7 @@ settings — key(string, PK), value(text, nullable), timestamps
 - `Dossier` HasMany `Courrier`, `Facture`
 - `Facture` HasMany `LigneFacture`
 - `Courrier` BelongsTo `Dossier`, BelongsTo `User` (redacteur)
+- `User` HasMany `UserOtpCode`, `UserTrustedDevice`
 
 ### Scopes importants (`Dossier`)
 ```php
@@ -593,6 +638,13 @@ Les clés suffixées `_chiffres` génèrent automatiquement la variante `_lettre
 | 20 | `Partie.client_id` nullable plutôt que fusion `Partie`/`Client` | `Client` a été introduit pour permettre la réutilisation d'une personne entre plusieurs dossiers (répertoire), mais sans migration de données existantes ni CRUD dédié. `Partie` reste la source de vérité pour un dossier donné ; `Client` est un enrichissement optionnel, pas un remplacement |
 | 21 | Deux mécanismes de calcul de montant non unifiés | `Formalite::calculerMontant()` (base×taux stocké sur la formalité) a précédé `Bareme::calculerMontant()` + `FacturationService` (barèmes paramétrables par type d'acte). Les deux coexistent aujourd'hui — ne pas supposer qu'un changement de barème impacte automatiquement le montant d'une formalité existante |
 | 22 | `ActesGeneratorService` reste générique clé/valeur | Plutôt que du code dédié par bloc (`bien.*`, `bq.*`, `bail.*`), le service boucle sur toutes les clés du questionnaire et appelle `setValue()` pour chacune — ça fonctionne déjà pour ces préfixes sans changement de code, mais la dérivation d'adresse auto (`{pfx}.adresse`) ne couvre que `pp/ger/acq/loc/liquidateur`, pas `bien/bq/bail` |
+| 23 | Login différé pour l'OTP (`Auth::validate` au lieu de `Auth::attempt`) | `LoginRequest::authenticate()` ne connecte plus l'utilisateur directement — il vérifie les identifiants et retourne le `User`. `AuthenticatedSessionController::store()` décide ensuite d'appeler `Auth::login()` immédiatement ou de rediriger vers le challenge OTP. Avantage : aucune session authentifiée n'existe avant validation complète du code, donc **aucun middleware `EnsureOtpVerified` n'est nécessaire** — le middleware `auth` existant bloque déjà tout accès tant que `Auth::login()` n'a pas été appelé |
+| 24 | `user_otp_codes` et `user_trusted_devices` en tables séparées, pas de colonnes sur `users` | Données transactionnelles/éphémères (code OTP) ou multi-valuées (plusieurs appareils par utilisateur, révocation individuelle) — éviter d'alourdir `User` avec des colonnes majoritairement vides |
+| 25 | `otp_enabled` est un interrupteur global (`Setting`), pas par utilisateur, désactivé par défaut | Simplicité : pas de préférence par compte à gérer dans cette v1. Défaut `false` volontaire — tant que le SMTP réel n'est pas testé, l'activer bloquerait tous les comptes hors du système (le code partirait dans les logs, jamais reçu) |
+| 26 | Politique de mot de passe fixée en dur (`Password::defaults()`), non paramétrable par un admin | Contrairement à `otp_duration_minutes` (paramètre opérationnel sans risque), affaiblir la politique de mot de passe a un impact de sécurité direct et silencieux — un admin ne doit pas pouvoir la réduire par erreur ou intentionnellement via l'UI |
+| 27 | Pusher (Channels) choisi pour le "push" plutôt que Web Push standard (VAPID) | Décision utilisateur explicite. **Nuance à ne pas oublier** : ce mécanisme (Echo + `Notification` API déclenchée en JS) ne délivre rien si le navigateur est complètement fermé — seulement tant que l'app est ouverte (onglet actif ou arrière-plan). Un vrai push hors-ligne nécessiterait un Service Worker + VAPID, ou Pusher Beams (produit séparé, payant au-delà d'un seuil) |
+| 28 | `TwoFactorCodeNotification` n'implémente volontairement PAS `ShouldQueue` (contrairement aux 4 autres notifications) | Le code OTP doit partir immédiatement — le dépendre d'un worker de queue qui pourrait ne pas tourner en continu en production bloquerait la connexion de l'utilisateur. Les 4 notifications métier (échéance, révision, formalité, demande) sont non urgentes et peuvent tolérer la latence d'une queue |
+| 29 | Onglets `Dossiers/Show` jamais masqués, seulement estompés (`opacity-40`) selon l'étape atteinte | Alternative retenue à un show/hide strict : les onglets futurs restent cliquables (consultables) mais visuellement désaccentués via `TAB_STAGE` + `tabPasEncoreAtteint()` — "Informations" et "Facturation" sont exclus de ce mécanisme (toujours pleinement visibles, transversaux). L'ancien onglet "Parties" a été fusionné dans "Informations" (gestion des personnes désormais inline) et "Journal" a été renommé **Historique** puis sorti de la barre d'onglets vers un dialog dédié (le champ backend `dossier.journal` n'a pas été renommé, seul le libellé/l'emplacement UI a changé) |
 
 ---
 
@@ -640,7 +692,11 @@ Les clés suffixées `_chiffres` génèrent automatiquement la variante `_lettre
 | `Client`/`Societe`/`BienImmobilier`/`Banque` sans CRUD ni seeder | Tables et modèles existent, alimentés uniquement en creux via le questionnaire du dossier — pas d'écran de gestion, pas de données de démo |
 | Migration `migrate_signature_etapes_to_formalites` irréversible | Pas de `down()` — si des dossiers étaient en étape signature avant le 2026-07-03, leur état précis (client vs notaire) est perdu, ils sont tous en `formalites` maintenant |
 | Routes `parametres/apparence` et `parametres/grilles` présentes dans `web.php` | Non vérifié si les pages React correspondantes existent et sont branchées (`Setting` pour apparence, UI d'édition de grille de révision) — à confirmer avant de s'y fier |
+| Worker de queue requis en production (2FA/notifications) | 4 des 5 notifications (`Echeance`, `Revision`, `NouvelleDemande`, `FormaliteUrgente`) sont `ShouldQueue` — un processus `queue:work` permanent (supervisor/cron) doit tourner en production, pas seulement `queue:listen` du script `composer dev`. Sans ça, ces notifications restent en attente indéfiniment (mais l'OTP, lui, part toujours en synchrone — voir décision #28) |
+| `otp_enabled` désactivé par défaut | Ne pas l'activer dans `Parametres > Sécurité` sans avoir testé un envoi SMTP réel au préalable (`Mail::raw` via tinker) — sinon tous les comptes se retrouvent bloqués hors du système au prochain login |
+| Push "temps réel" via Pusher ≠ push hors-ligne | Le mécanisme actuel (Echo + `Notification` API) ne fonctionne que navigateur ouvert (onglet actif ou arrière-plan) — pas de notification si le navigateur est complètement fermé. Voir décision #27 si un vrai push hors-ligne devient nécessaire |
+| Pas de "renouvellement forcé" du mot de passe | `Password::defaults()` ne s'applique qu'aux nouveaux mots de passe saisis (inscription, reset, changement) — les mots de passe déjà en base avant cette politique ne sont ni vérifiés ni forcés à la mise à jour |
 
 ---
 
-*Dernière mise à jour : 06/07/2026 — Devbook resynchronisé avec l'état réel du code après dérive de documentation (workflow passé à 6 étapes, modules Courriers et Barèmes/Facturation en réalité complets, nouveaux modèles Client/Societe/BienImmobilier/Banque/Setting, réception de 64 modèles Word réels dont 63 restent à normaliser). Voir `Analyse_et_Prompt_Generation_Modeles_Ayelema.md` pour le plan de normalisation des modèles.*
+*Dernière mise à jour : 16/07/2026 — Ajout du module Sécurité (politique de mot de passe forte fixée en dur, 2FA par OTP email avec durée paramétrable et appareils de confiance) et enrichissement du module Notifications (canal mail + temps réel Pusher + vraie cloche déroulante, formalité urgente ajoutée). Ajustement UX de `Dossiers/Show` : onglet Parties fusionné dans Informations, Journal renommé Historique et déplacé en dialog, onglets futurs estompés plutôt que masqués. Voir décisions #23 à #29.*

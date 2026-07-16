@@ -74,14 +74,23 @@ const GER_FIELDS = [
     { id: 'ger.email', label: 'Email', type: 'email', placeholder: 'email@exemple.com', required: false },
 ];
 
-// Schéma d'un associé dans un bloc répétable
+// Schéma d'un associé dans un bloc répétable — aligné sur les mentions exigées par les actes
+// notariés réels (DNSV, statuts) : civilité, état civil complet et pièce d'identité détaillée,
+// pas seulement un nom et une adresse sommaire.
 const ASSOCIE_SCHEMA = [
+    { id: 'civilite', label: 'Civilité', type: 'select', options: ['M.', 'Mme', 'Mlle', 'Société'], required: true },
     { id: 'nom', label: 'Nom et prénoms / Dénomination', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
     { id: 'type_personne', label: 'Type', type: 'select', options: ['Personne physique', 'Personne morale'], required: true },
     { id: 'parts_chiffres', label: 'Nombre de parts', type: 'number', placeholder: '100', required: true, mono: true },
+    { id: 'ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
+    { id: 'date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
     { id: 'nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false },
     { id: 'adresse', label: 'Adresse', type: 'text', placeholder: 'Quartier, Commune, Ville', required: false },
-    { id: 'cni', label: "Pièce d'identité / RCCM", type: 'text', placeholder: 'GN00123456 / GN-CON-2020-B-XXXX', required: false, mono: true },
+    { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false },
+    { id: 'cni', label: "N° pièce d'identité / RCCM", type: 'text', placeholder: 'GN00123456 / GN-CON-2020-B-XXXX', required: false, mono: true },
+    { id: 'piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
+    { id: 'piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
+    { id: 'piece_expire_le', label: 'Expire le', type: 'date', placeholder: '01/01/2030', required: false },
 ];
 
 // Schéma d'un gérant dans un bloc répétable (SARL multi-gérants)
@@ -341,6 +350,7 @@ export const QUESTIONNAIRES = {
         { id: 'bien.superficie', label: 'Superficie (m²)', type: 'number', placeholder: '500', required: true, mono: true, publicIntake: true },
         { id: 'bien.pcp', label: 'PCP (Plan Cadastral Parcellaire)', type: 'text', placeholder: 'PCP-XXX', required: false, mono: true },
         { id: 'bien.titre_foncier_numero', label: 'Numéro du titre foncier', type: 'text', placeholder: 'TF-2018-KAL-004521', required: true, mono: true, publicIntake: true },
+        { id: 'bien.livre_foncier_ville', label: 'Ville du livre foncier', type: 'text', placeholder: 'Conakry', required: true },
         { id: 'bien.limite_nord', label: 'Limite Nord', type: 'text', placeholder: 'Rue de la Paix', required: false },
         { id: 'bien.limite_sud', label: 'Limite Sud', type: 'text', placeholder: 'Parcelle de M. Camara', required: false },
         { id: 'bien.limite_est', label: 'Limite Est', type: 'text', placeholder: 'Route Nationale', required: false },
@@ -366,7 +376,9 @@ export const QUESTIONNAIRES = {
         { id: 'acq.adresse', label: "Adresse de l'acquéreur", type: 'text', placeholder: 'Quartier, Commune, Ville', required: true },
         { id: 'acq.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
         { id: 'acq.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
-        { id: 'bien.lieu_de', label: 'Situé à', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true, section: 'Bien immobilier', publicIntake: true },
+        { id: 'bien.parcelle_numero', label: 'Numéro de parcelle', type: 'text', placeholder: 'P-001', required: true, mono: true, section: 'Bien immobilier', publicIntake: true },
+        { id: 'bien.lot', label: 'Lot', type: 'text', placeholder: 'Lot 12', required: false, publicIntake: true },
+        { id: 'bien.lieu_de', label: 'Situé à', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true, publicIntake: true },
         { id: 'bien.nature_terrain', label: 'Nature du terrain', type: 'text', placeholder: 'Terrain nu / Immeuble bâti', required: true, publicIntake: true },
         { id: 'bien.usage', label: 'Usage', type: 'select', options: ['Résidentiel', 'Commercial', 'Industriel', 'Mixte', 'Agricole'], required: true, publicIntake: true },
         { id: 'bien.superficie', label: 'Superficie (m²)', type: 'number', placeholder: '500', required: true, mono: true, publicIntake: true },
@@ -385,6 +397,7 @@ export const QUESTIONNAIRES = {
         { id: 'bien.description', label: 'Description du bien', type: 'textarea', placeholder: 'Villa 4 pièces / Appartement F3…', required: false, publicIntake: true },
         { id: 'bien.superficie', label: 'Superficie (m²)', type: 'number', placeholder: '120', required: false, mono: true, publicIntake: true },
         { id: 'bien.usage', label: 'Usage', type: 'select', options: ['Résidentiel', 'Usage mixte'], required: true, publicIntake: true },
+        { id: 'bien.origine_propriete', label: 'Origine de la propriété du bailleur', type: 'textarea', placeholder: 'Acquis par acte du…, titre foncier n°…', required: false, publicIntake: true },
         { id: 'bail.date_prise_effet', label: "Date de prise d'effet", type: 'date', placeholder: '01/08/2026', required: true, section: 'Conditions du bail', publicIntake: true },
         { id: 'bail.duree_chiffres', label: 'Durée du bail (années)', type: 'number', placeholder: '2', required: true, mono: true, publicIntake: true },
         { id: 'bail.loyer_chiffres', label: 'Loyer mensuel (GNF)', type: 'number', placeholder: '5000000', required: true, mono: true, publicIntake: true },

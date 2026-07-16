@@ -35,4 +35,29 @@ class Setting extends Model
     {
         return parent::all($columns)->pluck('value', 'key');
     }
+
+    /**
+     * Utilisateurs pré-sélectionnés par défaut pour un nouveau dossier (Dossiers/Create
+     * et conversion d'une Demande). Un défaut n'est retenu que si l'utilisateur existe
+     * toujours, est actif et porte encore le rôle attendu — sinon on retombe sur "aucun"
+     * plutôt que de pré-sélectionner un compte désactivé ou changé de rôle.
+     */
+    public static function defaultAssignees(): array
+    {
+        $roleParCle = [
+            'notaire_id'    => ['default_notaire_id', 'notaire'],
+            'reviseur_id'   => ['default_reviseur_id', 'reviseur'],
+            'formaliste_id' => ['default_formaliste_id', 'formaliste'],
+        ];
+
+        $result = [];
+        foreach ($roleParCle as $champ => [$settingKey, $role]) {
+            $id = static::get($settingKey);
+            $result[$champ] = $id && \App\Models\User::withRole($role)->where('actif', true)->whereKey($id)->exists()
+                ? (int) $id
+                : null;
+        }
+
+        return $result;
+    }
 }

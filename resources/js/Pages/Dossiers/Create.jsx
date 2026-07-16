@@ -244,7 +244,7 @@ function RecapPersonne({ person, role, color = 'bg-ink' }) {
 }
 
 export default function DossierCreate() {
-    const { typesActes, notaires, reviseurs, formalistes } = usePage().props;
+    const { typesActes, notaires, reviseurs, formalistes, defauts } = usePage().props;
 
     const [step, setStep] = useState(0);
     const [categorie, setCategorie] = useState(null);
@@ -253,14 +253,20 @@ export default function DossierCreate() {
     const [formValues, setFormValues] = useState({});
     const [clientLinks, setClientLinks] = useState({}); // { [clientRole]: clientObject }
     const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
-    const [autresPersonnes, setAutresPersonnes] = useState([]); // [{ client, role }] — pas liées à un rôle du questionnaire
-    const [creatingClientForAutreIndex, setCreatingClientForAutreIndex] = useState(null);
+    // Clients ajoutés en haut du formulaire (personnes physiques/morales créées ou choisies
+    // dans le répertoire pour ce dossier). Certains reçoivent une qualité libre directement
+    // (témoin, accompagnateur…), d'autres restent disponibles pour être réutilisés comme
+    // gérant/associé/etc. via les sélecteurs de client des sections ci-dessous.
+    const [dossierClients, setDossierClients] = useState([]); // [{ client, role }]
+    const [creatingClientForDossierIndex, setCreatingClientForDossierIndex] = useState(null);
     const [objet, setObjet] = useState('');
     const [urgent, setUrgent] = useState(false);
     const [notes, setNotes] = useState('');
-    const [notaireId, setNotaireId] = useState('');
-    const [reviseurId, setReviseurId] = useState('');
-    const [formalisteId, setFormalisteId] = useState('');
+    // Pré-sélectionnés depuis Paramètres > Assignations (notaire/réviseur/formaliste par
+    // défaut) — modifiable au cas par cas, voir décision correspondante dans le devbook.
+    const [notaireId, setNotaireId] = useState(defauts?.notaire_id ? String(defauts.notaire_id) : '');
+    const [reviseurId, setReviseurId] = useState(defauts?.reviseur_id ? String(defauts.reviseur_id) : '');
+    const [formalisteId, setFormalisteId] = useState(defauts?.formaliste_id ? String(defauts.formaliste_id) : '');
     const [submitting, setSubmitting] = useState(false);
     const [errors, setErrors] = useState({});
 
@@ -332,12 +338,27 @@ export default function DossierCreate() {
         });
     };
 
-    // "Autres personnes" : présentes lors de la création du dossier mais pas
-    // liées à un rôle précis de l'acte (ex. accompagnateur, témoin).
-    const addAutrePersonne = () => setAutresPersonnes(prev => [...prev, { client: null, role: '' }]);
-    const removeAutrePersonne = (i) => setAutresPersonnes(prev => prev.filter((_, idx) => idx !== i));
-    const setAutrePersonneClient = (i, client) => setAutresPersonnes(prev => prev.map((p, idx) => idx === i ? { ...p, client } : p));
-    const setAutrePersonneRole = (i, role) => setAutresPersonnes(prev => prev.map((p, idx) => idx === i ? { ...p, role } : p));
+    // "Clients du dossier" : ajoutés en haut du formulaire, avant de savoir précisément
+    // à quel rôle ils correspondront. Une qualité libre est optionnelle (ex. accompagnateur,
+    // témoin) — sans qualité, le client reste simplement disponible à la réutilisation.
+    const addDossierClient = () => setDossierClients(prev => [...prev, { client: null, role: '' }]);
+    const removeDossierClient = (i) => setDossierClients(prev => prev.filter((_, idx) => idx !== i));
+    const setDossierClientClient = (i, client) => setDossierClients(prev => prev.map((p, idx) => idx === i ? { ...p, client } : p));
+    const setDossierClientRole = (i, role) => setDossierClients(prev => prev.map((p, idx) => idx === i ? { ...p, role } : p));
+
+    // Pool dédupliqué des clients déjà ajoutés au dossier — proposé en sélection rapide
+    // dans chaque section liée à un rôle (gérant, associé…) pour réutilisation immédiate.
+    const poolClients = Array.from(
+        new Map(dossierClients.filter(p => p.client).map(p => [p.client.id, p.client])).values()
+    );
+
+    // Un client créé/choisi directement depuis une section de rôle (gérant, associé…)
+    // rejoint aussi le pool du dossier, pour être réutilisable ailleurs sans le rechercher.
+    const addClientToPool = (client) => {
+        setDossierClients(prev => prev.some(p => p.client?.id === client.id)
+            ? prev
+            : [...prev, { client, role: '' }]);
+    };
 
     const canNext = () => {
         if (step === 0) return !!categorie;
@@ -362,7 +383,7 @@ export default function DossierCreate() {
             setErrors({ type_acte_id: 'Type d\'acte introuvable. Vérifiez la configuration.' });
             return;
         }
-        const autresPartiesPayload = autresPersonnes
+        const autresPartiesPayload = dossierClients
             .filter(p => p.client && p.role.trim())
             .map(p => ({ ...buildPartieFields(p.client, {}, ''), role: p.role.trim(), client_id: p.client.id }));
         setSubmitting(true);
@@ -542,6 +563,46 @@ export default function DossierCreate() {
                                     Détails — <span className="text-slate-500">{typeSelected?.label}</span>
                                 </h2>
 
+                                {/* Clients du dossier — créés/choisis en premier, réutilisables ensuite pour un rôle précis */}
+                                <Card>
+                                    <CardContent className="p-5 space-y-3">
+                                        <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">
+                                            Clients du dossier
+                                        </GroupHeader>
+                                        <p className="text-xs text-slate-400 -mt-2">
+                                            Ajoutez ici les clients (personnes physiques ou morales) concernés par ce dossier.
+                                            Vous pourrez ensuite les réutiliser directement comme gérant, associé, vendeur… dans
+                                            les sections ci-dessous. Ne renseignez une qualité que si la personne n'a pas de rôle
+                                            précis dans l'acte (témoin, accompagnateur…).
+                                        </p>
+                                        {dossierClients.map((p, i) => (
+                                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3">
+                                                <div className="flex-1 space-y-2">
+                                                    <ClientPicker
+                                                        placeholder="Rechercher un client existant…"
+                                                        linked={p.client}
+                                                        onSelect={(client) => setDossierClientClient(i, client)}
+                                                        onUnlink={() => setDossierClientClient(i, null)}
+                                                        onCreateNew={() => setCreatingClientForDossierIndex(i)}
+                                                    />
+                                                    <Input
+                                                        placeholder="Qualité si sans rôle précis (ex : témoin, accompagnateur…) — optionnel"
+                                                        value={p.role}
+                                                        onChange={e => setDossierClientRole(i, e.target.value)}
+                                                    />
+                                                </div>
+                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger mt-0.5"
+                                                    onClick={() => removeDossierClient(i)} title="Retirer">
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={addDossierClient}>
+                                            <PlusCircle className="h-3.5 w-3.5" /> Ajouter un client
+                                        </Button>
+                                    </CardContent>
+                                </Card>
+
                                 {/* Champs obligatoires du dossier, organisés par sections */}
                                 <Card className="border-seal/30">
                                     <CardContent className="p-5 space-y-4">
@@ -672,6 +733,7 @@ export default function DossierCreate() {
                                                                     onSelect={(client) => applyClientToSection(group, client)}
                                                                     onUnlink={() => unlinkClientFromSection(group.clientRole)}
                                                                     onCreateNew={() => setCreatingClientForGroup(group)}
+                                                                    poolClients={poolClients}
                                                                 />
                                                             </div>
                                                         )}
@@ -727,6 +789,8 @@ export default function DossierCreate() {
                                                                                         fieldDef={field}
                                                                                         value={formValues[field.id] ?? []}
                                                                                         onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                                                                                        poolClients={poolClients}
+                                                                                        onClientCreated={addClientToPool}
                                                                                     />
                                                                                 ) : field.type === 'textarea' ? (
                                                                                     <textarea
@@ -794,43 +858,6 @@ export default function DossierCreate() {
                                     </Card>
                                 )}
 
-                                {/* Autres personnes présentes, non liées à un rôle précis de l'acte */}
-                                <Card>
-                                    <CardContent className="p-5 space-y-3">
-                                        <GroupHeader icon={Users} iconColor="text-slate-500" iconBg="bg-slate-50">
-                                            Autres personnes
-                                        </GroupHeader>
-                                        <p className="text-xs text-slate-400 -mt-2">
-                                            Personnes présentes pour la création du dossier mais qui ne sont pas
-                                            forcément liées à l'acte en cours (accompagnateur, témoin…).
-                                        </p>
-                                        {autresPersonnes.map((p, i) => (
-                                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3">
-                                                <div className="flex-1 space-y-2">
-                                                    <ClientPicker
-                                                        placeholder="Rechercher un client existant…"
-                                                        linked={p.client}
-                                                        onSelect={(client) => setAutrePersonneClient(i, client)}
-                                                        onUnlink={() => setAutrePersonneClient(i, null)}
-                                                        onCreateNew={() => setCreatingClientForAutreIndex(i)}
-                                                    />
-                                                    <Input
-                                                        placeholder="Qualité (ex : témoin, accompagnateur…)"
-                                                        value={p.role}
-                                                        onChange={e => setAutrePersonneRole(i, e.target.value)}
-                                                    />
-                                                </div>
-                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger mt-0.5"
-                                                    onClick={() => removeAutrePersonne(i)} title="Retirer">
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                </Button>
-                                            </div>
-                                        ))}
-                                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={addAutrePersonne}>
-                                            <PlusCircle className="h-3.5 w-3.5" /> Ajouter une personne
-                                        </Button>
-                                    </CardContent>
-                                </Card>
                                 </div>
                                 )}
                             </>
@@ -841,7 +868,9 @@ export default function DossierCreate() {
                             const notaireSelected = (notaires ?? []).find(n => String(n.id) === String(notaireId));
                             const reviseurSelected = (reviseurs ?? []).find(r => String(r.id) === String(reviseurId));
                             const formalisteSelected = (formalistes ?? []).find(f => String(f.id) === String(formalisteId));
-                            const autresValides = autresPersonnes.filter(p => p.client && p.role.trim());
+                            const dossierClientsAjoutes = dossierClients.filter(p => p.client);
+                            const autresValides = dossierClientsAjoutes.filter(p => p.role.trim());
+                            const dossierClientsDisponibles = dossierClientsAjoutes.filter(p => !p.role.trim());
                             const sections = groupFieldsBySection(visibleFields)
                                 .map(group => ({
                                     ...group,
@@ -958,14 +987,20 @@ export default function DossierCreate() {
                                     );
                                 })}
 
-                                {/* Autres personnes */}
-                                {autresValides.length > 0 && (
-                                    <RecapCard icon={Users} iconColor="text-slate-500" iconBg="bg-slate-100" title="Autres personnes" onEdit={() => setStep(1)}>
+                                {/* Clients du dossier */}
+                                {dossierClientsAjoutes.length > 0 && (
+                                    <RecapCard icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50" title="Clients du dossier" onEdit={() => setStep(1)}>
                                         <div className="flex flex-wrap gap-2">
                                             {autresValides.map((p, i) => (
-                                                <span key={i} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
+                                                <span key={`role-${i}`} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
                                                     <span className="font-medium text-slate-700">{clientDisplayName(p.client)}</span>
                                                     <span className="text-slate-400">· {p.role}</span>
+                                                </span>
+                                            ))}
+                                            {dossierClientsDisponibles.map((p, i) => (
+                                                <span key={`dispo-${i}`} className="inline-flex items-center gap-1.5 text-xs bg-seal-light border border-seal/30 rounded-full px-3 py-1">
+                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client)}</span>
+                                                    <span className="text-slate-400">· réutilisé ci-dessus</span>
                                                 </span>
                                             ))}
                                         </div>
@@ -1018,16 +1053,17 @@ export default function DossierCreate() {
                 onClose={() => setCreatingClientForGroup(null)}
                 onCreated={(client) => {
                     applyClientToSection(creatingClientForGroup, client);
+                    addClientToPool(client);
                     setCreatingClientForGroup(null);
                 }}
             />
 
             <ModalNouveauClient
-                open={creatingClientForAutreIndex !== null}
-                onClose={() => setCreatingClientForAutreIndex(null)}
+                open={creatingClientForDossierIndex !== null}
+                onClose={() => setCreatingClientForDossierIndex(null)}
                 onCreated={(client) => {
-                    setAutrePersonneClient(creatingClientForAutreIndex, client);
-                    setCreatingClientForAutreIndex(null);
+                    setDossierClientClient(creatingClientForDossierIndex, client);
+                    setCreatingClientForDossierIndex(null);
                 }}
             />
         </AppLayout>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Search, UserPlus, X, Check, Loader2 } from 'lucide-react';
+import { Search, UserPlus, X, Check, Loader2, Users } from 'lucide-react';
 import { clientDisplayName, clientSubtitle } from '@/lib/clientFields';
 
 /**
@@ -10,8 +10,13 @@ import { clientDisplayName, clientSubtitle } from '@/lib/clientFields';
  *
  * Quand `linked` est fourni, affiche l'état "client rattaché" avec possibilité
  * de détacher (onUnlink) plutôt que le champ de recherche.
+ *
+ * `poolClients`, si fourni, affiche des puces de sélection rapide pour les clients
+ * déjà ajoutés au dossier en cours (voir section "Clients du dossier" dans
+ * Dossiers/Create.jsx) — permet de les réutiliser comme gérant/associé/etc. sans
+ * retaper une recherche.
  */
-export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placeholder }) {
+export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placeholder, poolClients = [] }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [results, setResults] = useState([]);
@@ -71,6 +76,22 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
 
     return (
         <div className="relative" ref={boxRef}>
+            {poolClients.length > 0 && (
+                <div className="mb-1.5 flex flex-wrap gap-1.5">
+                    {poolClients.map(c => (
+                        <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => onSelect(c)}
+                            className="inline-flex items-center gap-1 rounded-full border border-seal/30 bg-seal-light px-2.5 py-1 text-xs text-seal-hover hover:bg-seal/10 transition-colors"
+                            title="Réutiliser ce client du dossier"
+                        >
+                            <Users className="h-3 w-3" />
+                            {clientDisplayName(c)}
+                        </button>
+                    ))}
+                </div>
+            )}
             <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                 <input
