@@ -24,10 +24,11 @@ function dateRetourPrevueLabel(dateDepotISO, delaiHeures) {
     return d.toLocaleDateString('fr-FR');
 }
 
-export function ModalDepotFormalite({ open, onClose, formalite, onTogglePiece }) {
+export function ModalDepotFormalite({ open, onClose, formalite }) {
     const [dateDepot, setDateDepot] = useState(todayISO());
     const [montantPaye, setMontantPaye] = useState('');
     const [numeroRecepisse, setNumeroRecepisse] = useState('');
+    const [previewPieceId, setPreviewPieceId] = useState(null);
 
     useEffect(() => {
         if (open) {
@@ -81,13 +82,19 @@ export function ModalDepotFormalite({ open, onClose, formalite, onTogglePiece })
                             </div>
                             <div className="px-2 py-1 divide-y divide-slate-50">
                                 {pieces.map(p => (
-                                    <PieceGedRow key={p.id} piece={p} peutGerer onToggle={onTogglePiece} />
+                                    <PieceGedRow
+                                        key={p.id}
+                                        piece={p}
+                                        peutGerer
+                                        isPreviewOpen={previewPieceId === p.id}
+                                        onTogglePreview={(piece) => setPreviewPieceId(id => id === piece.id ? null : piece.id)}
+                                    />
                                 ))}
                             </div>
                             {piecesManquantes > 0 && (
                                 <div className="flex items-center gap-2 px-3 py-2 border-t border-amber-100 bg-amber-50 text-xs text-amber-800">
                                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                                    {piecesManquantes} pièce{piecesManquantes > 1 ? 's' : ''} manquante{piecesManquantes > 1 ? 's' : ''} — à cocher (ou téléverser) avant de confirmer le dépôt
+                                    {piecesManquantes} pièce{piecesManquantes > 1 ? 's' : ''} manquante{piecesManquantes > 1 ? 's' : ''} — à téléverser avant de confirmer le dépôt
                                 </div>
                             )}
                         </div>
@@ -140,7 +147,7 @@ export function ModalDepotFormalite({ open, onClose, formalite, onTogglePiece })
                             type="submit"
                             variant="seal"
                             disabled={!peutConfirmer}
-                            title={!peutConfirmer ? 'Cochez toutes les pièces requises avant de confirmer' : ''}
+                            title={!peutConfirmer ? 'Téléversez toutes les pièces requises avant de confirmer' : ''}
                         >
                             Confirmer le dépôt
                         </Button>

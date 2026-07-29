@@ -14,19 +14,7 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { notifyValidationError } from '@/lib/toast';
-
-// ── Métadonnées par étape ──────────────────────────────────────────────────
-
-const ETAPE_META = {
-    initialisation: { dot: 'bg-slate-400',  badge: 'bg-slate-100 text-slate-600 border-slate-200',  bar: 'bg-slate-300'  },
-    edition:        { dot: 'bg-blue-400',   badge: 'bg-blue-50 text-blue-700 border-blue-200',      bar: 'bg-blue-300'   },
-    revision:       { dot: 'bg-amber-400',  badge: 'bg-amber-50 text-amber-700 border-amber-200',   bar: 'bg-amber-300'  },
-    formalites:     { dot: 'bg-orange-400', badge: 'bg-orange-50 text-orange-700 border-orange-200',bar: 'bg-orange-300' },
-    expedition:     { dot: 'bg-cyan-400',   badge: 'bg-cyan-50 text-cyan-700 border-cyan-200',      bar: 'bg-cyan-300'   },
-    cloture:        { dot: 'bg-green-500',  badge: 'bg-green-50 text-green-700 border-green-200',   bar: 'bg-green-400'  },
-};
-
-const ETAPE_ORDER = ['initialisation', 'edition', 'revision', 'formalites', 'expedition', 'cloture'];
+import { ETAPE_META, ETAPE_ORDER } from '@/data/etapeMeta';
 
 // ── Barre de progression workflow ──────────────────────────────────────────
 
@@ -343,7 +331,7 @@ export default function DossiersIndex() {
                                                     <div className="flex items-center gap-2 mt-2">
                                                         <WorkflowDots etapeValue={d.etape?.value} />
                                                         <span className="text-[9px] text-slate-300 font-ref">
-                                                            {(d.etapeOrdre ?? 0) + 1}/8
+                                                            {(d.etapeOrdre ?? 0) + 1}/{ETAPE_ORDER.length}
                                                         </span>
                                                     </div>
                                                 </div>

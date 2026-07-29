@@ -8,6 +8,7 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DossierController;
 use App\Http\Controllers\FactureController;
 use App\Http\Controllers\FormaliteController;
+use App\Http\Controllers\GedController;
 use App\Http\Controllers\IntakeController;
 use App\Http\Controllers\ModeleActeController;
 use App\Http\Controllers\ModeleCourrierController;
@@ -54,6 +55,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Parties additionnelles (personnes non liées à un rôle du questionnaire)
     Route::post('/dossiers/{dossier:reference}/parties', [PartieController::class, 'store'])->name('dossiers.parties.store');
     Route::delete('/parties/{partie}', [PartieController::class, 'destroy'])->name('parties.destroy');
+    Route::post('/parties/{partie}/photo', [PartieController::class, 'uploaderPhoto'])->name('parties.photo');
+    Route::post('/parties/{partie}/pieces', [PartieController::class, 'uploaderPiece'])->name('parties.pieces.store');
 
     // Documents
     Route::post('/dossiers/{dossier:reference}/documents', [DocumentController::class, 'store'])->name('dossiers.documents.store');
@@ -62,6 +65,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/documents/{document}/download',   [DocumentController::class, 'download'])->name('documents.download');
     Route::get('/documents/{document}/preview',    [DocumentController::class, 'preview'])->name('documents.preview');
     Route::post('/documents/{document}/regenerer', [DocumentController::class, 'regenerer'])->name('documents.regenerer');
+    Route::get('/documents/{document}/versions', [DocumentController::class, 'versions'])->name('documents.versions');
+    Route::get('/documents/versions/{version}/telecharger', [DocumentController::class, 'telechargerVersion'])->name('documents.versions.telecharger');
+    Route::post('/documents/versions/{version}/restaurer', [DocumentController::class, 'restaurerVersion'])->name('documents.versions.restaurer');
+    Route::post('/documents/{document}/televerser-signe', [DocumentController::class, 'televerserSigne'])->name('documents.televerser_signe');
+
+    // GED (vue transversale de tous les documents, tous dossiers confondus)
+    Route::get('/ged', [GedController::class, 'index'])->name('ged.index');
 
     // Révisions
     Route::get('/revisions', [RevisionController::class, 'index'])->name('revisions.index');
@@ -85,8 +95,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Facturation
     Route::get('/facturation', [FactureController::class, 'index'])->name('facturation.index');
     Route::post('/dossiers/{dossier:reference}/paiements', [FactureController::class, 'enregistrerPaiement'])->name('dossiers.paiements.store');
+    Route::patch('/paiements/{paiement}', [FactureController::class, 'updatePaiement'])->name('paiements.update');
+    Route::delete('/paiements/{paiement}', [FactureController::class, 'destroyPaiement'])->name('paiements.destroy');
     Route::post('/paiements/{paiement}/recu', [FactureController::class, 'genererRecu'])->name('paiements.recu.generer');
     Route::get('/recus/{recu}/telecharger', [FactureController::class, 'telechargerRecu'])->name('recus.telecharger');
+    Route::get('/recus/{recu}/apercu', [FactureController::class, 'apercuRecu'])->name('recus.apercu');
+    Route::get('/factures/{facture}/telecharger', [FactureController::class, 'telechargerPdf'])->name('factures.telecharger');
+    Route::post('/factures/{facture}/lignes', [FactureController::class, 'storeLigne'])->name('factures.lignes.store');
+    Route::patch('/lignes/{ligne}', [FactureController::class, 'updateLigne'])->name('lignes.update');
+    Route::delete('/lignes/{ligne}', [FactureController::class, 'destroyLigne'])->name('lignes.destroy');
 
     // Demandes externes (générer un lien, consulter, convertir en dossier)
     Route::get('/demandes', [DemandeController::class, 'index'])->name('demandes.index');
@@ -128,6 +145,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/courriers/{courrier}/download', [CourrierController::class, 'download'])->name('courriers.download');
     Route::get('/courriers/{courrier}/preview',  [CourrierController::class, 'preview'])->name('courriers.preview');
     Route::post('/dossiers/{dossier:reference}/courriers/generer', [CourrierController::class, 'genererDepuisModele'])->name('dossiers.courriers.generer');
+    Route::post('/courriers/{courrier}/televerser-signe', [CourrierController::class, 'televerserSigne'])->name('courriers.televerser_signe');
 
     // Paramètres (Module 10 - admin only)
     Route::middleware('role:administrateur')->prefix('parametres')->name('parametres.')->group(function () {
@@ -142,6 +160,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/baremes', [ParametresController::class, 'storeBareme'])->name('baremes.store');
         Route::patch('/baremes/{bareme}', [ParametresController::class, 'updateBareme'])->name('baremes.update');
         Route::delete('/baremes/{bareme}', [ParametresController::class, 'destroyBareme'])->name('baremes.destroy');
+        Route::get('/cloture', [ParametresController::class, 'cloture'])->name('cloture');
+        Route::post('/cloture/bulk', [ParametresController::class, 'bulkObligatoireCloture'])->name('cloture.bulk');
         Route::get('/apparence', [ParametresController::class, 'apparence'])->name('apparence');
         Route::post('/apparence', [ParametresController::class, 'updateApparence'])->name('apparence.update');
         Route::post('/apparence/logo', [ParametresController::class, 'uploadLogo'])->name('apparence.logo');

@@ -4,13 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Enums\RoleUtilisateur;
 use App\Enums\StatutFormalite;
+use App\Models\DocumentFichier;
 use App\Models\Dossier;
 use App\Models\Formalite;
-use App\Models\FormalitePiece;
 use App\Models\JournalActivite;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class FormaliteController extends Controller
@@ -21,7 +20,7 @@ class FormaliteController extends Controller
      */
     private function baseQuery(Request $request, $user)
     {
-        return Formalite::with(['dossier.typeActe', 'dossier.parties.client', 'pieces', 'dependDe', 'dependants'])
+        return Formalite::with(['dossier.typeActe', 'dossier.parties.client', 'pieces.versionActuelle', 'dependDe', 'dependants'])
             ->whereHas('dossier', fn ($d) => $d->visiblePar($user))
             ->when($request->q, fn ($q, $s) => $q->where(fn ($qq) =>
                 $qq->whereHas('dossier', fn ($d) =>
@@ -146,7 +145,12 @@ class FormaliteController extends Controller
         }
 
         foreach ($data['pieces'] ?? [] as $piece) {
-            FormalitePiece::create(['formalite_id' => $formalite->id, 'label' => $piece['label'], 'est_fourni' => false]);
+            $formalite->pieces()->create([
+                'nom'        => $piece['label'],
+                'categorie'  => 'piece_justificative',
+                'est_requis' => true,
+                'est_fourni' => false,
+            ]);
         }
 
         JournalActivite::enregistrer($dossier, "Formalité ajoutée : {$formalite->labelAffiche()}", 'formalite');
@@ -162,22 +166,7 @@ class FormaliteController extends Controller
             'statut'     => ['sometimes', 'string'],
             'depose_at'  => ['sometimes', 'nullable', 'date'],
             'retour_at'  => ['sometimes', 'nullable', 'date'],
-            'pieces'     => ['sometimes', 'array'],
-            'pieces.*.id'         => ['required_with:pieces', 'integer'],
-            'pieces.*.est_fourni' => ['required_with:pieces', 'boolean'],
         ]);
-
-        if (isset($data['pieces'])) {
-            foreach ($data['pieces'] as $pieceData) {
-                FormalitePiece::where('id', $pieceData['id'])
-                    ->where('formalite_id', $formalite->id)
-                    ->update([
-                        'est_fourni' => $pieceData['est_fourni'],
-                        'fourni_at'  => $pieceData['est_fourni'] ? now() : null,
-                    ]);
-            }
-            unset($data['pieces']);
-        }
 
         $formalite->update($data);
 
@@ -300,51 +289,30 @@ class FormaliteController extends Controller
         return response()->json(['formalites' => $autres]);
     }
 
-    public function televerserPiece(Request $request, FormalitePiece $piece)
+    public function televerserPiece(Request $request, DocumentFichier $piece)
     {
-        $this->authorize('gererFormalites', $piece->formalite->dossier);
+        $this->authorize('gererFormalites', $piece->documentable->dossier);
 
         $request->validate([
             'fichier' => ['required', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png,doc,docx'],
         ]);
 
-        if ($piece->chemin_fichier) {
-            Storage::disk('public')->delete($piece->chemin_fichier);
-        }
-
-        $fichier = $request->file('fichier');
-        $dossierRef = $piece->formalite->dossier->reference;
-        $nomOriginal = $fichier->getClientOriginalName();
-
-        $path = $fichier->storeAs(
-            'formalites/' . $dossierRef,
-            $piece->id . '_' . Str::slug($piece->label) . '.' . $fichier->extension(),
-            'public'
-        );
-
-        $piece->update([
-            'chemin_fichier'   => $path,
-            'nom_original'     => $nomOriginal,
-            'mime_type'        => $fichier->getClientMimeType(),
-            'taille_octets'    => $fichier->getSize(),
-            'televerse_par_id' => auth()->id(),
-            'televerse_at'     => now(),
-            'est_fourni'       => true,
-            'fourni_at'        => now(),
-        ]);
+        $dossierRef = $piece->documentable->dossier->reference;
+        $piece->nouvelleVersion($request->file('fichier'), 'formalites/' . $dossierRef);
 
         return back()->with('success', 'Pièce téléversée.');
     }
 
-    public function telechargerPiece(FormalitePiece $piece)
+    public function telechargerPiece(DocumentFichier $piece)
     {
-        $this->authorize('view', $piece->formalite->dossier);
+        $this->authorize('view', $piece->documentable->dossier);
 
-        if (!$piece->chemin_fichier || !Storage::disk('public')->exists($piece->chemin_fichier)) {
+        $chemin = $piece->versionActuelle?->chemin_fichier;
+        if (!$chemin || !Storage::disk('public')->exists($chemin)) {
             abort(404, 'Fichier introuvable.');
         }
 
-        return Storage::disk('public')->download($piece->chemin_fichier, $piece->nom_original ?: $piece->label);
+        return Storage::disk('public')->download($chemin, $piece->versionActuelle->nom_original ?: $piece->nom);
     }
 
     public function destroy(Formalite $formalite)
@@ -360,7 +328,9 @@ class FormaliteController extends Controller
         $label   = $formalite->labelAffiche();
         $dossier = $formalite->dossier;
 
-        $formalite->pieces()->delete();
+        foreach ($formalite->pieces as $piece) {
+            $piece->supprimerAvecFichiers();
+        }
         $formalite->delete();
 
         JournalActivite::enregistrer($dossier, "Formalité supprimée : {$label}", 'formalite');

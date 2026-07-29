@@ -23,11 +23,17 @@ class RepertoireController extends Controller
             ->when($request->sort === 'role',   fn ($q) => $q->orderBy('role')->orderBy('nom'))
             ->when(!in_array($request->sort, ['recent', 'role']), fn ($q) => $q->orderBy('nom'));
 
+        $clientIdsLies = Partie::whereNotNull('client_id')->distinct()->pluck('client_id');
+
         $stats = [
             'total'            => Partie::count(),
             'dossiersCouverts' => Partie::whereNotNull('dossier_id')->distinct()->count('dossier_id'),
             'rolesDisctincts'  => Partie::distinct()->count('role'),
-            'clientsUniques'   => Partie::whereNotNull('client_id')->distinct()->count('client_id'),
+            'clientsUniques'   => $clientIdsLies->count(),
+            'clientsParStatut' => Client::whereIn('id', $clientIdsLies)
+                ->selectRaw('statut, count(*) as n')
+                ->groupBy('statut')
+                ->pluck('n', 'statut'),
             'parRole'          => Partie::selectRaw('role, count(*) as n')
                 ->groupBy('role')
                 ->orderByDesc('n')
@@ -52,9 +58,10 @@ class RepertoireController extends Controller
                 'adresse'   => $p->adresse,
                 'client_id' => $p->client_id,
                 'client'    => $p->client ? [
-                    'id'   => $p->client->id,
-                    'type' => $p->client->type,
-                    'nom'  => $p->client->nomComplet(),
+                    'id'     => $p->client->id,
+                    'type'   => $p->client->type,
+                    'nom'    => $p->client->nomComplet(),
+                    'statut' => $p->client->statut,
                 ] : null,
                 'dossier'   => $p->dossier ? [
                     'reference' => $p->dossier->reference,

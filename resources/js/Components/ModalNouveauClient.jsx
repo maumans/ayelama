@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { PhoneField } from '@/components/ui/phone-field';
 import { DateField } from '@/components/ui/date-field';
 import { cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 
 const EMPTY_CLIENT = {
     type: 'physique',
@@ -27,11 +28,20 @@ const EMPTY_CLIENT = {
  * Champs alignés sur ceux d'un gérant/associé du questionnaire (voir `clients` en base) :
  * un client créé ici porte donc déjà toutes les informations réutilisables pour
  * n'importe quel rôle (gérant, associé, vendeur…), pas seulement un sous-ensemble.
+ *
+ * `initialValues` (optionnel) pré-remplit le formulaire à l'ouverture — utilisé par
+ * Demandes/Show.jsx pour proposer un brouillon de client à partir des données déjà
+ * soumises par le client externe (voir buildClientDraftFromDonnees), à confirmer/
+ * corriger avant création plutôt que de tout ressaisir.
  */
-export function ModalNouveauClient({ open, onClose, onCreated }) {
-    const [form, setForm] = useState(EMPTY_CLIENT);
+export function ModalNouveauClient({ open, onClose, onCreated, initialValues }) {
+    const [form, setForm] = useState({ ...EMPTY_CLIENT, ...initialValues });
     const [errors, setErrors] = useState({});
     const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (open) setForm({ ...EMPTY_CLIENT, ...initialValues });
+    }, [open]);
 
     const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
     const d = (k) => (val) => setForm(p => ({ ...p, [k]: val }));
@@ -42,11 +52,25 @@ export function ModalNouveauClient({ open, onClose, onCreated }) {
         setErrors({});
         try {
             const res = await axios.post('/clients', form);
+            if (!res.data?.id) {
+                // Réponse 2xx mais sans forme de client exploitable — le cas le plus
+                // fréquent est une redirection silencieuse vers /login (session expirée)
+                // suivie automatiquement par le navigateur : axios reçoit alors le HTML
+                // de la page de connexion avec un statut 200, pas une erreur exploitable.
+                const isHtml = typeof res.data === 'string' && res.data.trim().startsWith('<');
+                console.error('ModalNouveauClient: réponse client inattendue', { status: res.status, data: res.data });
+                toast.error(isHtml
+                    ? 'Votre session a expiré. Reconnectez-vous puis réessayez de créer le client.'
+                    : "Le client n'a pas pu être créé (réponse inattendue du serveur).");
+                return;
+            }
             onCreated(res.data);
             setForm(EMPTY_CLIENT);
         } catch (err) {
             if (err.response?.status === 422) {
                 setErrors(err.response.data.errors ?? {});
+            } else {
+                toast.error(err.response?.data?.message || "Impossible de créer le client — réessayez.");
             }
         } finally {
             setSubmitting(false);

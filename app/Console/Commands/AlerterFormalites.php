@@ -13,7 +13,7 @@ class AlerterFormalites extends Command
 
     public function handle(): void
     {
-        $formalites = Formalite::with(['dossier.formaliste', 'dossier.notaire'])
+        $formalites = Formalite::with(['dossier.redacteur', 'dossier.reviseur', 'dossier.notaire', 'dossier.formaliste'])
             ->urgentes()
             ->get();
 
@@ -21,13 +21,7 @@ class AlerterFormalites extends Command
             $dossier = $formalite->dossier;
             if (!$dossier) continue;
 
-            $destinataires = $formalite->estDepassee()
-                ? [$dossier->formaliste, $dossier->notaire]
-                : [$dossier->formaliste];
-
-            foreach ($destinataires as $destinataire) {
-                if (!$destinataire) continue;
-
+            foreach ($dossier->ayantsDroit() as $destinataire) {
                 $dejaNotifie = $destinataire->notifications()
                     ->where('type', FormaliteUrgenteNotification::class)
                     ->where('created_at', '>=', now()->subHours(12))
@@ -35,7 +29,11 @@ class AlerterFormalites extends Command
                     ->exists();
 
                 if (!$dejaNotifie) {
-                    $destinataire->notify(new FormaliteUrgenteNotification($formalite));
+                    try {
+                        $destinataire->notify(new FormaliteUrgenteNotification($formalite));
+                    } catch (\Throwable $e) {
+                        report($e);
+                    }
                 }
             }
         }

@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 const ETAPE_META = {
     initialisation:    { label: 'Initialisation', short: 'Init.',      ordre: 0, color: 'bg-slate-400',  light: 'bg-slate-50',   text: 'text-slate-600',   border: 'border-slate-300' },
     edition:           { label: 'Édition',        short: 'Édition',    ordre: 1, color: 'bg-blue-500',   light: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-300' },
-    revision:          { label: 'Révision',       short: 'Révision',   ordre: 2, color: 'bg-amber-500',  light: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-300' },
+    revision:          { label: 'Certification',  short: 'Certif.',    ordre: 2, color: 'bg-amber-500',  light: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-300' },
     signature_client:  { label: 'Sig. Client',    short: 'Sig.Cli.',   ordre: 3, color: 'bg-purple-500', light: 'bg-purple-50',  text: 'text-purple-700',  border: 'border-purple-300' },
     signature_notaire: { label: 'Sig. Notaire',   short: 'Sig.Not.',   ordre: 4, color: 'bg-violet-500', light: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-300' },
     formalites:        { label: 'Formalités',     short: 'Formalités', ordre: 5, color: 'bg-orange-500', light: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-300' },
@@ -237,7 +237,7 @@ export default function Dashboard() {
                         href="/dossiers" delay={0.04}
                     />
                     <KpiCard
-                        label="En attente de révision" value={stats?.enRevision ?? 0}
+                        label="En attente de certification" value={stats?.enRevision ?? 0}
                         icon={ClipboardCheck} iconBg="bg-warning-bg" iconColor="text-warning"
                         href="/revisions" delay={0.08} urgent={(stats?.enRevision ?? 0) > 0}
                     />

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Client extends Model
 {
     protected $fillable = [
-        'type',
+        'type', 'statut',
         // Personne physique
         'civilite', 'prenom_nom', 'ne_a', 'date_naissance',
         'nationalite', 'piece_type', 'piece_numero',
@@ -34,9 +34,29 @@ class Client extends Model
         return $this->hasMany(Partie::class);
     }
 
+    public function scopeProspects($query)
+    {
+        return $query->where('statut', 'prospect');
+    }
+
+    public function scopeClientsConfirmes($query)
+    {
+        return $query->where('statut', 'client');
+    }
+
     public function estPersonnePhysique(): bool
     {
         return $this->type === 'physique';
+    }
+
+    public function estProspect(): bool
+    {
+        return $this->statut === 'prospect';
+    }
+
+    public function estClient(): bool
+    {
+        return $this->statut === 'client';
     }
 
     public function nomComplet(): string

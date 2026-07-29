@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Dossier;
 use App\Models\Facture;
 use App\Models\JournalActivite;
+use App\Models\LigneFacture;
 use App\Models\Paiement;
 use App\Models\Recu;
+use App\Services\FactureGeneratorService;
 use App\Services\RecuPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -114,6 +116,52 @@ class FactureController extends Controller
         return back()->with('success', 'Paiement enregistré.');
     }
 
+    public function updatePaiement(Request $request, Paiement $paiement)
+    {
+        $dossier = $paiement->facture->dossier;
+        $this->authorize('gererFacturation', $dossier);
+
+        if ($paiement->recu) {
+            throw ValidationException::withMessages([
+                'montant' => ['Un reçu a déjà été émis pour ce paiement — il ne peut plus être modifié.'],
+            ]);
+        }
+
+        $data = $request->validate([
+            'date_paiement'  => ['required', 'date'],
+            'montant'        => ['required', 'numeric', 'min:0.01'],
+            'moyen_paiement' => ['nullable', 'string', 'max:30'],
+            'notes'          => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $avant = $paiement->only(['date_paiement', 'montant', 'moyen_paiement', 'notes']);
+        $paiement->update($data);
+
+        JournalActivite::enregistrer($dossier, 'Paiement modifié : ' . number_format((float) $avant['montant'], 0, ',', ' ')
+            . ' GNF → ' . number_format((float) $paiement->montant, 0, ',', ' ') . ' GNF', 'facturation', ['avant' => $avant, 'apres' => $data]);
+
+        return back()->with('success', 'Paiement mis à jour.');
+    }
+
+    public function destroyPaiement(Paiement $paiement)
+    {
+        $dossier = $paiement->facture->dossier;
+        $this->authorize('gererFacturation', $dossier);
+
+        if ($paiement->recu) {
+            throw ValidationException::withMessages([
+                'montant' => ['Un reçu a déjà été émis pour ce paiement — il ne peut plus être supprimé.'],
+            ]);
+        }
+
+        $montant = (float) $paiement->montant;
+        $paiement->delete();
+
+        JournalActivite::enregistrer($dossier, 'Paiement supprimé : ' . number_format($montant, 0, ',', ' ') . ' GNF', 'facturation');
+
+        return back()->with('success', 'Paiement supprimé.');
+    }
+
     public function genererRecu(Request $request, Paiement $paiement, RecuPdfService $pdfService)
     {
         $dossier = $paiement->facture->dossier;
@@ -139,6 +187,91 @@ class FactureController extends Controller
         return back()->with('success', "Reçu {$recu->numero} généré.");
     }
 
+    public function telechargerPdf(Facture $facture, FactureGeneratorService $generatorService)
+    {
+        $this->authorize('view', $facture->dossier);
+
+        // Rendu à la demande, jamais persisté (voir FactureGeneratorService) — le fichier
+        // est donc supprimé une fois le téléchargement envoyé, pour ne pas accumuler de
+        // nouveaux fichiers orphelins hors GED à chaque clic (voir ayelema:ged-lister-orphelins).
+        $chemin = $generatorService->genererDocument($facture);
+        $cheminAbsolu = Storage::disk('public')->path($chemin);
+
+        // note_numero contient des "/" (ex. "001/MAB/26") — invalide dans un nom de fichier.
+        $nomFichier = 'facture-' . str_replace('/', '-', $facture->note_numero) . '.docx';
+
+        return response()->download($cheminAbsolu, $nomFichier)->deleteFileAfterSend(true);
+    }
+
+    /**
+     * Verrou commun aux 3 méthodes ci-dessous : une fois qu'un paiement a été
+     * enregistré sur la facture, la structure des lignes (et donc le total) ne
+     * doit plus bouger sous les encaissements déjà effectués.
+     */
+    private function assertLignesModifiables(Facture $facture): void
+    {
+        if ($facture->paiements()->exists()) {
+            throw ValidationException::withMessages([
+                'quantite' => ['Impossible de modifier les lignes : des paiements ont déjà été enregistrés sur cette facture.'],
+            ]);
+        }
+    }
+
+    public function storeLigne(Request $request, Facture $facture)
+    {
+        $this->authorize('gererFacturation', $facture->dossier);
+        $this->assertLignesModifiables($facture);
+
+        $data = $request->validate([
+            'designation' => ['required', 'string', 'max:255'],
+            'quantite'    => ['required', 'integer', 'min:1'],
+            'montant'     => ['required', 'numeric', 'min:0'],
+        ]);
+
+        LigneFacture::create([...$data, 'facture_id' => $facture->id]);
+        $facture->recalculerTotal();
+
+        JournalActivite::enregistrer($facture->dossier, "Ligne de facture ajoutée : {$data['designation']}", 'facturation');
+
+        return back()->with('success', 'Ligne ajoutée.');
+    }
+
+    public function updateLigne(Request $request, LigneFacture $ligne)
+    {
+        $facture = $ligne->facture;
+        $this->authorize('gererFacturation', $facture->dossier);
+        $this->assertLignesModifiables($facture);
+
+        $data = $request->validate([
+            'designation' => ['required', 'string', 'max:255'],
+            'quantite'    => ['required', 'integer', 'min:1'],
+            'montant'     => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $avant = $ligne->only(['designation', 'quantite', 'montant']);
+        $ligne->update($data);
+        $facture->recalculerTotal();
+
+        JournalActivite::enregistrer($facture->dossier, "Ligne de facture modifiée : {$data['designation']}", 'facturation', ['avant' => $avant, 'apres' => $data]);
+
+        return back()->with('success', 'Ligne mise à jour.');
+    }
+
+    public function destroyLigne(LigneFacture $ligne)
+    {
+        $facture = $ligne->facture;
+        $this->authorize('gererFacturation', $facture->dossier);
+        $this->assertLignesModifiables($facture);
+
+        $designation = $ligne->designation;
+        $ligne->delete();
+        $facture->recalculerTotal();
+
+        JournalActivite::enregistrer($facture->dossier, "Ligne de facture supprimée : {$designation}", 'facturation');
+
+        return back()->with('success', 'Ligne supprimée.');
+    }
+
     public function telechargerRecu(Recu $recu)
     {
         $recu->loadMissing('paiement.facture.dossier');
@@ -147,5 +280,20 @@ class FactureController extends Controller
         abort_if(!$recu->chemin_fichier || !Storage::disk('public')->exists($recu->chemin_fichier), 404, 'Fichier introuvable.');
 
         return Storage::disk('public')->download($recu->chemin_fichier, "recu-{$recu->numero}.pdf");
+    }
+
+    public function apercuRecu(Recu $recu)
+    {
+        $recu->loadMissing('paiement.facture.dossier');
+        $this->authorize('view', $recu->paiement->facture->dossier);
+
+        abort_if(!$recu->chemin_fichier || !Storage::disk('public')->exists($recu->chemin_fichier), 404, 'Fichier introuvable.');
+
+        $path = Storage::disk('public')->path($recu->chemin_fichier);
+
+        return response()->file($path, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => "inline; filename=\"recu-{$recu->numero}.pdf\"",
+        ]);
     }
 }

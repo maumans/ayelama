@@ -162,11 +162,11 @@ app/
 │   ├── Revision.php                # estValidable(), valider(), renvoyer()
 │   ├── RevisionPoint.php           # point_id (string), etat, commentaire
 │   ├── RevisionGrille.php          # groupes() → array par groupe
-│   ├── Formalite.php               # estUrgente(), estDepassee(), heuresRestantes(), labelOrganisme(), calculerMontant() (mécanisme séparé de Bareme, non unifié)
-│   ├── FormalitePiece.php
+│   ├── Formalite.php               # estUrgente(), estDepassee(), heuresRestantes(), labelOrganisme(), calculerMontant() (mécanisme séparé de Bareme, non unifié) ; pieces() → DocumentFichier polymorphe
 │   ├── Questionnaire.php           # donnees (json)
-│   ├── Document.php
-│   ├── Partie.php                  # initiales (accessor calculé depuis nom), client_id nullable → Client (coexistence, pas remplacement)
+│   ├── DocumentFichier.php         # (ajouté 2026-07-24) polymorphe Dossier|Formalite|Partie — nouvelleVersion(), restaurerVersion(), dossierGouvernant() — remplace Document + FormalitePiece
+│   ├── DocumentVersion.php         # (ajouté 2026-07-24) historique des versions d'un DocumentFichier
+│   ├── Partie.php                  # initiales (accessor calculé depuis nom), client_id nullable → Client (coexistence, pas remplacement) ; pieces() → DocumentFichier polymorphe (photo + justificatifs)
 │   ├── JournalActivite.php         # enregistrer() static
 │   ├── ModeleActe.php
 │   ├── Facture.php
@@ -199,7 +199,7 @@ app/
 │   │   ├── RevisionController.php  # index, show, update, valider, renvoyer
 │   │   ├── FormaliteController.php # index, store, update
 │   │   ├── ModeleActeController.php# index, store, update, destroy — upload .docx avec storeAs()
-│   │   ├── DocumentController.php  # download, preview — téléchargement avec extension correcte
+│   │   ├── DocumentController.php  # download, preview, versions, restaurerVersion — opère sur DocumentFichier (module GED unifié)
 │   │   ├── SearchController.php    # index → JSON {results:[]}
 │   │   ├── RepertoireController.php# index, autocomplete → JSON
 │   │   ├── CourrierController.php  # index (filtres/stats/recherche), store, update (gère envoye_at), destroy
@@ -407,6 +407,7 @@ Documents reçus/                                   # (ajouté 2026-07-06) 64 fi
 - [x] `Parametres/Baremes.jsx` — accordéon par type d'acte, légende organismes (APIP/Impôts/Conservation/CNSS/Notaire/Autre), toggle actif
 - [x] `FacturationService::genererFacture()` / `simuler()` — calcule les lignes de facture depuis les barèmes actifs du type d'acte, déduit l'assiette depuis le questionnaire ou `dossier->valeur`
 - [x] Tables `factures` / `lignes_factures` + modèles `Facture` / `LigneFacture`
+- [x] **Export de la facture au format .docx fidèle au modèle du cabinet** (2026-07-28) — `FactureGeneratorService` remplace l'ancien `FacturePdfService` (dompdf/HTML, abandonné) : rendu depuis `storage/app/private/modeles/facture-notariale.docx` (le fichier fourni par le cabinet, balisé `${fac.*}`/`${ligne.*}`), table des lignes clonée dynamiquement (`TemplateProcessor::cloneRow`), logo d'en-tête **et** filigrane remplacés à la volée par le logo configuré (`Setting::logo_path`, Paramètres > Apparence) — le filigrane délavé est un effet VML (`gain`/`blacklevel`) du modèle, pas un traitement d'image de notre côté, donc n'importe quel logo uploadé en hérite automatiquement. Logo toujours ré-encodé en PNG (GD) avant injection, quel que soit son format source (jpg/png) — les deux emplacements image du docx sont typés `.png` dans `[Content_Types].xml`, un contenu jpg injecté tel quel serait rejeté par Word. Logo SVG non géré (pas de rasterisation) : filigrane/logo du modèle reste alors inchangé. Rendu **à la demande** (jamais persisté en GED) : les lignes restent modifiables tant qu'aucun paiement n'existe, un fichier stocké deviendrait silencieusement obsolète
 - [ ] ⚠️ Non unifié : `Formalite::calculerMontant()` reste un mécanisme séparé (base×taux en dur sur la formalité), indépendant des `Bareme` — à terme, harmoniser les deux
 
 ### ✅ Complété — Module Courriers
@@ -422,6 +423,36 @@ Documents reçus/                                   # (ajouté 2026-07-06) 64 fi
 - [x] `Partie.client_id` (nullable) → `Client` : les deux modèles coexistent, `Client` n'est pas encore le pivot central
 - [ ] ⚠️ Aucun CRUD HTTP dédié pour ces 4 modèles (`clients`, `societes`, `biens_immobiliers`, `banques`) — pas de controller/route ; alimentation indirecte via questionnaire uniquement, aucun seeder
 
+### ✅ Complété — Module GED unifié (2026-07-24)
+
+Avant cette date, la gestion documentaire était éclatée en 3 sous-systèmes indépendants : `documents` (actes de dossier), `formalite_pieces` (pièces des démarches), et les colonnes `Partie.photo_chemin`/`pieces` (jamais câblées). Chaque régénération d'acte écrasait aussi silencieusement le fichier précédent, laissant des dizaines de fichiers orphelins non nettoyés dans `storage/app/public/dossiers/*` (117 recensés lors de la migration — voir `ayelema:ged-lister-orphelins`).
+
+- [x] Tables `document_fichiers` (polymorphe `documentable_type`/`documentable_id` → `Dossier`, `Formalite`, `Partie`) + `document_versions` (historique complet, jamais écrasé) — remplacent `documents` et `formalite_pieces`, **supprimées** après backfill vérifié
+- [x] Modèles `App\Models\DocumentFichier` (`nouvelleVersion()`, `restaurerVersion()`, `supprimerAvecFichiers()`, `dossierGouvernant()`) et `App\Models\DocumentVersion`
+- [x] Convention de stockage unifiée : `documents/{reference}/` (actes), `formalites/{reference}/` (pièces), `parties/{reference}/` (pièces/photo de partie) — `ActesGeneratorService` ne pointe plus vers l'ancien `dossiers/{id}/`
+- [x] `DocumentController` étendu : `GET /documents/{document}/versions` (JSON historique), `POST /documents/versions/{version}/restaurer` (restauration = nouvelle version, jamais de rollback destructif), `GET /documents/versions/{version}/telecharger`
+- [x] `DocumentsTab` (`Dossiers/Show.jsx`) : bouton « Historique » par document, dialog listant toutes les versions avec téléchargement/restauration individuels
+- [x] `FormaliteController`/`FormaliteGenerationService` réécrits sur `DocumentFichier` — **shape JSON frontend inchangée** (`label`, `est_fourni`, `aUnFichier`…) pour ne pas casser `PieceGedRow.jsx`/`ModalDepotFormalite`/`ModalRetourFormalite`
+- [x] `PartieController::uploaderPhoto/uploaderPiece` — upload photo + pièces justificatives (CNI…) par partie, avec avatar cliquable et liste de pièces inline dans l'onglet Informations
+- [x] Colonnes mortes `Partie.photo_chemin`/`Partie.pieces` (JSON) supprimées — `pieces` entrait d'ailleurs en collision avec la nouvelle relation Eloquent `Partie::pieces()` (voir [décision #30](#8-décisions-techniques))
+- [x] `php artisan ayelema:ged-lister-orphelins [--supprimer]` — liste (dry-run par défaut) les fichiers hérités de `storage/app/public/dossiers/*` non référencés dans `document_versions`. **117 fichiers orphelins recensés, jamais supprimés automatiquement** — à traiter manuellement via `--supprimer` quand souhaité
+- [ ] ⚠️ `ModeleActe` (bibliothèque de modèles) reste **hors** de cette unification — gabarit, pas document de dossier ; sa propre gestion de versions reste un item de backlog séparé (Module 4)
+- [x] `GedController` + page `Ged/Index.jsx` (route `/ged`, menu sidebar « GED ») — vue transversale de tous les `DocumentFichier` visibles par l'utilisateur, **groupée par dossier** (accordéon repliable/dépliable, premier groupe ouvert par défaut) plutôt qu'en liste chronologique plate — corrigé sur retour utilisateur (« pas organisé, pas intuitif »), le regroupement par dossier reflète le modèle mental du reste de l'appli. Pagination au niveau dossier (15/page), filtres type/catégorie, aperçu/téléchargement par document. Ajoutée après coup : le plan initial ne couvrait que l'unification par dossier (`DocumentsTab`), sans vue centrale
+
+### ✅ Complété — Clôture avec documents signés/cachetés (2026-07-24)
+
+Le module GED distinguait déjà les versions d'un document mais rien ne différenciait la **version brouillon** (générée avant impression) de la **version finale** — celle qui revient du circuit papier réel (impression → envoi physique → signature/cachet par le tiers concerné → retour au cabinet).
+
+- [x] `modeles_actes.obligatoire_cloture` (bool, réglable dans Paramètres > Modèles d'actes, `ModalModele`) — chaque modèle décide individuellement s'il sera obligatoire à la clôture, pas de règle globale déduite. Les documents générés depuis un modèle marqué ainsi héritent `est_requis = true` (colonne déjà existante sur `document_fichiers`, ajoutée lors du module GED mais jamais exploitée jusqu'ici)
+- [x] `document_fichiers.est_signe_cachete`/`signe_cachete_at`/`signe_cachete_par_id` — `DocumentController::televerserSigne()` (route `POST /documents/{document}/televerser-signe`) dépose la version finale via `nouvelleVersion()` (historique préservé, jamais d'écrasement) puis verrouille le document
+- [x] **Verrouillage serveur, pas seulement UI** : `abort_if($document->est_signe_cachete, 403, ...)` dans `DocumentController::update/regenerer/destroy/restaurerVersion` — un appel direct à l'API ne peut pas contourner le verrou une fois le document signé/cacheté
+- [x] `DossierPolicy::cloturerDocuments()` — restreint à Notaire + Formaliste + Administrateur (pas Rédacteur/Réviseur), uniquement aux étapes Expédition/Clôturé
+- [x] `DossierStepService::verifierExpedition()` bloque le passage à Clôturé tant qu'un document `est_requis` n'a pas `est_signe_cachete = true`, avec la liste nominative des documents manquants dans le message d'erreur
+- [x] `document_versions.hash_sha256` — empreinte calculée automatiquement dans `DocumentFichier::nouvelleVersion()`/`restaurerVersion()` pour **toutes** les versions (pas seulement signées), pour pouvoir vérifier après coup qu'un fichier téléchargé n'a pas été altéré (valeur probatoire)
+- [x] `DocumentsTab` (`Dossiers/Show.jsx`) — bandeau récapitulatif « X/Y documents obligatoires signés/cachetés », badges « Requis clôture »/« Signé/cacheté ✓ », bouton de dépôt par document requis (`can.cloturerDocuments`), boutons Régénérer/Supprimer masqués (pas seulement désactivés) une fois verrouillé
+- [x] **Synchronisation rétroactive de `est_requis`** (2026-07-28) — corrigé : `ModeleActe::synchroniserDocumentsRequis()` répercute `obligatoire_cloture` sur les documents déjà générés (par nom, dans les dossiers **pas encore clôturés** — un dossier déjà `Clôturé` n'est jamais rouvert rétroactivement), appelée depuis `ModeleActeController::update()` et `ParametresController::bulkObligatoireCloture()`. Protège les documents déjà `est_signe_cachete` (jamais réécrits). Détecté en usage réel : sans ça, activer la case sur un modèle ne changeait rien aux dossiers déjà en cours, seuls les nouveaux dossiers en bénéficiaient
+- [x] **Page `Paramètres > Clôture`** (2026-07-28) — `ParametresController::cloture()` + `resources/js/Pages/Parametres/Cloture.jsx` : vue d'ensemble (accordéon par type d'acte, calqué sur `Parametres/Baremes.jsx`) de tous les modèles avec leur statut `obligatoire_cloture`, jusque-là visible seulement un modèle à la fois dans le modal d'édition. Toggle par ligne (réutilise `PATCH /modeles/{id}` existant), + `ParametresController::bulkObligatoireCloture()` (`POST /parametres/cloture/bulk`) pour bascule en masse par type d'acte ou par catégorie. **Décision** : pas de nouvelle table « grille de clôture » façon `revision_grilles` (créée 2026-06-23, supprimée 2026-07-10 après abandon) — on s'appuie sur la colonne déjà existante, juste une meilleure vue
+
 ### ⚙️ Changement de workflow (2026-07-03)
 
 - [x] `EtapeDossier` réduit de 8 à 6 cas : `Signature client` et `Signature notaire` supprimées
@@ -436,8 +467,8 @@ Documents reçus/                                   # (ajouté 2026-07-06) 64 fi
 - [ ] **Normaliser les 63 modèles `.docx`/`.doc` bruts** dans `Documents reçus/` (pointillés/MAJUSCULES → balises `${...}`) — un seul fichier fait référence (`STATUTS_SARLU_balises.docx`). Voir `Analyse_et_Prompt_Generation_Modeles_Ayelema.md` §A/§E pour la méthode et le dictionnaire de blocs cible
 - [ ] Ajouter les blocs `cr.*` (Courrier) et `fac.*` (Facture) dans `resources/js/data/questionnaires.js` — documentés dans l'analyse mais absents du frontend, donc pas de formulaire de saisie pour les 13 courriers de transmission et les factures détaillées
 - [ ] Étendre `ActesGeneratorService` avec `cloneRowAndSetValues()` pour les tableaux répétables (lignes de facture, titres fonciers multiples, pièces transmises) — seul `cloneBlock()` simple est utilisé actuellement
-- [ ] Prévisualisation PDF dans le navigateur (conversion .docx → PDF côté serveur, ex. LibreOffice headless)
-- [ ] Gestion des versions de modèles (historique, rollback)
+- [x] ~~Prévisualisation PDF dans le navigateur~~ — **ligne obsolète, corrigée le 2026-07-24** : l'aperçu `.docx`/`.xlsx` est déjà implémenté côté client (`docx-preview` + `xlsx`, sans conversion serveur) dans `DocumentPreviewModal.jsx`/`DocumentInlinePreview.jsx`. Aucune conversion PDF serveur nécessaire (voir [décision #30](#8-décisions-techniques))
+- [ ] Gestion des versions de **modèles** (`ModeleActe` — historique, rollback du gabarit lui-même). À ne pas confondre avec le versionnage des documents d'un dossier, **déjà implémenté** depuis le module GED unifié (§ ci-dessous)
 - [ ] Signature électronique intégrée (module futur)
 
 #### Module 5 — Grilles de révision dynamiques
@@ -450,7 +481,7 @@ Documents reçus/                                   # (ajouté 2026-07-06) 64 fi
 - [ ] Génération des bordereaux de paiement
 
 #### Fonctionnalités transverses
-- [ ] Upload pièces jointes (CNI, photos parties)
+- [x] ~~Upload pièces jointes (CNI, photos parties)~~ — fait le 2026-07-24 via le module GED unifié (`PartieController::uploaderPhoto/uploaderPiece`)
 - [ ] Export PDF d'un dossier
 - [ ] CRUD HTTP pour `Client`, `Societe`, `BienImmobilier`, `Banque` (répertoire de données réutilisables — actuellement alimentés seulement via le questionnaire du dossier, sans écran dédié ni seeder)
 - [ ] Page `Parametres/Apparence` — routes présentes dans `web.php` (`GET/POST /parametres/apparence`, upload logo), à vérifier si l'UI React existe et est branchée à `Setting`
@@ -503,7 +534,7 @@ types_actes — id, code, label, categorie(enum), prefixe_reference, delai_jours
 
 questionnaires — id, dossier_id, donnees(json), timestamps
 
-documents — id, dossier_id, nom, version, statut, timestamps
+-- table `documents` supprimée le 2026-07-24 (module GED unifié, voir plus bas)
 
 revision_grilles — id, type_acte_id, points(json), version, est_active, timestamps
 
@@ -516,10 +547,11 @@ formalites — id, dossier_id, organisme, statut(enum), taux, montant_base,
              montant_calcule, type_impot, retour_attendu, delai_heures,
              depose_at, retour_at, echeance_at, timestamps
 
-formalite_pieces — id, formalite_id, label, est_fourni, fourni_at, timestamps
+-- table `formalite_pieces` supprimée le 2026-07-24 (module GED unifié, voir plus bas)
 
-parties — id, dossier_id, nom, role, cni, telephone, adresse, email,
-          photo_chemin, pieces(json), timestamps
+parties — id, dossier_id, nom, role, cni, telephone, adresse, email, client_id, timestamps
+          -- photo_chemin et pieces(json) supprimées le 2026-07-24 (jamais alimentées,
+          -- remplacées par la relation polymorphe Partie::pieces() — voir module GED)
 
 journal_activites — id, dossier_id, user_id, action, type, meta(json), created_at
 
@@ -576,6 +608,16 @@ user_otp_codes — id, user_id, code_hash, attempts, expires_at, consumed_at,
 
 user_trusted_devices — id, user_id, token_hash(unique), label, ip_address,
                        last_used_at, expires_at, timestamps
+
+-- Ajoutées le 2026-07-24 (module GED unifié — remplacent documents/formalite_pieces) :
+
+document_fichiers — id, documentable_type, documentable_id (morph : Dossier|Formalite|Partie),
+                     nom, categorie, statut, est_requis, est_fourni,
+                     version_actuelle_id, edite_par_id, edite_at, created_by_id, timestamps
+
+document_versions — id, document_fichier_id, numero, chemin_fichier, nom_original,
+                     mime_type, taille_octets, source(upload|genere|restauration),
+                     cree_par_id, timestamps
 ```
 
 ### Relations clés
@@ -645,6 +687,7 @@ Les clés suffixées `_chiffres` génèrent automatiquement la variante `_lettre
 | 27 | Pusher (Channels) choisi pour le "push" plutôt que Web Push standard (VAPID) | Décision utilisateur explicite. **Nuance à ne pas oublier** : ce mécanisme (Echo + `Notification` API déclenchée en JS) ne délivre rien si le navigateur est complètement fermé — seulement tant que l'app est ouverte (onglet actif ou arrière-plan). Un vrai push hors-ligne nécessiterait un Service Worker + VAPID, ou Pusher Beams (produit séparé, payant au-delà d'un seuil) |
 | 28 | `TwoFactorCodeNotification` n'implémente volontairement PAS `ShouldQueue` (contrairement aux 4 autres notifications) | Le code OTP doit partir immédiatement — le dépendre d'un worker de queue qui pourrait ne pas tourner en continu en production bloquerait la connexion de l'utilisateur. Les 4 notifications métier (échéance, révision, formalité, demande) sont non urgentes et peuvent tolérer la latence d'une queue |
 | 29 | Onglets `Dossiers/Show` jamais masqués, seulement estompés (`opacity-40`) selon l'étape atteinte | Alternative retenue à un show/hide strict : les onglets futurs restent cliquables (consultables) mais visuellement désaccentués via `TAB_STAGE` + `tabPasEncoreAtteint()` — "Informations" et "Facturation" sont exclus de ce mécanisme (toujours pleinement visibles, transversaux). L'ancien onglet "Parties" a été fusionné dans "Informations" (gestion des personnes désormais inline) et "Journal" a été renommé **Historique** puis sorti de la barre d'onglets vers un dialog dédié (le champ backend `dossier.journal` n'a pas été renommé, seul le libellé/l'emplacement UI a changé) |
+| 30 | `DocumentFichier` polymorphe unique plutôt que 3 systèmes séparés (`documents`, `formalite_pieces`, `Partie.pieces`) | Les trois évoluaient déjà en parallèle avec des conventions de stockage divergentes et aucun vrai historique de versions (chaque régénération d'acte écrasait le fichier précédent sans le nettoyer ni le référencer — 117 orphelins accumulés dans `storage/app/public/dossiers/*`). Un modèle polymorphe + `document_versions` centralise `nouvelleVersion()`/`restaurerVersion()` une seule fois. Contrepartie assumée : `dossierGouvernant()` sur `DocumentFichier` doit résoudre le Dossier réel (direct, via `Formalite`, ou via `Partie`) pour que les policies (`genererDocuments`, `view`) restent valides quel que soit le documentable. Le JSON exposé au frontend pour les pièces de formalité garde volontairement les noms de champs historiques (`label`, `aUnFichier`…) pour ne pas casser `PieceGedRow.jsx` et les modals de dépôt/retour — seul `DocumentsTab` (nouveauté : historique de versions) expose le nouveau schéma (`categorie`, `est_fourni`…). La colonne `Partie.pieces` (JSON, jamais utilisée) a dû être supprimée dans la même foulée : elle entrait en collision avec la nouvelle relation Eloquent `Partie::pieces()` (un attribut de colonne réel prime sur une méthode de relation du même nom) |
 
 ---
 
@@ -696,7 +739,8 @@ Les clés suffixées `_chiffres` génèrent automatiquement la variante `_lettre
 | `otp_enabled` désactivé par défaut | Ne pas l'activer dans `Parametres > Sécurité` sans avoir testé un envoi SMTP réel au préalable (`Mail::raw` via tinker) — sinon tous les comptes se retrouvent bloqués hors du système au prochain login |
 | Push "temps réel" via Pusher ≠ push hors-ligne | Le mécanisme actuel (Echo + `Notification` API) ne fonctionne que navigateur ouvert (onglet actif ou arrière-plan) — pas de notification si le navigateur est complètement fermé. Voir décision #27 si un vrai push hors-ligne devient nécessaire |
 | Pas de "renouvellement forcé" du mot de passe | `Password::defaults()` ne s'applique qu'aux nouveaux mots de passe saisis (inscription, reset, changement) — les mots de passe déjà en base avant cette politique ne sont ni vérifiés ni forcés à la mise à jour |
+| 117 fichiers orphelins dans `storage/app/public/dossiers/*` (hérités d'avant le module GED) | Recensés par `php artisan ayelema:ged-lister-orphelins` le 2026-07-24, **jamais supprimés automatiquement** — à traiter manuellement avec `--supprimer` une fois la bascule GED validée en conditions réelles |
 
 ---
 
-*Dernière mise à jour : 16/07/2026 — Ajout du module Sécurité (politique de mot de passe forte fixée en dur, 2FA par OTP email avec durée paramétrable et appareils de confiance) et enrichissement du module Notifications (canal mail + temps réel Pusher + vraie cloche déroulante, formalité urgente ajoutée). Ajustement UX de `Dossiers/Show` : onglet Parties fusionné dans Informations, Journal renommé Historique et déplacé en dialog, onglets futurs estompés plutôt que masqués. Voir décisions #23 à #29.*
+*Dernière mise à jour : 24/07/2026 — Module GED unifié : `documents`/`formalite_pieces`/`Partie.photo_chemin`+`pieces` remplacés par un modèle polymorphe unique (`DocumentFichier`/`DocumentVersion`) avec vrai historique de versions (restauration non destructive), upload photo/pièces de partie ajouté, convention de stockage unifiée, ancien tables supprimées après backfill vérifié. Correction d'une ligne obsolète du backlog (prévisualisation PDF déjà faite côté client). Voir décisions #30 et section « Module GED unifié » (§5).*

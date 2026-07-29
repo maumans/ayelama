@@ -40,6 +40,8 @@ class RevisionPolicy
 
     public function renvoyer(User $user, Revision $revision): bool
     {
-        return $this->update($user, $revision) && $revision->nombreNonConformes() > 0;
+        return $this->update($user, $revision)
+            && $revision->nombreNonConformes() > 0
+            && $revision->tousEvalues();
     }
 }

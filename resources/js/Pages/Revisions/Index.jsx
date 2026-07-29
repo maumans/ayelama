@@ -97,16 +97,16 @@ export default function RevisionsIndex() {
     const hasFiltres = search || statut || retard || sortBy;
 
     return (
-        <AppLayout breadcrumbs={[{ label: 'Révisions' }]}>
-            <Head title="Révisions — Ayelema" />
+        <AppLayout breadcrumbs={[{ label: 'Certifications' }]}>
+            <Head title="Certifications — Ayelema" />
 
             <div className="p-6 max-w-[1000px] mx-auto space-y-5">
 
                 {/* ── En-tête ──────────────────────────────────────────────── */}
                 <div>
-                    <h1 className="font-serif text-display text-ink">Révisions</h1>
+                    <h1 className="font-serif text-display text-ink">Certifications</h1>
                     <p className="text-sm text-slate-500 mt-1">
-                        <span className="text-slate-700 font-medium">{stats?.total ?? 0}</span> dossier{(stats?.total ?? 0) > 1 ? 's' : ''} en révision
+                        <span className="text-slate-700 font-medium">{stats?.total ?? 0}</span> dossier{(stats?.total ?? 0) > 1 ? 's' : ''} en certification
                         {(stats?.enRetard ?? 0) > 0 && (
                             <> · <span className="text-danger font-medium">{stats.enRetard} en retard</span></>
                         )}
@@ -245,7 +245,7 @@ export default function RevisionsIndex() {
                     <div className="flex flex-col items-center justify-center py-20 text-center">
                         <ClipboardCheck className="h-12 w-12 text-slate-200 mb-4" />
                         <h3 className="font-serif text-heading text-slate-500">
-                            {hasFiltres ? 'Aucun résultat' : 'Aucune révision en attente'}
+                            {hasFiltres ? 'Aucun résultat' : 'Aucune certification en attente'}
                         </h3>
                         <p className="text-sm text-slate-400 mt-1">
                             {hasFiltres ? 'Modifiez vos critères de recherche.' : 'Tous les dossiers sont à jour.'}

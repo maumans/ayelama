@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,7 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ClientPicker } from '@/Components/ui/client-picker';
+import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP } from '@/data/questionnaires';
+import { getPublicIntakeFields } from '@/lib/partiesPayload';
+import { buildClientDraftFromDonnees, buildPartieFields } from '@/lib/clientFields';
 import { notifyValidationError, toast } from '@/lib/toast';
 import { Copy, ArrowRight, ImageIcon, Check, ChevronLeft } from 'lucide-react';
 
@@ -26,6 +30,8 @@ export default function DemandeShow() {
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [errors, setErrors] = useState({});
+    const [clientLie, setClientLie] = useState(null);
+    const [creatingClient, setCreatingClient] = useState(false);
 
     const key = TYPE_ACTE_CODE_MAP[demande.typeActe.code];
     const questionnaire = key ? (QUESTIONNAIRES[key] ?? []) : [];
@@ -33,6 +39,22 @@ export default function DemandeShow() {
 
     const donneesEntries = Object.entries(demande.donnees ?? {}).filter(([, v]) => v !== null && v !== '' && !Array.isArray(v));
     const donneesRepeatable = Object.entries(demande.donnees ?? {}).filter(([, v]) => Array.isArray(v) && v.length);
+
+    // Rattachement optionnel à une fiche Client — reconstruit les valeurs du rôle
+    // capté par ce lien de demande (préfixées ou aplaties selon le questionnaire,
+    // voir getPublicIntakeFields) pour proposer un brouillon pré-rempli plutôt que
+    // de tout ressaisir dans ModalNouveauClient.
+    const { roleFields, repeatableFieldId } = useMemo(
+        () => getPublicIntakeFields(questionnaire, demande.clientRole),
+        [key, demande.clientRole]
+    );
+    const roleValues = repeatableFieldId
+        ? (demande.donnees?.[repeatableFieldId]?.[0] ?? {})
+        : (demande.donnees ?? {});
+    const clientDraft = useMemo(
+        () => buildClientDraftFromDonnees(roleValues, roleFields),
+        [demande.donnees, roleFields, repeatableFieldId]
+    );
 
     const copierLien = () => {
         navigator.clipboard.writeText(demande.url).then(() => toast.success('Lien copié.'));
@@ -47,6 +69,9 @@ export default function DemandeShow() {
             formaliste_id: formalisteId || undefined,
             urgent,
             notes: notes || undefined,
+            ...(clientLie ? {
+                parties: [{ ...buildPartieFields(clientLie, {}, ''), role: demande.clientRole, client_id: clientLie.id }],
+            } : {}),
         }, {
             onError: (errs) => { setErrors(errs); setSubmitting(false); notifyValidationError(errs); },
             onFinish: () => setSubmitting(false),
@@ -139,6 +164,33 @@ export default function DemandeShow() {
                     </>
                 )}
 
+                {demande.statut === 'soumise' && demande.clientRole && (
+                    <Card>
+                        <CardHeader className="pb-3"><CardTitle className="text-sm">Client identifié</CardTitle></CardHeader>
+                        <CardContent className="pt-0 space-y-2">
+                            <p className="text-xs text-slate-400">
+                                Optionnel — rattachez cette personne à une fiche client existante ou créez-en
+                                une (pré-remplie avec les informations soumises), pour la retrouver facilement
+                                par la suite.
+                            </p>
+                            <ClientPicker
+                                placeholder="Rechercher un client existant…"
+                                linked={clientLie}
+                                onSelect={setClientLie}
+                                onUnlink={() => setClientLie(null)}
+                                onCreateNew={() => setCreatingClient(true)}
+                            />
+                        </CardContent>
+                    </Card>
+                )}
+
+                <ModalNouveauClient
+                    open={creatingClient}
+                    onClose={() => setCreatingClient(false)}
+                    onCreated={(client) => { setClientLie(client); setCreatingClient(false); }}
+                    initialValues={clientDraft}
+                />
+
                 {demande.statut === 'soumise' && (
                     <Card className="border-seal/30">
                         <CardHeader className="pb-3"><CardTitle className="text-sm">Créer le dossier</CardTitle></CardHeader>
@@ -166,7 +218,7 @@ export default function DemandeShow() {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1.5">
-                                    <Label htmlFor="reviseur_id">Réviseur</Label>
+                                    <Label htmlFor="reviseur_id">Certificateur</Label>
                                     <select
                                         id="reviseur_id" value={reviseurId} onChange={e => setReviseurId(e.target.value)}
                                         className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"

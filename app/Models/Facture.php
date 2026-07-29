@@ -103,6 +103,7 @@ class Facture extends Model
                     'numero'             => $p->recu->numero,
                     'date_emission'      => $p->recu->date_emission?->format('d/m/Y'),
                     'url_telechargement' => route('recus.telecharger', $p->recu),
+                    'url_apercu'         => route('recus.apercu', $p->recu),
                 ] : null,
             ])->values(),
             'dossier' => [

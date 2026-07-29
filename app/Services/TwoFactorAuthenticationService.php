@@ -77,8 +77,14 @@ class TwoFactorAuthenticationService
         }
 
         $lastSent = $user->otpCodes()->latest('id')->value('last_sent_at');
-        if ($lastSent && now()->diffInSeconds($lastSent) < 60) {
-            return;
+        if ($lastSent) {
+            $ecoule = (int) now()->diffInSeconds($lastSent, true);
+            if ($ecoule < 60) {
+                $seconds = 60 - $ecoule;
+                throw ValidationException::withMessages([
+                    'code' => ["Veuillez patienter {$seconds} secondes avant de redemander un code."],
+                ]);
+            }
         }
 
         RateLimiter::hit($key, 600);
@@ -98,13 +104,13 @@ class TwoFactorAuthenticationService
             'expires_at'   => now()->addDays(self::TRUSTED_DEVICE_DAYS),
         ]);
 
-        Cookie::queue(
+        Cookie::queue(cookie(
             self::TRUSTED_DEVICE_COOKIE,
             $token,
             60 * 24 * self::TRUSTED_DEVICE_DAYS,
             httpOnly: true,
             sameSite: 'lax',
-        );
+        ));
     }
 
     public function isDeviceTrusted(User $user, Request $request): bool

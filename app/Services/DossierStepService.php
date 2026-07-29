@@ -3,12 +3,16 @@
 namespace App\Services;
 
 use App\Enums\EtapeDossier;
+use App\Models\Client;
 use App\Models\Courrier;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
 use App\Models\ModeleCourrier;
 use App\Models\Revision;
 use App\Models\User;
+use App\Notifications\RevisionEnAttenteNotification;
+use App\Notifications\SignatureClientEnAttenteNotification;
+use App\Notifications\SignatureNotaireEnAttenteNotification;
 use App\Services\ActesGeneratorService;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -44,6 +48,32 @@ class DossierStepService
             if (!$revision->wasRecentlyCreated) {
                 $revision->resetPoints();
             }
+
+            foreach ($dossier->ayantsDroit() as $destinataire) {
+                try {
+                    $destinataire->notify(new RevisionEnAttenteNotification($dossier));
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            }
+        }
+
+        // Signature client / notaire : pas d'onglet dédié, juste une notification
+        // au notaire en charge pour lui signaler que le dossier est prêt.
+        if ($etapeSuivante === EtapeDossier::SignatureClient && $dossier->notaire) {
+            try {
+                $dossier->notaire->notify(new SignatureClientEnAttenteNotification($dossier));
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        if ($etapeSuivante === EtapeDossier::SignatureNotaire && $dossier->notaire) {
+            try {
+                $dossier->notaire->notify(new SignatureNotaireEnAttenteNotification($dossier));
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         // Générer automatiquement les lettres de transmission applicables en
@@ -51,6 +81,15 @@ class DossierStepService
         // définitives à ce stade, aucune raison d'attendre un clic manuel.
         if ($etapeSuivante === EtapeDossier::Expedition) {
             $this->genererLettresTransmission($dossier, $user);
+        }
+
+        // Un client ajouté pendant la création du dossier n'est qu'un prospect tant que le
+        // dossier n'a pas abouti — il devient client confirmé une fois le dossier clôturé.
+        if ($etapeSuivante === EtapeDossier::Cloture) {
+            // pluck()->unique() plutôt que ->distinct() en SQL : Dossier::parties() applique
+            // un orderBy('role') par défaut, incompatible avec DISTINCT en SQL strict (MySQL).
+            $clientIds = $dossier->parties()->whereNotNull('client_id')->pluck('client_id')->unique();
+            Client::whereIn('id', $clientIds)->where('statut', 'prospect')->update(['statut' => 'client']);
         }
 
         JournalActivite::enregistrer(
@@ -159,7 +198,7 @@ class DossierStepService
             $errors['notaire'] = ['Un notaire doit être assigné au dossier.'];
         }
         if (!$dossier->reviseur_id) {
-            $errors['reviseur'] = ['Un réviseur doit être assigné au dossier.'];
+            $errors['reviseur'] = ['Un certificateur doit être assigné au dossier.'];
         }
 
         if (!empty($errors)) {
@@ -173,7 +212,7 @@ class DossierStepService
 
         if ($dossier->documents->isEmpty()) {
             throw ValidationException::withMessages([
-                'documents' => ['Au moins un document doit être ajouté avant de passer en révision.'],
+                'documents' => ['Au moins un document doit être ajouté avant de passer en certification.'],
             ]);
         }
     }
@@ -183,10 +222,10 @@ class DossierStepService
         if (!$dossier->revisionValidee()) {
             $statut = $dossier->revision?->statut?->value;
             $msg = match ($statut) {
-                'renvoye'    => 'La révision a été renvoyée en correction. Corrigez les points signalés puis soumettez à nouveau.',
-                'en_attente' => 'La révision est en attente. Elle doit être évaluée et validée par le réviseur.',
-                'en_cours'   => 'La révision est en cours. Elle doit être validée avant de continuer.',
-                default      => 'La révision doit être validée avant de passer aux formalités.',
+                'renvoye'    => 'La certification a été renvoyée en correction. Corrigez les points signalés puis soumettez à nouveau.',
+                'en_attente' => 'La certification est en attente. Elle doit être évaluée et validée par le certificateur.',
+                'en_cours'   => 'La certification est en cours. Elle doit être validée avant de continuer.',
+                default      => 'La certification doit être validée avant de passer aux formalités.',
             };
             throw ValidationException::withMessages(['revision' => [$msg]]);
         }
@@ -212,25 +251,26 @@ class DossierStepService
 
     private function verifierExpedition(Dossier $dossier): void
     {
-        $dossier->loadMissing('typeActe', 'courriers');
+        $dossier->loadMissing('typeActe', 'courriers', 'documents');
 
-        $applicables = ModeleCourrier::with('typesActes')
-            ->actif()
-            ->get()
-            ->filter(fn (ModeleCourrier $m) => $m->applicablePour($dossier->typeActe));
-
-        if ($applicables->isEmpty()) {
-            return;
+        $manquants = $dossier->documents->filter(fn ($d) => $d->est_requis && !$d->est_signe_cachete);
+        if ($manquants->isNotEmpty()) {
+            $noms = $manquants->pluck('nom')->join(', ');
+            throw ValidationException::withMessages([
+                'documents' => ["Documents obligatoires non encore signés/cachetés : {$noms}."],
+            ]);
         }
 
-        $envoye = $dossier->courriers->contains(
-            fn ($c) => $c->type === 'transmission' && $c->statut === 'envoye'
-        );
-
-        if (!$envoye) {
-            $noms = $applicables->pluck('nom')->join(', ');
+        // Remplace l'ancienne règle générique (« au moins une lettre envoyée ») par le
+        // même mécanisme granulaire que les documents : seuls les courriers
+        // explicitement marqués obligatoires (Paramètres > Clôture) bloquent la
+        // clôture — un type d'acte non configuré ne bloque plus rien automatiquement,
+        // cohérent avec le comportement déjà accepté côté documents.
+        $courriersManquants = $dossier->courriers->filter(fn ($c) => $c->est_requis && !$c->est_signe_cachete);
+        if ($courriersManquants->isNotEmpty()) {
+            $noms = $courriersManquants->pluck('objet')->join(', ');
             throw ValidationException::withMessages([
-                'courriers' => ["Au moins une lettre de transmission doit être générée et marquée « envoyée » avant de clôturer ce dossier (ex. : {$noms})."],
+                'courriers' => ["Courriers obligatoires non encore signés/cachetés : {$noms}."],
             ]);
         }
     }

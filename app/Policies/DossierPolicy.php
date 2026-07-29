@@ -35,6 +35,9 @@ class DossierPolicy
                 || $dossier->notaire_id === $user->id,
             EtapeDossier::Revision       => $dossier->reviseur_id === $user->id
                 || $dossier->notaire_id === $user->id,
+            EtapeDossier::SignatureClient,
+            EtapeDossier::SignatureNotaire => $dossier->redacteur_id === $user->id
+                || $dossier->notaire_id === $user->id,
             EtapeDossier::Formalites,
             EtapeDossier::Expedition     => $dossier->formaliste_id === $user->id
                 || $dossier->notaire_id === $user->id,
@@ -101,6 +104,20 @@ class DossierPolicy
         if (!$user->actif) return false;
 
         return $user->hasAnyRole(RoleUtilisateur::peuventGererFacturation());
+    }
+
+    /**
+     * Dépôt de la version signée/cachetée d'un document (retour du circuit papier réel) —
+     * verrouille définitivement le document. Restreint au Notaire (certifie l'acte) et au
+     * Formaliste (gère matériellement l'aller-retour physique), pas au Rédacteur/Réviseur.
+     */
+    public function cloturerDocuments(User $user, Dossier $dossier): bool
+    {
+        if (!$user->actif) return false;
+        if ($user->hasRole(RoleUtilisateur::Administrateur)) return true;
+        if (!in_array($dossier->etape, [EtapeDossier::Expedition, EtapeDossier::Cloture], true)) return false;
+
+        return $dossier->notaire_id === $user->id || $dossier->formaliste_id === $user->id;
     }
 
     public function genererCourriers(User $user, Dossier $dossier): bool

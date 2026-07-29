@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Enums\CategorieActe;
 use App\Enums\RoleUtilisateur;
 use App\Models\Bareme;
+use App\Models\ModeleActe;
+use App\Models\ModeleCourrier;
 use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
@@ -83,6 +85,7 @@ class ParametresController extends Controller
                 'baremes'            => Bareme::count(),
                 'baremesActifs'      => Bareme::where('actif', true)->count(),
                 'typesAvecBaremes'   => TypeActe::has('baremes')->count(),
+                'obligatoiresCloture' => ModeleActe::where('obligatoire_cloture', true)->count(),
             ],
             'parRole'           => $parRole,
             'parCategorie'      => $parCategorie,
@@ -215,6 +218,7 @@ class ParametresController extends Controller
             'libelle'             => $b->libelle,
             'taux'                => $b->taux,
             'montant_fixe'        => $b->montant_fixe,
+            'quantite_defaut'     => $b->quantite_defaut ?? 1,
             'base_calcul'         => $b->base_calcul,
             'description'         => $b->description,
             'actif'               => $b->actif,
@@ -226,6 +230,100 @@ class ParametresController extends Controller
             'delai_heures'        => $b->delai_heures,
             'pieces_requises'     => $b->pieces_requises ?? [],
         ];
+    }
+
+    /**
+     * Vue d'ensemble « Clôture » : quels documents (modèles d'actes) sont obligatoires
+     * à la clôture, par type d'acte — la case existe déjà sur ModeleActe (session
+     * précédente) mais n'était visible qu'un modèle à la fois dans son modal d'édition.
+     */
+    public function cloture(Request $request)
+    {
+        $typesActes = TypeActe::with(['modeles' => fn ($q) => $q->orderBy('nom')])
+            ->when($request->categorie, fn ($q, $cat) => $q->where('categorie', $cat))
+            ->orderBy('categorie')
+            ->orderBy('label')
+            ->get()
+            ->map(fn ($t) => [
+                'id'             => $t->id,
+                'label'          => $t->label,
+                'categorie'      => $t->categorie?->value,
+                'categorieLabel' => $t->categorie?->label(),
+                'modeles'        => $t->modeles->map(fn ($m) => [
+                    'id'                  => $m->id,
+                    'nom'                 => $m->nom,
+                    'type_document'       => $m->type_document,
+                    'typeDocLabel'        => $m->typeDocumentLabel(),
+                    'est_actif'           => $m->est_actif,
+                    'obligatoire_cloture' => $m->obligatoire_cloture,
+                ])->values(),
+            ]);
+
+        $modelesCourriers = ModeleCourrier::with('typesActes')
+            ->orderBy('nom')
+            ->get()
+            ->map(fn (ModeleCourrier $m) => [
+                'id'                  => $m->id,
+                'nom'                 => $m->nom,
+                'typeDocLabel'        => $m->typeDocumentLabel(),
+                'est_actif'           => $m->est_actif,
+                'applicable_tous'     => $m->applicable_tous,
+                'typesActesLabels'    => $m->typesActes->pluck('label'),
+                'obligatoire_cloture' => $m->obligatoire_cloture,
+            ]);
+
+        return Inertia::render('Parametres/Cloture', [
+            'typesActes' => $typesActes,
+            'modelesCourriers' => $modelesCourriers,
+            'categories' => collect(CategorieActe::cases())->map(fn ($c) => [
+                'value' => $c->value,
+                'label' => $c->label(),
+            ]),
+            'filters' => $request->only(['categorie']),
+            'stats'   => [
+                'totalModeles'        => ModeleActe::count(),
+                'obligatoires'        => ModeleActe::where('obligatoire_cloture', true)->count(),
+                'obligatoiresCourriers' => ModeleCourrier::where('obligatoire_cloture', true)->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * Bascule obligatoire_cloture pour tous les modèles d'un type d'acte ou d'une
+     * catégorie en une seule requête — répond au besoin exprimé de configurer ça
+     * "par type d'acte ou par catégorie", pas seulement modèle par modèle.
+     */
+    public function bulkObligatoireCloture(Request $request)
+    {
+        $data = $request->validate([
+            'obligatoire_cloture' => ['required', 'boolean'],
+            'type_acte_id'        => ['nullable', 'exists:types_actes,id'],
+            'categorie'           => ['nullable', 'string'],
+        ]);
+
+        if (empty($data['type_acte_id']) && empty($data['categorie'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'type_acte_id' => ["Précisez un type d'acte ou une catégorie."],
+            ]);
+        }
+
+        $query = ModeleActe::query();
+        if (!empty($data['type_acte_id'])) {
+            $query->where('type_acte_id', $data['type_acte_id']);
+        }
+        if (!empty($data['categorie'])) {
+            $query->whereHas('typeActe', fn ($q) => $q->where('categorie', $data['categorie']));
+        }
+
+        // Boucle plutôt qu'un update() en masse : chaque modèle doit répercuter le
+        // changement sur ses documents déjà générés (voir ModeleActe::synchroniserDocumentsRequis()).
+        $modeles = $query->get();
+        foreach ($modeles as $modele) {
+            $modele->update(['obligatoire_cloture' => $data['obligatoire_cloture']]);
+            $modele->synchroniserDocumentsRequis();
+        }
+
+        return back()->with('success', "{$modeles->count()} modèle(s) mis à jour.");
     }
 
     public function baremes(Request $request)
@@ -290,6 +388,7 @@ class ParametresController extends Controller
             'libelle'           => ['required', 'string', 'max:200'],
             'taux'              => ['nullable', 'numeric', 'min:0', 'max:100'],
             'montant_fixe'      => ['nullable', 'numeric', 'min:0'],
+            'quantite_defaut'   => ['nullable', 'integer', 'min:1'],
             'base_calcul'       => ['required', 'in:valeur_acte,montant_fixe'],
             'description'       => ['nullable', 'string'],
             'genere_formalite'    => ['boolean'],
@@ -325,6 +424,7 @@ class ParametresController extends Controller
             'libelle'           => ['sometimes', 'string', 'max:200'],
             'taux'              => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'montant_fixe'      => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'quantite_defaut'   => ['sometimes', 'nullable', 'integer', 'min:1'],
             'base_calcul'       => ['sometimes', 'in:valeur_acte,montant_fixe'],
             'description'       => ['sometimes', 'nullable', 'string'],
             'actif'             => ['sometimes', 'boolean'],

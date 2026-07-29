@@ -37,8 +37,47 @@ class PartieController extends Controller
     {
         $this->authorize('update', $partie->dossier);
 
+        foreach ($partie->pieces as $piece) {
+            $piece->supprimerAvecFichiers();
+        }
+
         $partie->delete();
 
         return back()->with('success', 'Personne retirée du dossier.');
+    }
+
+    public function uploaderPhoto(Request $request, Partie $partie)
+    {
+        $this->authorize('genererDocuments', $partie->dossier);
+
+        $request->validate([
+            'fichier' => ['required', 'file', 'max:5120', 'mimes:jpg,jpeg,png,webp'],
+        ]);
+
+        $photo = $partie->pieces()->where('categorie', 'photo')->first()
+            ?? $partie->pieces()->create(['nom' => 'Photo', 'categorie' => 'photo']);
+
+        $photo->nouvelleVersion($request->file('fichier'), 'parties/' . $partie->dossier->reference);
+
+        return back()->with('success', 'Photo mise à jour.');
+    }
+
+    public function uploaderPiece(Request $request, Partie $partie)
+    {
+        $this->authorize('genererDocuments', $partie->dossier);
+
+        $data = $request->validate([
+            'nom'     => ['required', 'string', 'max:200'],
+            'fichier' => ['required', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png,doc,docx'],
+        ]);
+
+        $piece = $partie->pieces()->create([
+            'nom'       => $data['nom'],
+            'categorie' => 'piece_justificative',
+        ]);
+
+        $piece->nouvelleVersion($request->file('fichier'), 'parties/' . $partie->dossier->reference);
+
+        return back()->with('success', 'Pièce ajoutée.');
     }
 }

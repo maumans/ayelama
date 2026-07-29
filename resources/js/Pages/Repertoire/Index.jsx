@@ -44,6 +44,13 @@ const ROLE_META = {
 
 const DEFAULT_ROLE = { label: null, badge: 'bg-slate-100 text-slate-600 border-slate-200', avatar: 'bg-ink' };
 
+/* ─── Statut client (prospect tant que le dossier n'a pas abouti) ───────── */
+
+const STATUT_CLIENT_META = {
+    prospect: { label: 'Prospect', badge: 'bg-amber-50 text-amber-700 border-amber-200' },
+    client:   { label: 'Client',   badge: 'bg-success-bg text-success-text border-green-200' },
+};
+
 const getRoleMeta  = (role) => ROLE_META[role?.toLowerCase()] ?? DEFAULT_ROLE;
 const getRoleLabel = (role) => {
     const m = getRoleMeta(role);
@@ -70,17 +77,20 @@ function PartieCard({ partie, onFilterClient }) {
                         <Badge className={`text-[10px] px-1.5 py-0 border ${meta.badge}`}>
                             {getRoleLabel(partie.role)}
                         </Badge>
-                        {partie.client_id && (
-                            <button
-                                type="button"
-                                onClick={() => onFilterClient(partie.client_id)}
-                                title={`Client enregistré (${partie.client?.type === 'morale' ? 'personne morale' : 'personne physique'}) — voir ses autres dossiers`}
-                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0 rounded-full border bg-ink/5 text-ink border-ink/20 hover:bg-ink/10 transition-colors"
-                            >
-                                <UserCheck className="h-2.5 w-2.5" />
-                                Client
-                            </button>
-                        )}
+                        {partie.client_id && (() => {
+                            const statutMeta = STATUT_CLIENT_META[partie.client?.statut] ?? STATUT_CLIENT_META.prospect;
+                            return (
+                                <button
+                                    type="button"
+                                    onClick={() => onFilterClient(partie.client_id)}
+                                    title={`${statutMeta.label} enregistré (${partie.client?.type === 'morale' ? 'personne morale' : 'personne physique'}) — voir ses autres dossiers`}
+                                    className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0 rounded-full border transition-colors hover:opacity-80 ${statutMeta.badge}`}
+                                >
+                                    <UserCheck className="h-2.5 w-2.5" />
+                                    {statutMeta.label}
+                                </button>
+                            );
+                        })()}
                     </div>
                 </div>
             </div>
@@ -210,7 +220,7 @@ export default function RepertoireIndex({ parties, stats, roles, filters: init, 
                 </div>
 
                 {/* KPIs */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
                         <div className="flex items-center justify-between mb-1">
                             <span className="text-xs text-slate-500">Personnes enregistrées</span>
@@ -231,6 +241,13 @@ export default function RepertoireIndex({ parties, stats, roles, filters: init, 
                             <Briefcase className="h-4 w-4 text-slate-500" />
                         </div>
                         <div className="text-2xl font-semibold text-slate-600">{stats?.rolesDisctincts ?? 0}</div>
+                    </div>
+                    <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+                        <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-slate-500">Clients confirmés</span>
+                            <UserCheck className="h-4 w-4 text-success" />
+                        </div>
+                        <div className="text-2xl font-semibold text-success">{stats?.clientsParStatut?.client ?? 0}</div>
                     </div>
                 </div>
 

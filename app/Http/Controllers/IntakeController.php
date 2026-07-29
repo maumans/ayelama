@@ -93,7 +93,11 @@ class IntakeController extends Controller
             ->where(fn ($q) => $q->withRole('notaire')->orWhere('id', $demande->cree_par_id))
             ->get();
         foreach ($destinataires as $user) {
-            $user->notify(new NouvelleDemandeNotification($demande));
+            try {
+                $user->notify(new NouvelleDemandeNotification($demande));
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         return Inertia::render('Intake/Show', [

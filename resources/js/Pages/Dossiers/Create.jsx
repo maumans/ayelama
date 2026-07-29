@@ -660,7 +660,7 @@ export default function DossierCreate() {
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div className="space-y-1.5">
-                                                        <Label htmlFor="reviseur_id">Réviseur</Label>
+                                                        <Label htmlFor="reviseur_id">Certificateur</Label>
                                                         <select
                                                             id="reviseur_id"
                                                             value={reviseurId}
@@ -725,7 +725,12 @@ export default function DossierCreate() {
                                                             </GroupHeader>
                                                         )}
 
-                                                        {group.clientRole && (
+                                                        {/* group.fields.length > 1 exclut les groupes qui ne sont encore que la case à
+                                                            cocher "personne différente de…" (ger.est_different, etc.) — les autres
+                                                            champs, masqués tant qu'elle n'est pas cochée, sont filtrés de visibleFields
+                                                            en amont ; proposer un client à lier n'a de sens qu'une fois la section
+                                                            dépliée. */}
+                                                        {group.clientRole && group.fields.length > 1 && (
                                                             <div className="mb-3">
                                                                 <ClientPicker
                                                                     placeholder={`Rechercher un client existant (${group.name})…`}
@@ -941,7 +946,7 @@ export default function DossierCreate() {
                                 <RecapCard icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50" title="Intervenants" onEdit={() => setStep(1)}>
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                         <RecapPersonne person={notaireSelected} role="Notaire" color="bg-stone-600" />
-                                        <RecapPersonne person={reviseurSelected} role="Réviseur" color="bg-seal" />
+                                        <RecapPersonne person={reviseurSelected} role="Certificateur" color="bg-seal" />
                                         <RecapPersonne person={formalisteSelected} role="Formaliste" color="bg-ink" />
                                     </div>
                                 </RecapCard>
@@ -993,13 +998,13 @@ export default function DossierCreate() {
                                         <div className="flex flex-wrap gap-2">
                                             {autresValides.map((p, i) => (
                                                 <span key={`role-${i}`} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
-                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client)}</span>
+                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client) || 'Client sans nom'}</span>
                                                     <span className="text-slate-400">· {p.role}</span>
                                                 </span>
                                             ))}
                                             {dossierClientsDisponibles.map((p, i) => (
                                                 <span key={`dispo-${i}`} className="inline-flex items-center gap-1.5 text-xs bg-seal-light border border-seal/30 rounded-full px-3 py-1">
-                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client)}</span>
+                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client) || 'Client sans nom'}</span>
                                                     <span className="text-slate-400">· réutilisé ci-dessus</span>
                                                 </span>
                                             ))}

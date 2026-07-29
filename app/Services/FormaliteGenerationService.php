@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Dossier;
 use App\Models\Formalite;
-use App\Models\FormalitePiece;
 
 /**
  * Génère automatiquement les formalités administratives d'un dossier à partir des
@@ -62,10 +61,11 @@ class FormaliteGenerationService
 
             if ($formalite->wasRecentlyCreated) {
                 foreach ($bareme->pieces_requises ?? [] as $label) {
-                    FormalitePiece::create([
-                        'formalite_id' => $formalite->id,
-                        'label'        => $label,
-                        'est_fourni'   => false,
+                    $formalite->pieces()->create([
+                        'nom'        => $label,
+                        'categorie'  => 'piece_justificative',
+                        'est_requis' => true,
+                        'est_fourni' => false,
                     ]);
                 }
             }

@@ -59,7 +59,7 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
             <div className="flex items-center gap-2 rounded-lg border border-seal/30 bg-seal-light px-3 py-2 text-sm">
                 <Check className="h-3.5 w-3.5 text-seal-hover shrink-0" />
                 <span className="flex-1 min-w-0 truncate">
-                    <span className="font-medium text-slate-800">{clientDisplayName(linked)}</span>
+                    <span className="font-medium text-slate-800">{clientDisplayName(linked) || 'Client sans nom'}</span>
                     {clientSubtitle(linked) && <span className="text-slate-500"> · {clientSubtitle(linked)}</span>}
                 </span>
                 <button
@@ -87,7 +87,7 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
                             title="Réutiliser ce client du dossier"
                         >
                             <Users className="h-3 w-3" />
-                            {clientDisplayName(c)}
+                            {clientDisplayName(c) || 'Client sans nom'}
                         </button>
                     ))}
                 </div>
@@ -98,7 +98,7 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
                     type="text"
                     value={query}
                     onChange={e => { setQuery(e.target.value); setOpen(true); }}
-                    onFocus={() => setOpen(true)}
+                    onFocus={() => { setOpen(true); search(query); }}
                     placeholder={placeholder ?? 'Rechercher un client existant…'}
                     className="w-full h-8 text-sm rounded-lg border border-slate-200 bg-white pl-8 pr-2 focus:outline-none focus:ring-2 focus:ring-seal"
                 />
@@ -119,7 +119,7 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
                                 onClick={() => { onSelect(c); setOpen(false); setQuery(''); }}
                                 className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-slate-50 transition-colors"
                             >
-                                <span className="font-medium text-slate-800">{clientDisplayName(c)}</span>
+                                <span className="font-medium text-slate-800">{clientDisplayName(c) || 'Client sans nom'}</span>
                                 {clientSubtitle(c) && <span className="text-xs text-slate-400">{clientSubtitle(c)}</span>}
                             </button>
                         ))}

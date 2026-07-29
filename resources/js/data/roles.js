@@ -3,7 +3,7 @@
 export const ROLES = [
     { value: 'administrateur', label: 'Admin',      cls: 'bg-amber-50 text-amber-700 border-amber-200' },
     { value: 'notaire',        label: 'Notaire',    cls: 'bg-ink/5 text-ink border-ink/20' },
-    { value: 'reviseur',       label: 'Réviseur',   cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+    { value: 'reviseur',       label: 'Certificateur', cls: 'bg-purple-50 text-purple-700 border-purple-200' },
     { value: 'clerc',          label: 'Clerc',      cls: 'bg-blue-50 text-blue-700 border-blue-200' },
     { value: 'formaliste',     label: 'Formaliste', cls: 'bg-orange-50 text-orange-700 border-orange-200' },
     { value: 'comptable',      label: 'Comptable',  cls: 'bg-teal-50 text-teal-700 border-teal-200' },

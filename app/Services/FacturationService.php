@@ -85,14 +85,16 @@ class FacturationService
                     continue;
                 }
 
+                $quantite = $bareme->quantite_defaut ?? 1;
+
                 LigneFacture::create([
                     'facture_id'  => $facture->id,
                     'designation' => $this->formaterDesignation($bareme, $assiette),
-                    'quantite'    => 1,
+                    'quantite'    => $quantite,
                     'montant'     => $montant,
                 ]);
 
-                $total += $montant;
+                $total += $montant * $quantite;
             }
 
             // Mettre à jour le total
@@ -125,6 +127,8 @@ class FacturationService
                 continue;
             }
 
+            $quantite = $bareme->quantite_defaut ?? 1;
+
             $lignes[] = [
                 'organisme'   => $bareme->organisme,
                 'libelle'     => $bareme->libelle,
@@ -132,10 +136,12 @@ class FacturationService
                 'taux'        => $bareme->taux,
                 'montant_fixe' => $bareme->montant_fixe,
                 'base_calcul' => $bareme->base_calcul,
+                'quantite'    => $quantite,
                 'montant'     => $montant,
+                'total'       => $montant * $quantite,
             ];
 
-            $total += $montant;
+            $total += $montant * $quantite;
         }
 
         return [

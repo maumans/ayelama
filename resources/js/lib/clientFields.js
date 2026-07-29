@@ -93,18 +93,90 @@ export function mapClientToRepeatableItem(client, fieldIds) {
     return item;
 }
 
+// Se base sur `client.type` quand il est fiable, mais se rabat toujours sur les
+// champs réellement renseignés (physique ou morale) si `type` est absent/inattendu
+// ou si les champs habituels du type déclaré sont vides — pour ne jamais afficher
+// un client "lié" sans aucun nom visible, quelle qu'en soit la cause en amont.
 export function clientDisplayName(client) {
     if (!client) return '';
-    return client.type === 'physique'
-        ? [client.civilite, client.prenom_nom].filter(Boolean).join(' ')
-        : (client.denomination || '');
+    const nomPhysique = [client.civilite, client.prenom_nom].filter(Boolean).join(' ');
+    const nomMorale = client.denomination || '';
+    if (client.type === 'morale') return nomMorale || nomPhysique;
+    if (client.type === 'physique') return nomPhysique || nomMorale;
+    return nomPhysique || nomMorale;
 }
 
 export function clientSubtitle(client) {
     if (!client) return '';
-    return client.type === 'physique'
-        ? [client.piece_numero, client.telephone].filter(Boolean).join(' · ')
-        : [client.forme, client.rccm].filter(Boolean).join(' · ');
+    const subPhysique = [client.piece_numero, client.telephone].filter(Boolean).join(' · ');
+    const subMorale = [client.forme, client.rccm].filter(Boolean).join(' · ');
+    if (client.type === 'morale') return subMorale || subPhysique;
+    if (client.type === 'physique') return subPhysique || subMorale;
+    return subPhysique || subMorale;
+}
+
+// Miroir inverse de mapClientToPrefixedFields/mapClientToRepeatableItem : à partir
+// des valeurs déjà soumises pour UN rôle (préfixées ex. pp.civilite, ou aplaties
+// pour un item de bloc répétable ex. civilite), reconstruit un brouillon façon
+// Client pour pré-remplir ModalNouveauClient lors du rattachement d'une Demande
+// convertie en dossier (Demandes/Show.jsx). `roleValues` doit déjà être la portion
+// aplatie/résolue pour ce rôle (voir getPublicIntakeFields) — pas le `donnees`
+// complet du dossier. Retourne null si aucune donnée exploitable n'est trouvée.
+export function buildClientDraftFromDonnees(roleValues, roleFields) {
+    if (!roleFields?.length || !roleValues) return null;
+
+    const hasPrefix = roleFields[0].id.includes('.');
+    const prefix = hasPrefix ? roleFields[0].id.split('.')[0] : null;
+    const get = (suffix) => {
+        const key = hasPrefix ? `${prefix}.${suffix}` : suffix;
+        const v = roleValues[key];
+        return v === undefined || v === null || v === '' ? null : v;
+    };
+
+    // Seul ASSOCIE_SCHEMA a un vrai sélecteur "Personne physique/morale" — ailleurs,
+    // la civilité "Société" est le seul indice disponible ; à défaut, on suppose
+    // une personne physique (l'admin peut corriger le type dans la modale).
+    const civilite = get('civilite');
+    const isMorale = get('type_personne') === 'Personne morale' || civilite === 'Société';
+
+    let quartier = get('quartier');
+    let commune = get('commune');
+    let demeurantVille = get('demeurant_ville');
+    if (!quartier && !commune && !demeurantVille) {
+        // Schéma pas encore éclaté (adresse en texte libre) — tentative de découpage
+        // sur la convention "Quartier, Commune, Ville" utilisée dans tous les placeholders.
+        const adresseLibre = get('adresse') || get('domicile');
+        if (adresseLibre) {
+            const parts = adresseLibre.split(',').map(s => s.trim()).filter(Boolean);
+            [quartier, commune, demeurantVille] = parts;
+        }
+    }
+
+    const draft = {
+        type: isMorale ? 'morale' : 'physique',
+        civilite: isMorale ? '' : (civilite || ''),
+        prenom_nom: isMorale ? '' : (get('prenom_nom') || get('nom') || ''),
+        denomination: isMorale ? (get('prenom_nom') || get('nom') || '') : '',
+        ne_a: get('ne_a') || '',
+        date_naissance: get('date_naissance') || '',
+        nationalite: get('nationalite') || '',
+        situation_matrimoniale: get('situation_matrimoniale') || '',
+        regime_matrimonial: get('regime_matrimonial') || '',
+        piece_type: get('piece_type') || '',
+        piece_numero: get('piece_numero') || get('cni') || '',
+        piece_delivree_le: get('piece_delivree_le') || '',
+        piece_delivree_a: get('piece_delivree_a') || '',
+        piece_expire_le: get('piece_expire_le') || '',
+        quartier: quartier || '',
+        commune: commune || '',
+        demeurant_ville: demeurantVille || '',
+        pays: get('pays') || '',
+        telephone: get('telephone') || '',
+        email: get('email') || '',
+    };
+
+    const aDesDonnees = Object.entries(draft).some(([k, v]) => k !== 'type' && v);
+    return aDesDonnees ? draft : null;
 }
 
 // Construit les champs "Partie" (nom, cni, telephone, adresse, email) à partir soit

@@ -2,14 +2,13 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Document;
+use App\Models\DocumentFichier;
+use App\Models\DocumentVersion;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
-use App\Models\ModeleActe;
 use App\Models\RevisionPoint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class DocumentController extends Controller
 {
@@ -18,59 +17,43 @@ class DocumentController extends Controller
         $this->authorize('genererDocuments', $dossier);
 
         $data = $request->validate([
-            'nom'          => ['required', 'string', 'max:200'],
-            'type_document'=> ['required', 'in:acte_principal,annexe,procedure,lettre,recepisse'],
-            'version'      => ['nullable', 'string', 'max:10'],
-            'fichier'      => ['nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt,xlsx,xls'],
+            'nom'       => ['required', 'string', 'max:200'],
+            'categorie' => ['required', 'in:acte_principal,annexe,procedure,lettre,recepisse'],
+            'fichier'   => ['nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt,xlsx,xls'],
         ]);
 
-        $cheminFichier = null;
-        if ($request->hasFile('fichier')) {
-            $path = $request->file('fichier')->storeAs(
-                'documents/' . $dossier->reference,
-                Str::slug($data['nom']) . '_v' . ($data['version'] ?? '1') . '.' . $request->file('fichier')->extension(),
-                'public'
-            );
-            $cheminFichier = $path;
-        }
-
-        $dossier->documents()->create([
+        $document = $dossier->documents()->create([
             'nom'           => $data['nom'],
-            'type_document' => $data['type_document'],
-            'version'       => $data['version'] ?? '1.0',
+            'categorie'     => $data['categorie'],
             'statut'        => 'a_editer',
-            'chemin_fichier'=> $cheminFichier,
+            'created_by_id' => auth()->id(),
         ]);
+
+        if ($request->hasFile('fichier')) {
+            $document->nouvelleVersion($request->file('fichier'), 'documents/' . $dossier->reference);
+        }
 
         return back()->with('success', 'Document ajouté.');
     }
 
-    public function update(Request $request, Document $document)
+    public function update(Request $request, DocumentFichier $document)
     {
-        $this->authorize('genererDocuments', $document->dossier);
+        $this->authorize('genererDocuments', $document->documentable);
+        abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
 
         $data = $request->validate([
-            'statut'        => ['sometimes', 'in:a_editer,edite'],
-            'nom'           => ['sometimes', 'string', 'max:200'],
-            'version'       => ['sometimes', 'string', 'max:10'],
-            'fichier'       => ['sometimes', 'nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt,xlsx,xls'],
+            'statut'  => ['sometimes', 'in:a_editer,edite'],
+            'nom'     => ['sometimes', 'string', 'max:200'],
+            'fichier' => ['sometimes', 'nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt,xlsx,xls'],
         ]);
 
         if ($request->hasFile('fichier')) {
-            if ($document->chemin_fichier) {
-                Storage::disk('public')->delete($document->chemin_fichier);
-            }
-            $dossierRef = $document->dossier->reference;
-            $path = $request->file('fichier')->storeAs(
-                'documents/' . $dossierRef,
-                Str::slug($document->nom) . '_v' . ($data['version'] ?? $document->version) . '.' . $request->file('fichier')->extension(),
-                'public'
-            );
-            $data['chemin_fichier'] = $path;
+            $document->nouvelleVersion($request->file('fichier'), 'documents/' . $document->documentable->reference);
+            unset($data['fichier']);
         }
 
         if (isset($data['statut']) && $data['statut'] === 'edite') {
-            $data += ['edite_at' => now(), 'edite_par' => auth()->id()];
+            $data += ['edite_at' => now(), 'edite_par_id' => auth()->id()];
         }
 
         $document->update($data);
@@ -78,43 +61,17 @@ class DocumentController extends Controller
         return back()->with('success', 'Document mis à jour.');
     }
 
-    public function regenerer(Document $document, \App\Services\ActesGeneratorService $generatorService)
+    public function regenerer(DocumentFichier $document, \App\Services\ActesGeneratorService $generatorService)
     {
-        $dossier = $document->dossier;
+        $dossier = $document->documentable;
         $this->authorize('genererDocuments', $dossier);
-
-        $modele = ModeleActe::where('type_acte_id', $dossier->type_acte_id)
-            ->where('nom', $document->nom)
-            ->where('est_actif', true)
-            ->first();
-
-        if (! $modele) {
-            return back()->with('error', "Aucun modèle actif trouvé pour « {$document->nom} ».");
-        }
+        abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
 
         $dossier->load('questionnaire');
 
-        // Supprime l'ancien fichier généré
-        if ($document->chemin_fichier) {
-            Storage::disk('public')->delete($document->chemin_fichier);
+        if (! $generatorService->regenererDocument($document)) {
+            return back()->with('error', "Aucun modèle actif trouvé pour « {$document->nom} ».");
         }
-
-        // Le contenu change : la vérification déjà enregistrée pour ce document n'est
-        // plus fiable, on force une nouvelle évaluation en révision.
-        RevisionPoint::where('point_id', (string) $document->id)
-            ->whereHas('revision', fn ($q) => $q->where('dossier_id', $dossier->id))
-            ->delete();
-
-        $chemin = $generatorService->genererDocument(
-            $dossier,
-            $modele->chemin_fichier,
-            Str::slug($document->nom)
-        );
-
-        $document->update([
-            'chemin_fichier' => $chemin,
-            'statut'         => 'a_editer',
-        ]);
 
         JournalActivite::enregistrer(
             $dossier,
@@ -126,52 +83,140 @@ class DocumentController extends Controller
         return back()->with('success', "« {$document->nom} » régénéré avec succès.");
     }
 
-    public function destroy(Document $document)
+    public function destroy(DocumentFichier $document)
     {
-        $this->authorize('genererDocuments', $document->dossier);
-
-        if ($document->chemin_fichier) {
-            Storage::disk('public')->delete($document->chemin_fichier);
-        }
+        $this->authorize('genererDocuments', $document->dossierGouvernant());
+        abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
 
         RevisionPoint::where('point_id', (string) $document->id)
-            ->whereHas('revision', fn ($q) => $q->where('dossier_id', $document->dossier_id))
+            ->whereHas('revision', fn ($q) => $q->where('dossier_id', $document->documentable_id))
             ->delete();
 
-        $document->delete();
+        $document->supprimerAvecFichiers();
 
         return back()->with('success', 'Document supprimé.');
     }
 
-    public function download(Document $document)
+    public function download(DocumentFichier $document)
     {
-        $this->authorize('view', $document->dossier);
+        $this->authorize('view', $document->dossierGouvernant());
 
-        if (!$document->chemin_fichier || !Storage::disk('public')->exists($document->chemin_fichier)) {
+        $chemin = $document->versionActuelle?->chemin_fichier;
+        if (!$chemin || !Storage::disk('public')->exists($chemin)) {
             abort(404, 'Fichier introuvable.');
         }
 
-        $ext      = pathinfo($document->chemin_fichier, PATHINFO_EXTENSION);
+        $ext      = pathinfo($chemin, PATHINFO_EXTENSION);
         $filename = $document->nom . ($ext ? '.' . $ext : '');
 
-        return Storage::disk('public')->download($document->chemin_fichier, $filename);
+        return Storage::disk('public')->download($chemin, $filename);
     }
 
-    public function preview(Document $document)
+    public function preview(DocumentFichier $document)
     {
-        $this->authorize('view', $document->dossier);
+        $this->authorize('view', $document->dossierGouvernant());
 
-        if (!$document->chemin_fichier || !Storage::disk('public')->exists($document->chemin_fichier)) {
+        $chemin = $document->versionActuelle?->chemin_fichier;
+        if (!$chemin || !Storage::disk('public')->exists($chemin)) {
             abort(404, 'Fichier introuvable.');
         }
 
-        $path     = Storage::disk('public')->path($document->chemin_fichier);
+        $path     = Storage::disk('public')->path($chemin);
         $mime     = mime_content_type($path) ?: 'application/octet-stream';
-        $filename = basename($document->chemin_fichier);
+        $filename = basename($chemin);
 
         return response()->file($path, [
             'Content-Type'        => $mime,
             'Content-Disposition' => "inline; filename=\"{$filename}\"",
         ]);
+    }
+
+    public function versions(DocumentFichier $document)
+    {
+        $this->authorize('view', $document->dossierGouvernant());
+
+        return response()->json([
+            'versions' => $document->versions()
+                ->with('creePar:id,name')
+                ->get()
+                ->reverse()
+                ->values()
+                ->map(fn (DocumentVersion $v) => [
+                    'id'            => $v->id,
+                    'numero'        => $v->numero,
+                    'est_actuelle'  => $v->id === $document->version_actuelle_id,
+                    'nom_original'  => $v->nom_original,
+                    'taille_octets' => $v->taille_octets,
+                    'source'        => $v->source,
+                    'cree_par'      => $v->creePar?->name,
+                    'created_at'    => $v->created_at?->format('d/m/Y H:i'),
+                    'url_download'  => route('documents.versions.telecharger', $v),
+                ]),
+        ]);
+    }
+
+    public function telechargerVersion(DocumentVersion $version)
+    {
+        $this->authorize('view', $version->documentFichier->dossierGouvernant());
+
+        if (!$version->chemin_fichier || !Storage::disk('public')->exists($version->chemin_fichier)) {
+            abort(404, 'Fichier introuvable.');
+        }
+
+        $ext      = pathinfo($version->chemin_fichier, PATHINFO_EXTENSION);
+        $filename = $version->documentFichier->nom . '_v' . $version->numero . ($ext ? '.' . $ext : '');
+
+        return Storage::disk('public')->download($version->chemin_fichier, $filename);
+    }
+
+    /**
+     * Dépôt de la version finale signée/cachetée (retour du circuit papier réel :
+     * impression → envoi → signature/cachet → retour) — verrouille définitivement le
+     * document (voir abort_if(est_signe_cachete) dans update/regenerer/destroy/restaurerVersion
+     * ci-dessus, qui empêchent toute modification ultérieure même via appel direct à l'API).
+     */
+    public function televerserSigne(Request $request, DocumentFichier $document)
+    {
+        $dossier = $document->documentable;
+        $this->authorize('cloturerDocuments', $dossier);
+        abort_if($document->est_signe_cachete, 403, 'Document déjà signé/cacheté — verrouillé, non modifiable.');
+
+        $request->validate([
+            'fichier' => ['required', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png,docx'],
+        ]);
+
+        $document->nouvelleVersion($request->file('fichier'), 'documents/' . $dossier->reference, ['source' => 'signe_cachete']);
+        $document->update([
+            'est_signe_cachete'    => true,
+            'signe_cachete_at'     => now(),
+            'signe_cachete_par_id' => auth()->id(),
+        ]);
+
+        JournalActivite::enregistrer(
+            $dossier,
+            "Document « {$document->nom} » déposé signé/cacheté (verrouillé)",
+            'etape',
+            []
+        );
+
+        return back()->with('success', "« {$document->nom} » enregistré comme signé/cacheté — verrouillé.");
+    }
+
+    public function restaurerVersion(DocumentVersion $version)
+    {
+        $document = $version->documentFichier;
+        $this->authorize('genererDocuments', $document->dossierGouvernant());
+        abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
+
+        $document->restaurerVersion($version);
+
+        JournalActivite::enregistrer(
+            $document->dossierGouvernant(),
+            "Document « {$document->nom} » restauré à la version {$version->numero}",
+            'etape',
+            []
+        );
+
+        return back()->with('success', "Version {$version->numero} restaurée.");
     }
 }

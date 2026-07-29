@@ -60,9 +60,11 @@ class HandleInertiaRequests extends Middleware
         $unreadNotificationsCount = 0;
 
         if ($user) {
-            $urgentCount   = Dossier::echeanceUrgente()->count();
-            $revisionCount = Dossier::enRevision()->count();
-            $factureImpayeCount = Facture::with('paiements')->get()
+            $urgentCount   = Dossier::visiblePar($user)->echeanceUrgente()->count();
+            $revisionCount = Dossier::visiblePar($user)->enRevision()->count();
+            $factureImpayeCount = Facture::with('paiements')
+                ->whereHas('dossier', fn ($d) => $d->visiblePar($user))
+                ->get()
                 ->filter(fn ($f) => $f->soldeRestant() > 0)
                 ->count();
             $unreadNotificationsCount = $user->unreadNotifications()->count();

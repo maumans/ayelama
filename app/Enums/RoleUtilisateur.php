@@ -15,7 +15,7 @@ enum RoleUtilisateur: string
     {
         return match($this) {
             self::Clerc          => 'Clerc / Rédacteur',
-            self::Reviseur       => 'Réviseur / Responsable',
+            self::Reviseur       => 'Certificateur / Responsable',
             self::Notaire        => 'Notaire (Maître)',
             self::Formaliste     => 'Formaliste',
             self::Comptable      => 'Comptable',

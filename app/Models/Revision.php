@@ -49,7 +49,10 @@ class Revision extends Model
         $this->loadMissing(['points', 'dossier.documents']);
         $idsDocuments = $this->dossier->documents->pluck('id')->map(fn ($id) => (string) $id);
 
-        return $this->points->whereIn('point_id', $idsDocuments);
+        // Un point périmé (document régénéré depuis, ex. questionnaire modifié) n'est
+        // plus fiable — le certificateur doit le réexaminer, donc il ne compte pas
+        // comme évalué même si son etat/commentaire est conservé pour affichage.
+        return $this->points->whereIn('point_id', $idsDocuments)->where('perime', false);
     }
 
     public function nombreConformes(): int
@@ -67,18 +70,28 @@ class Revision extends Model
         return $this->pointsValides()->whereNotNull('etat')->count();
     }
 
-    public function estValidable(): bool
+    public function tousEvalues(): bool
     {
         $totalDocuments = $this->dossier->documents()->count();
 
-        return $totalDocuments > 0
-            && $this->nombreNonConformes() === 0
-            && $this->nombreEvalues() === $totalDocuments;
+        return $totalDocuments > 0 && $this->nombreEvalues() === $totalDocuments;
+    }
+
+    public function estValidable(): bool
+    {
+        return $this->tousEvalues() && $this->nombreNonConformes() === 0;
     }
 
     public function resetPoints(): void
     {
-        $this->points()->where('etat', 'a_corriger')->delete();
+        // Nouveau round de certification : les points encore « à corriger » (jamais
+        // régénérés depuis) et les points périmés (déjà régénérés, en attente de ce
+        // nouveau round) repartent tous à zéro. Les points « ok » non périmés restent
+        // — un document non retouché depuis la dernière certification n'a pas besoin
+        // d'être réévalué.
+        $this->points()->where(function ($q) {
+            $q->where('etat', 'a_corriger')->orWhere('perime', true);
+        })->delete();
         $this->update([
             'statut'     => StatutRevision::EnAttente,
             'commentaire' => null,

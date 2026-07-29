@@ -9,13 +9,7 @@ class Partie extends Model
     protected $fillable = [
         'dossier_id', 'client_id', 'nom', 'role', 'cni',
         'telephone', 'adresse', 'email',
-        'photo_chemin', 'pieces',
     ];
-
-    protected function casts(): array
-    {
-        return ['pieces' => 'array'];
-    }
 
     public function dossier()
     {
@@ -25,6 +19,11 @@ class Partie extends Model
     public function client()
     {
         return $this->belongsTo(Client::class);
+    }
+
+    public function pieces()
+    {
+        return $this->morphMany(DocumentFichier::class, 'documentable')->orderBy('id');
     }
 
     public function getInitialesAttribute(): string

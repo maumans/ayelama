@@ -8,6 +8,7 @@ use App\Models\Demande;
 use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
+use App\Notifications\DemandeConvertieNotification;
 use App\Services\ActesGeneratorService;
 use App\Services\FacturationService;
 use App\Services\FormaliteGenerationService;
@@ -174,6 +175,8 @@ class DemandeController extends Controller
             'traitee_at'     => now(),
             'dossier_id'     => $dossier->id,
         ]);
+
+        $demande->creePar?->notify(new DemandeConvertieNotification($demande, $dossier));
 
         return redirect()->route('dossiers.show', $dossier->reference)
             ->with('success', "Dossier {$dossier->reference} créé à partir de la demande.");

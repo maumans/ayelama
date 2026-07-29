@@ -195,14 +195,13 @@ class DossierController extends Controller
                     Str::slug($modele->nom)
                 );
 
-                \App\Models\Document::create([
-                    'dossier_id'     => $dossier->id,
-                    'nom'            => $modele->nom,
-                    'type_document'  => $modele->type_document,
-                    'statut'         => 'a_editer',
-                    'chemin_fichier' => $chemin,
-                    'version'        => $modele->version ?? 'v1',
+                $document = $dossier->documents()->create([
+                    'nom'        => $modele->nom,
+                    'categorie'  => $modele->type_document,
+                    'statut'     => 'a_editer',
+                    'est_requis' => $modele->obligatoire_cloture,
                 ]);
+                $document->nouvelleVersion($chemin, 'documents/' . $dossier->reference, ['source' => 'genere']);
             }
 
             // Génération automatique de la facture (note de frais)
@@ -234,11 +233,11 @@ class DossierController extends Controller
 
         $dossier->load([
             'typeActe', 'redacteur', 'reviseur', 'notaire', 'formaliste',
-            'questionnaire', 'documents', 'revision.reviseur', 'revision.points',
-            'formalites.pieces', 'formalites.dependDe', 'formalites.dependants',
-            'parties.client', 'journal.user',
+            'questionnaire', 'documents.versionActuelle', 'documents.signeCachetePar', 'revision.reviseur', 'revision.points',
+            'formalites.pieces.versionActuelle', 'formalites.dependDe', 'formalites.dependants',
+            'parties.client', 'parties.pieces.versionActuelle', 'journal.user',
             'factures.lignes', 'factures.paiements.recu', 'factures.paiements.enregistrePar',
-            'courriers.redacteur',
+            'courriers.redacteur', 'courriers.signeCachetePar',
         ]);
 
         return Inertia::render('Dossiers/Show', [
@@ -250,6 +249,7 @@ class DossierController extends Controller
                 'gererFormalites' => auth()->user()->can('gererFormalites', $dossier),
                 'gererFacturation' => auth()->user()->can('gererFacturation', $dossier),
                 'genererDocuments' => auth()->user()->can('genererDocuments', $dossier),
+                'cloturerDocuments' => auth()->user()->can('cloturerDocuments', $dossier),
                 'genererCourriers' => auth()->user()->can('genererCourriers', $dossier),
                 'reassigner'      => auth()->user()->can('reassigner', $dossier),
                 'delete'          => auth()->user()->can('delete', $dossier),
@@ -279,7 +279,7 @@ class DossierController extends Controller
         return back()->with('success', 'Dossier mis à jour.');
     }
 
-    public function updateQuestionnaire(Request $request, Dossier $dossier)
+    public function updateQuestionnaire(Request $request, Dossier $dossier, \App\Services\ActesGeneratorService $generatorService)
     {
         $this->authorize('update', $dossier);
 
@@ -306,9 +306,29 @@ class DossierController extends Controller
             }
         });
 
-        JournalActivite::enregistrer($dossier, 'Questionnaire mis à jour', 'modification', []);
+        // Les actes déjà générés référencent l'ancien contenu du questionnaire — on les
+        // régénère depuis leur modèle pour qu'ils reflètent les réponses à jour. Les
+        // documents verrouillés (signés/cachetés) ou sans modèle actif correspondant sont
+        // ignorés silencieusement, comme le fait déjà genererDocuments() pour les cas non
+        // applicables.
+        $dossier->load(['questionnaire', 'documents']);
+        $regeneres = 0;
+        foreach ($dossier->documents as $document) {
+            if ($document->est_signe_cachete) {
+                continue;
+            }
+            if ($generatorService->regenererDocument($document)) {
+                $regeneres++;
+            }
+        }
 
-        return back()->with('success', 'Questionnaire mis à jour.');
+        $message = $regeneres > 0
+            ? "Questionnaire mis à jour — {$regeneres} document(s) régénéré(s) automatiquement."
+            : 'Questionnaire mis à jour.';
+
+        JournalActivite::enregistrer($dossier, $message, 'modification', []);
+
+        return back()->with('success', $message);
     }
 
     public function destroy(Dossier $dossier)
@@ -362,14 +382,13 @@ class DossierController extends Controller
                 Str::slug($modele->nom)
             );
 
-            \App\Models\Document::create([
-                'dossier_id'     => $dossier->id,
-                'nom'            => $modele->nom,
-                'type_document'  => $modele->type_document,
-                'statut'         => 'a_editer',
-                'chemin_fichier' => $chemin,
-                'version'        => $modele->version ?? 'v1',
+            $document = $dossier->documents()->create([
+                'nom'        => $modele->nom,
+                'categorie'  => $modele->type_document,
+                'statut'     => 'a_editer',
+                'est_requis' => $modele->obligatoire_cloture,
             ]);
+            $document->nouvelleVersion($chemin, 'documents/' . $dossier->reference, ['source' => 'genere']);
 
             $count++;
         }
@@ -407,6 +426,9 @@ class DossierController extends Controller
             'reference'  => $d->reference,
             'objet'      => $d->objet,
             'etape'      => ['value' => $d->etape->value, 'label' => $d->etape->label()],
+            'etapeSuivante' => $d->etape->suivante()
+                ? ['value' => $d->etape->suivante()->value, 'label' => $d->etape->suivante()->label()]
+                : null,
             'typeActe'   => $d->typeActe ? ['label' => $d->typeActe->label, 'categorie' => $d->typeActe->categorie?->value, 'code' => $d->typeActe->code] : null,
             'redacteur'  => $d->redacteur ? ['name' => $d->redacteur->name, 'initiales' => $d->redacteur->initiales] : null,
             'notaire'    => $d->notaire   ? ['name' => $d->notaire->name,   'initiales' => $d->notaire->initiales]   : null,
@@ -419,6 +441,33 @@ class DossierController extends Controller
         ];
     }
 
+    /**
+     * Sérialisation partagée d'un DocumentFichier — utilisée pour les documents du
+     * dossier et les pièces des parties (les pièces de formalité ont leur propre
+     * mapping dans Formalite::versArray(), au même format).
+     */
+    private function documentFichierToArray(\App\Models\DocumentFichier $doc): array
+    {
+        return [
+            'id'             => $doc->id,
+            'nom'            => $doc->nom,
+            'categorie'      => $doc->categorie,
+            'statut'         => $doc->statut,
+            'est_requis'     => (bool) $doc->est_requis,
+            'est_fourni'     => (bool) $doc->est_fourni,
+            'chemin_fichier' => $doc->versionActuelle?->chemin_fichier,
+            'has_file'       => (bool) $doc->versionActuelle,
+            'version'        => $doc->versionActuelle?->numero,
+            'est_signe_cachete' => (bool) $doc->est_signe_cachete,
+            'signe_cachete_at'  => $doc->signe_cachete_at?->format('d/m/Y H:i'),
+            'signe_cachete_par' => $doc->signeCachetePar?->name,
+            'url_download'      => route('documents.download', $doc),
+            'url_preview'       => route('documents.preview', $doc),
+            'url_versions'      => route('documents.versions', $doc),
+            'url_televerser_signe' => route('documents.televerser_signe', $doc),
+        ];
+    }
+
     private function dossierDetailToArray(Dossier $d): array
     {
         return [
@@ -427,17 +476,7 @@ class DossierController extends Controller
             'formaliste'  => $d->formaliste ? ['id' => $d->formaliste->id, 'name' => $d->formaliste->name, 'initiales' => $d->formaliste->initiales] : null,
             'etapeOrdre'  => $d->etapeOrdre(),
             'questionnaire' => $d->questionnaire?->donnees,
-            'documents'   => $d->documents->map(fn ($doc) => [
-                'id'             => $doc->id,
-                'nom'            => $doc->nom,
-                'type_document'  => $doc->type_document,
-                'version'        => $doc->version,
-                'statut'         => $doc->statut,
-                'chemin_fichier' => $doc->chemin_fichier,
-                'has_file'       => (bool) $doc->chemin_fichier,
-                'url_download'   => route('documents.download', $doc),
-                'url_preview'    => route('documents.preview', $doc),
-            ]),
+            'documents'   => $d->documents->map(fn ($doc) => $this->documentFichierToArray($doc)),
             'revision'    => $d->revision ? [
                 'id'         => $d->revision->id,
                 'statut'     => $d->revision->statut?->value,
@@ -447,6 +486,7 @@ class DossierController extends Controller
                     'point_id'    => $p->point_id,
                     'etat'        => $p->etat,
                     'commentaire' => $p->commentaire,
+                    'perime'      => (bool) $p->perime,
                 ]),
                 'estValidable' => $d->revision->estValidable(),
             ] : null,
@@ -475,6 +515,11 @@ class DossierController extends Controller
                     'forme'        => $p->client->forme,
                     'rccm'         => $p->client->rccm,
                 ] : null,
+                'photo'     => ($photo = $p->pieces->firstWhere('categorie', 'photo'))
+                    ? $this->documentFichierToArray($photo)
+                    : null,
+                'pieces'    => $p->pieces->where('categorie', '!=', 'photo')->values()
+                    ->map(fn ($doc) => $this->documentFichierToArray($doc)),
             ]),
             'journal' => $d->journal->map(fn ($j) => [
                 'id'         => $j->id,
@@ -495,8 +540,13 @@ class DossierController extends Controller
                 'redacteur'      => $c->redacteur?->name,
                 'chemin_fichier' => $c->chemin_fichier,
                 'has_file'       => (bool) $c->chemin_fichier,
-                'url_download'   => $c->chemin_fichier ? route('courriers.download', $c) : null,
-                'url_preview'    => $c->chemin_fichier ? route('courriers.preview', $c) : null,
+                'est_requis'        => (bool) $c->est_requis,
+                'est_signe_cachete' => (bool) $c->est_signe_cachete,
+                'signe_cachete_at'  => $c->signe_cachete_at?->format('d/m/Y H:i'),
+                'signe_cachete_par' => $c->signeCachetePar?->name,
+                'url_download'      => $c->chemin_fichier ? route('courriers.download', $c) : null,
+                'url_preview'       => $c->chemin_fichier ? route('courriers.preview', $c) : null,
+                'url_televerser_signe' => route('courriers.televerser_signe', $c),
             ]),
             'courrierModelesApplicables' => $this->courrierModelesApplicables($d),
         ];

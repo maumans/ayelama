@@ -112,6 +112,7 @@ class CourrierController extends Controller
     public function update(Request $request, Courrier $courrier)
     {
         $this->authorize('update', $courrier);
+        abort_if($courrier->est_signe_cachete, 403, 'Courrier verrouillé : déjà signé/cacheté, non modifiable.');
 
         $data = $request->validate([
             'destinataire' => ['sometimes', 'string', 'max:300'],
@@ -138,6 +139,7 @@ class CourrierController extends Controller
     public function destroy(Courrier $courrier)
     {
         $this->authorize('delete', $courrier);
+        abort_if($courrier->est_signe_cachete, 403, 'Courrier verrouillé : déjà signé/cacheté, non modifiable.');
 
         $courrier->delete();
 
@@ -150,6 +152,12 @@ class CourrierController extends Controller
 
         $data   = $request->validate(['modele_courrier_id' => ['required', 'integer', 'exists:modeles_courriers,id']]);
         $modele = ModeleCourrier::actif()->findOrFail($data['modele_courrier_id']);
+
+        $dernier = Courrier::where('dossier_id', $dossier->id)
+            ->where('objet', $modele->nom)
+            ->latest('id')
+            ->first();
+        abort_if($dernier?->est_signe_cachete, 403, 'Ce courrier est déjà signé/cacheté — verrouillé, non régénérable.');
 
         $dossier->load('questionnaire');
 
@@ -168,6 +176,7 @@ class CourrierController extends Controller
             'type'           => 'transmission',
             'statut'         => 'brouillon',
             'chemin_fichier' => $chemin,
+            'est_requis'     => $modele->obligatoire_cloture,
         ]);
 
         JournalActivite::enregistrer($dossier, "Courrier « {$modele->nom} » généré", 'expedition', []);
@@ -187,6 +196,51 @@ class CourrierController extends Controller
         $filename = $courrier->objet . ($ext ? '.' . $ext : '');
 
         return Storage::disk('public')->download($courrier->chemin_fichier, $filename);
+    }
+
+    /**
+     * Dépôt de la version finale signée/cachetée d'un courrier obligatoire — même
+     * principe que DocumentController::televerserSigne(), mais Courrier n'a pas
+     * d'historique de versions (différence assumée avec les documents, voir plan
+     * GED/Clôture) : le fichier précédent est simplement remplacé, pas conservé.
+     */
+    public function televerserSigne(Request $request, Courrier $courrier)
+    {
+        $dossier = $courrier->dossier;
+        $this->authorize('cloturerDocuments', $dossier);
+        abort_if($courrier->est_signe_cachete, 403, 'Courrier déjà signé/cacheté — verrouillé, non modifiable.');
+
+        $request->validate([
+            'fichier' => ['required', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png,docx'],
+        ]);
+
+        if ($courrier->chemin_fichier) {
+            Storage::disk('public')->delete($courrier->chemin_fichier);
+        }
+
+        $chemin = $request->file('fichier')->storeAs(
+            'documents/' . $dossier->reference,
+            Str::slug($courrier->objet) . '_signe.' . $request->file('fichier')->extension(),
+            'public'
+        );
+
+        $courrier->update([
+            'chemin_fichier'       => $chemin,
+            'statut'               => 'envoye',
+            'envoye_at'            => $courrier->envoye_at ?? now(),
+            'est_signe_cachete'    => true,
+            'signe_cachete_at'     => now(),
+            'signe_cachete_par_id' => Auth::id(),
+        ]);
+
+        JournalActivite::enregistrer(
+            $dossier,
+            "Courrier « {$courrier->objet} » déposé signé/cacheté (verrouillé)",
+            'expedition',
+            []
+        );
+
+        return back()->with('success', "« {$courrier->objet} » enregistré comme signé/cacheté — verrouillé.");
     }
 
     public function preview(Courrier $courrier)

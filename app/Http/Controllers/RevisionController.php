@@ -115,6 +115,7 @@ class RevisionController extends Controller
                 'points'       => $dossier->revision->points->keyBy('point_id')->map(fn ($p) => [
                     'etat'        => $p->etat,
                     'commentaire' => $p->commentaire,
+                    'perime'      => (bool) $p->perime,
                 ]),
                 'estValidable' => $dossier->revision->estValidable(),
             ] : null,
@@ -148,15 +149,18 @@ class RevisionController extends Controller
 
         foreach ($points as $pointId => $data) {
             if (($data['etat'] ?? null) === null) continue;
+            // perime => false : un nouveau verdict vient d'être saisi sur ce document (qu'il
+            // ait été régénéré depuis ou non) — il redevient fiable et compte à nouveau comme
+            // évalué (voir Revision::pointsValides()).
             RevisionPoint::updateOrCreate(
                 ['revision_id' => $revision->id, 'point_id' => $pointId],
-                ['etat' => $data['etat'], 'commentaire' => $data['commentaire'] ?? null]
+                ['etat' => $data['etat'], 'commentaire' => $data['commentaire'] ?? null, 'perime' => false]
             );
         }
 
         $revision->update(['statut' => \App\Enums\StatutRevision::EnCours]);
 
-        return back()->with('success', 'Grille de révision sauvegardée.');
+        return back()->with('success', 'Grille de certification sauvegardée.');
     }
 
     public function valider(Dossier $dossier)
@@ -169,7 +173,7 @@ class RevisionController extends Controller
         $this->stepService->avancer($dossier, auth()->user());
 
         return redirect()->route('dossiers.show', $dossier->reference)
-            ->with('success', 'Révision validée — dossier transmis pour signature.');
+            ->with('success', 'Certification validée — dossier transmis pour signature.');
     }
 
     public function renvoyer(Request $request, Dossier $dossier)

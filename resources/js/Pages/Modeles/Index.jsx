@@ -3,11 +3,11 @@ import { Head, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     FileText, Plus, Search, Trash2, Copy,
-    CheckCircle2, XCircle, X, LayoutGrid, List,
+    CheckCircle2, XCircle, X, LayoutGrid, List, AlertTriangle,
     Pencil, ClipboardCopy, Check, ChevronDown, ChevronUp,
     ArrowUpDown, FileCheck, Paperclip, PenLine, Mail, Receipt,
     BookOpen, ShieldCheck, ClipboardList, Fingerprint,
-    Newspaper, Building2, Calculator, LayoutList,
+    Newspaper, Building2, Calculator, LayoutList, Lock,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -104,13 +104,14 @@ import { useForm } from '@inertiajs/react';
 
 function ModalModele({ open, onClose, typesActes, modele = null }) {
     const isEdit = !!modele;
-    const { data, setData, post, processing, errors, reset, clearErrors } = useForm({
-        nom:            '',
-        type_acte_id:   '',
-        type_document:  'acte_principal',
-        version:        '1.0',
-        fichier:        null,
-        chemin_fichier: '',
+    const { data, setData, post, patch, processing, errors, reset, clearErrors } = useForm({
+        nom:                 '',
+        type_acte_id:        '',
+        type_document:       'acte_principal',
+        version:             '1.0',
+        fichier:             null,
+        chemin_fichier:      '',
+        obligatoire_cloture: false,
     });
 
     // sync si modele change (ouverture édition)
@@ -119,12 +120,13 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
             clearErrors();
             if (modele) {
                 setData({
-                    nom:            modele.nom,
-                    type_acte_id:   String(modele.type_acte_id),
-                    type_document:  modele.type_document,
-                    version:        modele.version,
-                    fichier:        null,
-                    chemin_fichier: modele.chemin_fichier,
+                    nom:                 modele.nom,
+                    type_acte_id:        String(modele.type_acte_id),
+                    type_document:       modele.type_document,
+                    version:             modele.version,
+                    fichier:             null,
+                    chemin_fichier:      modele.chemin_fichier,
+                    obligatoire_cloture: !!modele.obligatoire_cloture,
                 });
             } else {
                 reset();
@@ -133,15 +135,15 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
     }, [open, modele]);
 
     const submit = () => {
-        const opts = { onSuccess: () => { onClose(); reset(); } };
+        // patch()/post() du formulaire (pas le routeur global) : lie correctement
+        // errors/processing à ce useForm — sinon un échec (fichier invalide, validation…)
+        // reste totalement silencieux, sans message ni indicateur de chargement.
+        // Inertia gère lui-même la conversion PATCH+fichier en POST + _method côté client.
+        const opts = { forceFormData: true, onSuccess: () => { onClose(); reset(); }, onError: notifyValidationError };
         if (isEdit) {
-            // Pour uploader un fichier en PATCH avec Laravel + Inertia
-            router.post(`/modeles/${modele.id}`, {
-                _method: 'patch',
-                ...data
-            }, { ...opts, forceFormData: true });
+            patch(`/modeles/${modele.id}`, opts);
         } else {
-            post('/modeles', { ...opts, forceFormData: true });
+            post('/modeles', opts);
         }
     };
 
@@ -213,6 +215,24 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
                             {errors.chemin_fichier && <p className="text-xs text-danger-text">{errors.chemin_fichier}</p>}
                         </div>
                     </div>
+
+                    <label className="flex items-start gap-2.5 rounded-md border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                        <Checkbox
+                            checked={data.obligatoire_cloture}
+                            onCheckedChange={v => setData('obligatoire_cloture', !!v)}
+                            className="mt-0.5"
+                        />
+                        <span>
+                            <span className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                                <Lock className="h-3.5 w-3.5 text-slate-400" />
+                                Obligatoire à la clôture
+                            </span>
+                            <span className="block text-xs text-slate-400 mt-0.5">
+                                Les documents générés depuis ce modèle devront avoir leur version signée/cachetée
+                                déposée avant que le dossier puisse être clôturé.
+                            </span>
+                        </span>
+                    </label>
                 </div>
 
                 <DialogFooter>
@@ -230,7 +250,7 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
 
 function ModalModeleCourrier({ open, onClose, typesActes, categories, modele = null }) {
     const isEdit = !!modele;
-    const { data, setData, post, processing, errors, reset, clearErrors } = useForm({
+    const { data, setData, post, patch, processing, errors, reset, clearErrors } = useForm({
         nom:              '',
         type_document:    'lettre',
         version:          '1.0',
@@ -267,11 +287,11 @@ function ModalModeleCourrier({ open, onClose, typesActes, categories, modele = n
     };
 
     const submit = () => {
-        const opts = { onSuccess: () => { onClose(); reset(); }, onError: notifyValidationError };
+        const opts = { forceFormData: true, onSuccess: () => { onClose(); reset(); }, onError: notifyValidationError };
         if (isEdit) {
-            router.post(`/modeles-courriers/${modele.id}`, { _method: 'patch', ...data }, { ...opts, forceFormData: true });
+            patch(`/modeles-courriers/${modele.id}`, opts);
         } else {
-            post('/modeles-courriers', { ...opts, forceFormData: true });
+            post('/modeles-courriers', opts);
         }
     };
 
@@ -455,13 +475,44 @@ function GroupeTable({ categorieLabel, items, can, onEdit }) {
                                                 <td>
                                                     <Icon className={cn('h-3.5 w-3.5', tdInfo ? tdInfo.color.split(' ')[1] : 'text-slate-400')} />
                                                 </td>
-                                                <td className="font-medium text-ink max-w-[220px] truncate" title={m.nom}>{m.nom}</td>
+                                                <td className="font-medium text-ink max-w-[220px] truncate" title={m.nom}>
+                                                    <span className="flex items-center gap-1.5">
+                                                        {m.nom}
+                                                        {m.obligatoire_cloture && (
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <Lock className="h-3 w-3 text-seal shrink-0" />
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>Obligatoire à la clôture du dossier</TooltipContent>
+                                                            </Tooltip>
+                                                        )}
+                                                    </span>
+                                                </td>
                                                 <td className="text-slate-500 text-sm">{m.typeActeLabel}</td>
                                                 <td><TypeDocBadge type={m.type_document} /></td>
                                                 <td>
                                                     <span className="font-ref text-seal text-xs font-semibold">v{m.version}</span>
                                                 </td>
-                                                <td><CopyPathButton path={m.chemin_fichier} /></td>
+                                                <td>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <CopyPathButton path={m.chemin_fichier} />
+                                                        {!m.fichier_existe && m.est_actif && (
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-danger-bg text-danger-text border border-red-200 shrink-0">
+                                                                        <AlertTriangle className="h-2.5 w-2.5" />
+                                                                        Fichier introuvable
+                                                                    </span>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>
+                                                                    Ce modèle est actif mais son fichier .docx est introuvable sur le
+                                                                    disque — les dossiers utilisant ce type d'acte généreront un texte
+                                                                    de secours au lieu du document réel.
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        )}
+                                                    </div>
+                                                </td>
                                                 <td className="text-slate-400 text-xs">{m.updated_at}</td>
                                                 <td className="text-center">
                                                     {can.administrer ? (
@@ -798,8 +849,6 @@ export default function ModelesIndex() {
         return acc;
     }, {});
 
-    const totalType = TYPES_DOC.reduce((s, t) => s + (stats.parTypeDoc?.[t.value] ?? 0), 0) || 1;
-
     return (
         <AppLayout breadcrumbs={[{ label: "Modèles d'actes" }]}>
                 <Head title="Modèles d'actes — Ayelema" />
@@ -843,47 +892,17 @@ export default function ModelesIndex() {
                         <TabsContent value="actes" className="space-y-5 pt-4">
 
                     {/* ── Stats ────────────────────────────────────────────── */}
-                    <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-                        {/* KPIs */}
-                        <div className="lg:col-span-2 grid grid-cols-3 gap-3">
-                            {[
-                                { label: 'Total',    value: stats.total    ?? 0, color: 'text-ink' },
-                                { label: 'Actifs',   value: stats.actifs   ?? 0, color: 'text-success' },
-                                { label: 'Inactifs', value: stats.inactifs ?? 0, color: 'text-slate-400' },
-                            ].map(k => (
-                                <Card key={k.label} className="p-3 text-center">
-                                    <div className={cn('text-2xl font-bold', k.color)}>{k.value}</div>
-                                    <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">{k.label}</div>
-                                </Card>
-                            ))}
-                        </div>
-
-                        {/* Répartition par type document */}
-                        <Card className="lg:col-span-3 p-4">
-                            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Répartition par type de document</div>
-                            <div className="space-y-2">
-                                {TYPES_DOC.map(t => {
-                                    const count = stats.parTypeDoc?.[t.value] ?? 0;
-                                    const pct = Math.round((count / totalType) * 100);
-                                    const Icon = t.icon;
-                                    return (
-                                        <div key={t.value} className="flex items-center gap-2">
-                                            <Icon className={cn('h-3.5 w-3.5 shrink-0', t.color.split(' ')[1])} />
-                                            <span className="text-xs text-slate-600 w-28 shrink-0">{t.label}</span>
-                                            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                                                <motion.div
-                                                    className={cn('h-full rounded-full', t.color.split(' ')[0])}
-                                                    initial={{ width: 0 }}
-                                                    animate={{ width: `${pct}%` }}
-                                                    transition={{ duration: 0.6, delay: 0.1 }}
-                                                />
-                                            </div>
-                                            <span className="text-xs font-ref text-slate-500 w-6 text-right">{count}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </Card>
+                    <div className="grid grid-cols-3 gap-3">
+                        {[
+                            { label: 'Total',    value: stats.total    ?? 0, color: 'text-ink' },
+                            { label: 'Actifs',   value: stats.actifs   ?? 0, color: 'text-success' },
+                            { label: 'Inactifs', value: stats.inactifs ?? 0, color: 'text-slate-400' },
+                        ].map(k => (
+                            <Card key={k.label} className="p-3 text-center">
+                                <div className={cn('text-2xl font-bold', k.color)}>{k.value}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">{k.label}</div>
+                            </Card>
+                        ))}
                     </div>
 
                     {/* ── Filtres ───────────────────────────────────────────── */}

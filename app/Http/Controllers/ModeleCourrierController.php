@@ -9,6 +9,14 @@ use Illuminate\Support\Str;
 
 class ModeleCourrierController extends Controller
 {
+    // Voir ModeleActeController::FICHIER_MESSAGES — même besoin ici (messages de
+    // validation Laravel natifs sortant en anglais sinon, APP_LOCALE n'étant pas fr).
+    private const FICHIER_MESSAGES = [
+        'fichier.required' => 'Veuillez sélectionner un fichier.',
+        'fichier.mimes'     => 'Le fichier doit être un vrai .docx (Word 2007+) — un .doc renommé en .docx ne fonctionne pas, il faut l\'ouvrir dans Word et l\'enregistrer sous .docx.',
+        'fichier.max'       => 'Le fichier est trop volumineux (20 Mo maximum).',
+    ];
+
     public function store(Request $request)
     {
         $rules = [
@@ -26,7 +34,7 @@ class ModeleCourrierController extends Controller
             $rules['chemin_fichier'] = ['required', 'string', 'max:500'];
         }
 
-        $data = $request->validate($rules);
+        $data = $request->validate($rules, self::FICHIER_MESSAGES);
         $typeActeIds = $data['type_acte_ids'] ?? [];
         unset($data['type_acte_ids']);
 
@@ -54,10 +62,11 @@ class ModeleCourrierController extends Controller
             'nom'             => ['sometimes', 'string', 'max:200'],
             'type_document'   => ['sometimes', 'in:acte_principal,page_garde,attestation,declaration,dnsv,insertion,rccm,note_frais,bordereau,annexe,procedure,lettre,recepisse'],
             'version'         => ['sometimes', 'string', 'max:10'],
-            'est_actif'       => ['sometimes', 'boolean'],
-            'applicable_tous' => ['sometimes', 'boolean'],
-            'type_acte_ids'   => ['sometimes', 'array'],
-            'type_acte_ids.*' => ['exists:types_actes,id'],
+            'est_actif'           => ['sometimes', 'boolean'],
+            'applicable_tous'     => ['sometimes', 'boolean'],
+            'obligatoire_cloture' => ['sometimes', 'boolean'],
+            'type_acte_ids'       => ['sometimes', 'array'],
+            'type_acte_ids.*'     => ['exists:types_actes,id'],
         ];
 
         if ($request->hasFile('fichier')) {
@@ -66,7 +75,7 @@ class ModeleCourrierController extends Controller
             $rules['chemin_fichier'] = ['sometimes', 'string', 'max:500'];
         }
 
-        $data = $request->validate($rules);
+        $data = $request->validate($rules, self::FICHIER_MESSAGES);
         $typeActeIds = $data['type_acte_ids'] ?? null;
         unset($data['type_acte_ids']);
 
@@ -86,6 +95,10 @@ class ModeleCourrierController extends Controller
 
         if ($typeActeIds !== null) {
             $modeleCourrier->typesActes()->sync($typeActeIds);
+        }
+
+        if (array_key_exists('obligatoire_cloture', $data)) {
+            $modeleCourrier->synchroniserCourriersRequis();
         }
 
         return back()->with('success', 'Modèle de courrier mis à jour.');

@@ -56,6 +56,20 @@ class Dossier extends Model
         return $this->belongsTo(User::class, 'formaliste_id');
     }
 
+    /**
+     * Tous les utilisateurs ayant un rôle assigné sur ce dossier (rédacteur,
+     * réviseur, notaire, formaliste), dédupliqués — les destinataires légitimes
+     * de toute notification relative à ce dossier.
+     */
+    public function ayantsDroit(): \Illuminate\Support\Collection
+    {
+        $this->loadMissing(['redacteur', 'reviseur', 'notaire', 'formaliste']);
+
+        return collect([$this->redacteur, $this->reviseur, $this->notaire, $this->formaliste])
+            ->filter()
+            ->unique('id');
+    }
+
     public function questionnaire()
     {
         return $this->hasOne(Questionnaire::class);
@@ -63,7 +77,7 @@ class Dossier extends Model
 
     public function documents()
     {
-        return $this->hasMany(Document::class)->orderBy('id');
+        return $this->morphMany(DocumentFichier::class, 'documentable')->orderBy('id');
     }
 
     public function revision()

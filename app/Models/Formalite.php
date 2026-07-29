@@ -52,7 +52,7 @@ class Formalite extends Model
 
     public function pieces()
     {
-        return $this->hasMany(FormalitePiece::class);
+        return $this->morphMany(DocumentFichier::class, 'documentable')->orderBy('id');
     }
 
     public function estBloquee(): bool
@@ -143,7 +143,7 @@ class Formalite extends Model
      */
     public function versArray(?User $user = null): array
     {
-        $this->loadMissing(['pieces', 'dependDe', 'dependants']);
+        $this->loadMissing(['pieces.versionActuelle', 'dependDe', 'dependants']);
 
         return [
             'id'                      => $this->id,
@@ -182,11 +182,15 @@ class Formalite extends Model
             ],
             'pieces' => $this->pieces->map(fn ($p) => [
                 'id'             => $p->id,
-                'label'          => $p->label,
+                'label'          => $p->nom,
                 'est_fourni'     => (bool) $p->est_fourni,
-                'nom_original'   => $p->nom_original,
-                'televerse_at'   => $p->televerse_at?->format('d/m/Y H:i'),
-                'aUnFichier'     => (bool) $p->chemin_fichier,
+                'nom_original'   => $p->versionActuelle?->nom_original,
+                'televerse_at'   => $p->versionActuelle?->created_at?->format('d/m/Y H:i'),
+                'aUnFichier'     => (bool) $p->versionActuelle,
+                // Nécessaires à DocumentInlinePreview/PreviewBody pour choisir le rendu
+                // (PDF/DOCX/Excel) selon l'extension du fichier téléversé.
+                'chemin_fichier' => $p->versionActuelle?->chemin_fichier,
+                'version'        => $p->versionActuelle?->numero,
             ]),
         ];
     }

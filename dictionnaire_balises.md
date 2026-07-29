@@ -56,6 +56,7 @@
 | `${date_acte_jma}` | Date de signature de l'acte (JJ/MM/AAAA) | Date | `J/M/A`, `(JOUR/MOIS/AN)`, `LE …………`, `……/……/………` |
 | `${annee_lettres}` | Année en lettres majuscules | Texte auto | `DEUX MILLE VINGT…`, `(ANNÉE EN LETTRES)` |
 | `${date_acte_lettres}` | Date complète en lettres (`LE TRENTE JUIN DEUX MILLE VINGT-SIX`) | Texte auto | `LE (DATE EN LETTRES)` |
+| `${date_acte_lettres_sans_annee}` | Jour + mois en lettres, sans l'année (`TRENTE JUIN`) — à utiliser quand l'année est déjà affichée juste au-dessus via `${annee_lettres}` (ex. « L'AN ${annee_lettres} ; LE ${date_acte_lettres_sans_annee} ; ») pour ne pas la répéter deux fois | Texte auto | `LE (DATE SANS ANNÉE)` |
 
 ---
 

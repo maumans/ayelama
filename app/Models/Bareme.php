@@ -9,7 +9,7 @@ class Bareme extends Model
 {
     protected $fillable = [
         'type_acte_id', 'organisme', 'libelle',
-        'taux', 'montant_fixe', 'base_calcul',
+        'taux', 'montant_fixe', 'quantite_defaut', 'base_calcul',
         'description', 'actif', 'ordre',
         'genere_formalite', 'depend_de_bareme_id', 'type_impot',
         'retour_attendu', 'delai_heures', 'pieces_requises',
@@ -20,6 +20,7 @@ class Bareme extends Model
         return [
             'taux'             => 'decimal:4',
             'montant_fixe'     => 'decimal:2',
+            'quantite_defaut'  => 'integer',
             'actif'            => 'boolean',
             'genere_formalite' => 'boolean',
             'pieces_requises'  => 'array',

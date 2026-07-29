@@ -3,24 +3,66 @@
 namespace App\Services;
 
 use App\Models\Dossier;
+use App\Models\DocumentFichier;
 use App\Models\JournalActivite;
+use App\Models\ModeleActe;
+use App\Models\RevisionPoint;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use PhpOffice\PhpWord\TemplateProcessor;
 use PhpOffice\PhpWord\PhpWord;
 use PhpOffice\PhpWord\IOFactory;
 
 class ActesGeneratorService
 {
+    /**
+     * Régénère un document déjà généré depuis son modèle actif, avec les données
+     * (questionnaire) à jour. Retourne false sans effet si aucun modèle actif ne
+     * correspond — appelant libre d'ignorer silencieusement ce cas (ex. régénération
+     * en masse après édition du questionnaire) ou de le signaler (régénération manuelle).
+     */
+    public function regenererDocument(DocumentFichier $document): bool
+    {
+        $dossier = $document->documentable;
+
+        $modele = ModeleActe::where('type_acte_id', $dossier->type_acte_id)
+            ->where('nom', $document->nom)
+            ->where('est_actif', true)
+            ->first();
+
+        if (! $modele) {
+            return false;
+        }
+
+        // Le contenu change : la vérification déjà enregistrée pour ce document n'est
+        // plus fiable, on la marque périmée plutôt que de la supprimer — le verdict et
+        // le commentaire du certificateur restent visibles (contexte pour le rédacteur)
+        // jusqu'au prochain envoi en certification, qui les purgera (Revision::resetPoints()).
+        RevisionPoint::where('point_id', (string) $document->id)
+            ->whereHas('revision', fn ($q) => $q->where('dossier_id', $dossier->id))
+            ->update(['perime' => true]);
+
+        $chemin = $this->genererDocument($dossier, $modele->chemin_fichier, Str::slug($document->nom));
+
+        $document->nouvelleVersion($chemin, 'documents/' . $dossier->reference, ['source' => 'genere']);
+        $document->update(['statut' => 'a_editer']);
+
+        return true;
+    }
+
     public function genererDocument(Dossier $dossier, string $templatePath, string $outputName): string
     {
-        $outputAbsDir = storage_path('app' . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'dossiers' . DIRECTORY_SEPARATOR . $dossier->id);
+        // Convention unifiée avec les documents téléversés manuellement (voir DocumentFichier /
+        // plan GED) — auparavant ce service écrivait dans 'dossiers/{id}/', un dossier distinct
+        // jamais nettoyé et jamais relié aux enregistrements en base (fichiers orphelins).
+        $outputAbsDir = storage_path('app' . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'documents' . DIRECTORY_SEPARATOR . $dossier->reference);
         if (!is_dir($outputAbsDir) && !mkdir($outputAbsDir, 0755, true) && !is_dir($outputAbsDir)) {
             throw new \RuntimeException("Impossible de créer le répertoire : {$outputAbsDir}");
         }
 
         $ts                 = time();
         $filename           = $outputName . '_' . $ts . '.docx';
-        $outputPath         = 'dossiers/' . $dossier->id . '/' . $filename;
+        $outputPath         = 'documents/' . $dossier->reference . '/' . $filename;
         $outputAbsolutePath = $outputAbsDir . DIRECTORY_SEPARATOR . $filename;
         // Le disque 'local' (racine storage/app/private) est la source des modèles uploadés.
         // On normalise le chemin : si chemin_fichier = 'statuts.docx' → 'modeles/statuts.docx'
@@ -101,15 +143,19 @@ class ActesGeneratorService
 
         $tp->setValue('dossier.reference',     $dossier->reference);
         $tp->setValue('dossier.objet',         $dossier->objet ?? '');
-        $tp->setValue('date_acte_jma',         $now->format('d/m/Y'));
-        $tp->setValue('annee_lettres',         NombreEnLettres::convertir((float) $now->year, ''));
-        $tp->setValue('date_acte_lettres',     $this->datEnLettres($now));
+        $tp->setValue('date_acte_jma',              $now->format('d/m/Y'));
+        $tp->setValue('annee_lettres',               NombreEnLettres::convertir((float) $now->year, ''));
+        $tp->setValue('date_acte_lettres',           $this->dateJourMoisEnLettres($now) . ' ' . NombreEnLettres::convertir((float) $now->year, ''));
+        $tp->setValue('date_acte_lettres_sans_annee', $this->dateJourMoisEnLettres($now));
         // Le nombre de pages ne peut être déterminé qu'après génération : laisser vide
         $tp->setValue('acte.nb_pages',         '');
         $tp->setValue('acte.nb_pages_lettres', '');
     }
 
-    private function datEnLettres(\Illuminate\Support\Carbon $date): string
+    // Jour + mois en lettres, sans l'année — utilisé dans les templates qui affichent
+    // déjà l'année séparément via ${annee_lettres} (ex. « L'AN ... ; LE ... ; ») pour
+    // éviter de la répéter deux fois dans le même acte.
+    private function dateJourMoisEnLettres(\Illuminate\Support\Carbon $date): string
     {
         $mois = [
             1 => 'JANVIER',   2 => 'FÉVRIER',  3 => 'MARS',      4 => 'AVRIL',
@@ -117,13 +163,11 @@ class ActesGeneratorService
             9 => 'SEPTEMBRE', 10 => 'OCTOBRE', 11 => 'NOVEMBRE', 12 => 'DÉCEMBRE',
         ];
 
-        $jourLettres  = $date->day === 1
+        $jourLettres = $date->day === 1
             ? 'PREMIER'
             : NombreEnLettres::convertir((float) $date->day, '');
 
-        $anneeLettres = NombreEnLettres::convertir((float) $date->year, '');
-
-        return $jourLettres . ' ' . $mois[$date->month] . ' ' . $anneeLettres;
+        return $jourLettres . ' ' . $mois[$date->month];
     }
 
     private function remplirQuestionnaire(TemplateProcessor $tp, Dossier $dossier): void
@@ -272,6 +316,22 @@ class ActesGeneratorService
                 continue;
             }
             $index = $i + 1; // PhpWord utilise #1, #2, …
+
+            // Même dérivation que remplirQuestionnaire() pour les champs préfixés :
+            // reconstitue "adresse" à partir de quartier/commune/demeurant_ville si le
+            // schéma de ce bloc répétable utilise la forme décomposée (voir GERANT_SCHEMA/
+            // ASSOCIE_SCHEMA côté frontend) plutôt qu'un champ adresse en texte libre.
+            if (!isset($item['adresse'])) {
+                $adresse = implode(', ', array_filter([
+                    $item['quartier'] ?? null,
+                    $item['commune'] ?? null,
+                    $item['demeurant_ville'] ?? null,
+                ]));
+                if ($adresse !== '') {
+                    $item['adresse'] = $adresse;
+                }
+            }
+
             foreach ($item as $champ => $valeur) {
                 $valeur = (string) ($valeur ?? '');
 

@@ -3,7 +3,7 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     FileText, Download, Eye, CheckCircle2, AlertTriangle,
-    XCircle, ChevronLeft, Send, Shield, ClipboardList,
+    XCircle, ChevronLeft, Send, Shield, ClipboardList, Clock,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,10 +33,14 @@ function buildInitialEtats(documents, savedPoints) {
     const init = {};
     (documents ?? []).forEach(doc => {
         const saved = savedPoints?.[String(doc.id)];
-        init[String(doc.id)] = {
-            etat:        saved?.etat        ?? null,
-            commentaire: saved?.commentaire ?? '',
-        };
+        if (saved?.perime) {
+            // Document régénéré depuis ce verdict (ex. questionnaire modifié) — on ne le
+            // préremplit pas comme déjà évalué, le certificateur doit se prononcer à nouveau
+            // sur la nouvelle version. L'ancien verdict/commentaire reste dispo pour contexte.
+            init[String(doc.id)] = { etat: null, commentaire: '', ancienEtat: saved.etat, ancienCommentaire: saved.commentaire };
+        } else {
+            init[String(doc.id)] = { etat: saved?.etat ?? null, commentaire: saved?.commentaire ?? '' };
+        }
     });
     return init;
 }
@@ -54,6 +58,9 @@ export default function Revision() {
     const revisionStatut = revision?.statut ?? 'en_attente';
     const statutConf     = STATUT_META[revisionStatut] ?? STATUT_META.en_attente;
 
+    // Un point périmé a déjà été remis à null (etat) par buildInitialEtats — il compte
+    // donc naturellement comme non-évalué ici, même règle que Revision::pointsValides()
+    // côté backend, qui exige que le certificateur se prononce à nouveau.
     const docList      = documents ?? [];
     const docEvalues   = Object.values(etats).filter(e => e.etat !== null).length;
     const docOk        = Object.values(etats).filter(e => e.etat === 'ok').length;
@@ -62,7 +69,8 @@ export default function Revision() {
         .some(e => e.etat === 'a_corriger' && !e.commentaire?.trim());
     const pctProgress  = docList.length > 0 ? Math.round((docEvalues / docList.length) * 100) : 0;
     const canValidate  = docACorriger === 0 && docEvalues === docList.length && docList.length > 0;
-    const canRenvoyer  = docACorriger > 0 && !docACorrigerSansCommentaire;
+    const tousEvalues  = docEvalues === docList.length;
+    const canRenvoyer  = docACorriger > 0 && !docACorrigerSansCommentaire && tousEvalues;
 
     const setVerdict = (docId, etat) => {
         setEtats(prev => ({ ...prev, [docId]: { ...prev[docId], etat } }));
@@ -110,9 +118,9 @@ export default function Revision() {
         <AppLayout breadcrumbs={[
             { label: 'Dossiers', href: '/dossiers' },
             { label: dossier.reference, href: `/dossiers/${dossier.reference}` },
-            { label: 'Révision' }
+            { label: 'Certification' }
         ]}>
-            <Head title={`Révision ${dossier.reference} — Ayelema`} />
+            <Head title={`Certification ${dossier.reference} — Ayelema`} />
 
             <div className="p-6 max-w-[900px] mx-auto space-y-5">
 
@@ -169,7 +177,7 @@ export default function Revision() {
                                 <div>
                                     <div className="flex items-center gap-2 mb-1">
                                         <ClipboardList className="h-4 w-4 text-slate-400" />
-                                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Révision des actes</span>
+                                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Certification des actes</span>
                                     </div>
                                     <h1 className="font-serif text-display text-ink">Évaluation des documents</h1>
                                     <p className="text-slate-500 text-sm mt-1">
@@ -237,6 +245,7 @@ export default function Revision() {
                         const etatDoc  = etats[docId] ?? { etat: null, commentaire: '' };
                         const isOk     = etatDoc.etat === 'ok';
                         const isNok    = etatDoc.etat === 'a_corriger';
+                        const isCorrigeEnAttente = !etatDoc.etat && etatDoc.ancienEtat != null;
 
                         return (
                             <motion.div
@@ -249,7 +258,8 @@ export default function Revision() {
                                     'transition-colors border',
                                     isOk  && 'border-success/40 bg-success-bg/20',
                                     isNok && 'border-danger/30 bg-danger-bg/30',
-                                    !isOk && !isNok && 'border-slate-200',
+                                    isCorrigeEnAttente && 'border-slate-200 bg-slate-50',
+                                    !isOk && !isNok && !isCorrigeEnAttente && 'border-slate-200',
                                 )}>
                                     <CardContent className="p-5">
                                         {/* En-tête document */}
@@ -257,12 +267,14 @@ export default function Revision() {
                                             <div className="flex items-start gap-3 min-w-0">
                                                 <div className={cn(
                                                     'h-9 w-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5',
-                                                    isOk  ? 'bg-success/10' : isNok ? 'bg-danger/10' : 'bg-slate-100'
+                                                    isOk  ? 'bg-success/10' : isNok ? 'bg-danger/10' : isCorrigeEnAttente ? 'bg-slate-200' : 'bg-slate-100'
                                                 )}>
                                                     {isOk ? (
                                                         <CheckCircle2 className="h-4.5 w-4.5 text-success" />
                                                     ) : isNok ? (
                                                         <XCircle className="h-4.5 w-4.5 text-danger" />
+                                                    ) : isCorrigeEnAttente ? (
+                                                        <Clock className="h-4.5 w-4.5 text-slate-400" />
                                                     ) : (
                                                         <FileText className="h-4.5 w-4.5 text-slate-400" />
                                                     )}
@@ -304,6 +316,19 @@ export default function Revision() {
                                                 </div>
                                             )}
                                         </div>
+
+                                        {isCorrigeEnAttente && (
+                                            <div className="mt-4 pt-4 border-t border-slate-100 flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg p-3">
+                                                <Clock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                                <div>
+                                                    <span className="font-medium text-slate-600">Régénéré depuis un renvoi en correction</span>
+                                                    {etatDoc.ancienCommentaire && (
+                                                        <> — ancien commentaire : « {etatDoc.ancienCommentaire} »</>
+                                                    )}
+                                                    {can?.update && ' — merci de réexaminer la nouvelle version.'}
+                                                </div>
+                                            </div>
+                                        )}
 
                                         {/* Boutons verdict */}
                                         {can?.update && (
@@ -400,7 +425,8 @@ export default function Revision() {
                                 <>
                                     <span className="font-medium">Validation bloquée — </span>
                                     {docACorriger} document{docACorriger > 1 ? 's' : ''} à corriger.
-                                    Renvoyez le dossier en édition pour que le rédacteur effectue les corrections.
+                                    {!tousEvalues && ' Évaluez également les documents restants avant de renvoyer en correction.'}
+                                    {tousEvalues && ' Renvoyez le dossier en édition pour que le rédacteur effectue les corrections.'}
                                 </>
                             )}
                         </div>
@@ -442,6 +468,7 @@ export default function Revision() {
                             size="lg"
                             disabled={!canRenvoyer}
                             onClick={() => setShowRenvoyerDialog(true)}
+                            title={!tousEvalues ? 'Évaluez tous les documents avant de renvoyer en correction' : (docACorrigerSansCommentaire ? 'Ajoutez un commentaire aux documents « À corriger »' : '')}
                         >
                             <AlertTriangle className="h-4 w-4" />
                             Renvoyer en correction
@@ -461,7 +488,7 @@ export default function Revision() {
                             onClick={handleValider}
                         >
                             <Shield className="h-4 w-4" />
-                            {validating ? 'Validation…' : revisionStatut === 'valide' ? 'Révision validée ✓' : 'Valider la révision'}
+                            {validating ? 'Validation…' : revisionStatut === 'valide' ? 'Certification validée ✓' : 'Valider la certification'}
                             {!canValidate && docEvalues < docList.length && revisionStatut !== 'valide' && (
                                 <span className="text-xs opacity-70 ml-1">
                                     ({docList.length - docEvalues} restant{docList.length - docEvalues > 1 ? 's' : ''})

@@ -13,15 +13,13 @@ class AlerterEcheances extends Command
 
     public function handle(): void
     {
-        $dossiers = Dossier::with(['redacteur', 'notaire'])
+        $dossiers = Dossier::with(['redacteur', 'reviseur', 'notaire', 'formaliste'])
             ->echeanceUrgente()
             ->get();
 
         foreach ($dossiers as $dossier) {
-            // Notifier le rédacteur et le notaire
-            foreach ([$dossier->redacteur, $dossier->notaire] as $destinataire) {
-                if (!$destinataire) continue;
-
+            // Notifier tous les ayants droit du dossier
+            foreach ($dossier->ayantsDroit() as $destinataire) {
                 $dejaNotifie = $destinataire->notifications()
                     ->where('type', EcheanceDossierNotification::class)
                     ->where('created_at', '>=', now()->subHours(12))
@@ -29,7 +27,11 @@ class AlerterEcheances extends Command
                     ->exists();
 
                 if (!$dejaNotifie) {
-                    $destinataire->notify(new EcheanceDossierNotification($dossier));
+                    try {
+                        $destinataire->notify(new EcheanceDossierNotification($dossier));
+                    } catch (\Throwable $e) {
+                        report($e);
+                    }
                 }
             }
         }

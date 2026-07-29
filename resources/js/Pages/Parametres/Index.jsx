@@ -17,7 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import {
     AlertTriangle, Check, CheckCircle, CheckCircle2, ChevronDown, ChevronUp,
-    ClipboardCheck, ExternalLink, FileText, Palette, Pencil, Percent, Plus,
+    ClipboardCheck, ExternalLink, FileText, Lock, Palette, Pencil, Percent, Plus,
     Scale, Search, Settings, Shield, ShieldCheck, Trash2, Upload, UserCog, Users, X, XCircle,
 } from 'lucide-react';
 import { ROLE_META } from '@/data/roles';
@@ -767,7 +767,7 @@ function TabApparence({ apparence = {} }) {
                                         </div>
                                     </div>
                                     {/* Nav items */}
-                                    {['Tableau de bord', 'Dossiers', 'Révisions', 'Formalités'].map((item, i) => (
+                                    {['Tableau de bord', 'Dossiers', 'Certifications', 'Formalités'].map((item, i) => (
                                         <div key={item} className="flex items-center gap-1.5 px-2 py-1 mx-1 my-0.5 rounded text-[7px]"
                                              style={{
                                                  backgroundColor: i === 0 ? 'rgba(255,255,255,0.15)' : 'transparent',
@@ -911,7 +911,7 @@ function TabAssignations({ defauts = {}, utilisateurs = [] }) {
 
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
                 {champSelect('Notaire en charge par défaut', 'default_notaire_id', notaires)}
-                {champSelect('Réviseur par défaut', 'default_reviseur_id', reviseurs)}
+                {champSelect('Certificateur par défaut', 'default_reviseur_id', reviseurs)}
                 {champSelect('Formaliste par défaut', 'default_formaliste_id', formalistes)}
             </div>
 
@@ -1007,6 +1007,7 @@ export default function ParametresIndex({
     const actifTypes  = stats.typesActifs        ?? 0;
     const baremes     = stats.baremes            ?? 0;
     const typesAvecB  = stats.typesAvecBaremes   ?? 0;
+    const obligatoiresCloture = stats.obligatoiresCloture ?? 0;
 
     const pctBaremes  = totalTypes > 0 ? Math.round((typesAvecB / totalTypes) * 100) : 0;
     const pctTypes    = totalTypes > 0 ? Math.round((actifTypes / totalTypes) * 100) : 0;
@@ -1037,12 +1038,13 @@ export default function ParametresIndex({
                 </div>
 
                 {/* KPIs */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                     {[
                         { label: 'Utilisateurs actifs', value: `${actifUsers}/${totalUsers}`, sub: 'comptes',      cls: 'text-ink' },
                         { label: 'Types actifs',         value: `${actifTypes}/${totalTypes}`, sub: "d'actes",     cls: 'text-seal' },
                         { label: 'Barèmes configurés',   value: baremes,                       sub: 'au total',    cls: baremes === 0 ? 'text-red-500' : 'text-green-600' },
                         { label: 'Types sans barème',    value: totalTypes - typesAvecB,       sub: 'à couvrir',   cls: (totalTypes - typesAvecB) > 0 ? 'text-amber-600' : 'text-green-600' },
+                        { label: 'Docs obligatoires',    value: obligatoiresCloture,           sub: 'à la clôture', cls: 'text-ink' },
                     ].map(({ label, value, sub, cls }) => (
                         <div key={label} className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm">
                             <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wide">{label}</div>
@@ -1099,6 +1101,14 @@ export default function ParametresIndex({
                         >
                             <Scale className="h-4 w-4" />
                             Barèmes & Taux
+                            <ExternalLink className="h-3 w-3 opacity-50" />
+                        </button>
+                        <button
+                            onClick={() => router.visit('/parametres/cloture')}
+                            className="flex items-center gap-2 px-5 py-3.5 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+                        >
+                            <Lock className="h-4 w-4" />
+                            Clôture
                             <ExternalLink className="h-3 w-3 opacity-50" />
                         </button>
                     </div>

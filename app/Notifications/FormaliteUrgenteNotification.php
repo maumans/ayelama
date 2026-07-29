@@ -3,15 +3,11 @@
 namespace App\Notifications;
 
 use App\Models\Formalite;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class FormaliteUrgenteNotification extends Notification implements ShouldQueue
+class FormaliteUrgenteNotification extends Notification
 {
-    use Queueable;
-
     public function __construct(public Formalite $formalite) {}
 
     public function via(object $notifiable): array
@@ -33,7 +29,7 @@ class FormaliteUrgenteNotification extends Notification implements ShouldQueue
             ->subject("Formalité urgente — Dossier {$dossier?->reference}")
             ->greeting("Bonjour {$notifiable->name},")
             ->line("La formalité « {$this->formalite->libelle} » ({$this->formalite->organisme}) du dossier {$dossier?->reference} {$etat}.")
-            ->action('Consulter les formalités', url('/formalites'))
+            ->action('Consulter les formalités', $dossier ? url("/dossiers/{$dossier->reference}?tab=formalites") : url('/formalites'))
             ->line('Merci de traiter cette formalité dans les meilleurs délais.');
     }
 
@@ -45,7 +41,7 @@ class FormaliteUrgenteNotification extends Notification implements ShouldQueue
             'type'      => 'formalite',
             'dossier'   => $dossier?->reference,
             'formalite' => $this->formalite->id,
-            'href'      => '/formalites',
+            'href'      => $dossier ? "/dossiers/{$dossier->reference}?tab=formalites" : '/formalites',
             'message'   => "Formalité urgente : {$this->formalite->libelle} — {$dossier?->reference}",
         ];
     }

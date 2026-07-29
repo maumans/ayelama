@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
 
 const EMPTY_BAREME_FORM = {
     applicable_tous: false, type_acte_ids: [], organisme: 'Impots', libelle: '',
-    taux: '', montant_fixe: '', base_calcul: 'valeur_acte', description: '',
+    taux: '', montant_fixe: '', quantite_defaut: '1', base_calcul: 'valeur_acte', description: '',
     genere_formalite: false, depend_de_bareme_id: '',
     type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
 };
@@ -54,6 +54,7 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
                 libelle:          bareme.libelle ?? '',
                 taux:             bareme.taux ?? '',
                 montant_fixe:     bareme.montant_fixe ?? '',
+                quantite_defaut:  String(bareme.quantite_defaut ?? 1),
                 base_calcul:      bareme.base_calcul ?? 'valeur_acte',
                 description:      bareme.description ?? '',
                 genere_formalite: !!bareme.genere_formalite,
@@ -100,6 +101,7 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
             ...rest,
             taux:         form.taux         !== '' ? parseFloat(form.taux)         : null,
             montant_fixe: form.montant_fixe !== '' ? parseFloat(form.montant_fixe) : null,
+            quantite_defaut: parseInt(form.quantite_defaut, 10) || 1,
             delai_heures: form.delai_heures !== '' ? parseInt(form.delai_heures, 10) : null,
             depend_de_bareme_id: form.depend_de_bareme_id !== '' ? parseInt(form.depend_de_bareme_id, 10) : null,
             ...(isEdit ? {} : { applicable_tous, type_acte_ids }),
@@ -224,6 +226,20 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
                             {errors.montant_fixe && <p className="text-xs text-danger-text">{errors.montant_fixe}</p>}
                         </div>
                     )}
+
+                    <div className="space-y-1.5">
+                        <Label>Quantité par défaut</Label>
+                        <NumberField
+                            placeholder="1"
+                            value={form.quantite_defaut}
+                            onValueChange={val => setForm(f => ({ ...f, quantite_defaut: val }))}
+                        />
+                        <p className="text-xs text-slate-400">
+                            Nombre d'exemplaires, de pages… appliqué par défaut à la ligne de facture
+                            générée — ajustable ensuite au cas par cas sur chaque dossier.
+                        </p>
+                        {errors.quantite_defaut && <p className="text-xs text-danger-text">{errors.quantite_defaut}</p>}
+                    </div>
 
                     <div className="rounded-lg border border-slate-200 p-3 space-y-3">
                         <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
@@ -389,6 +405,7 @@ function TypeActeRow({ typeActe, onEdit }) {
                                     <th>Libellé</th>
                                     <th>Calcul</th>
                                     <th>Taux / Montant</th>
+                                    <th>Qté</th>
                                     <th>Actif</th>
                                     <th></th>
                                 </tr>
@@ -423,6 +440,9 @@ function TypeActeRow({ typeActe, onEdit }) {
                                                 ? `${parseFloat(b.taux ?? 0).toFixed(4).replace(/\.?0+$/, '')} %`
                                                 : `${Number(b.montant_fixe ?? 0).toLocaleString('fr-GN')} GNF`
                                             }
+                                        </td>
+                                        <td className="font-ref text-sm text-slate-600">
+                                            {b.quantite_defaut ?? 1}
                                         </td>
                                         <td>
                                             <Switch

@@ -23,7 +23,7 @@ class RecuPdfService
             'recu'     => $recu,
             'paiement' => $paiement,
             'dossier'  => $dossier,
-            'montantEnLettres' => NombreEnLettres::convertir((float) $paiement->montant),
+            'montantEnLettres' => NombreEnLettres::convertir((float) $paiement->montant, ''),
         ]);
 
         $chemin = 'recus/' . $dossier->reference . '/' . $recu->numero . '.pdf';

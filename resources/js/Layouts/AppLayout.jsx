@@ -3,7 +3,7 @@ import { Link, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     LayoutDashboard, FolderOpen, ClipboardCheck, Building2,
-    FileText, Users, Mail, Settings, Search,
+    FileText, Users, Mail, Settings, Search, Archive,
     ChevronLeft, ChevronRight, LogOut, User,
     Menu, Link2, Banknote
 } from 'lucide-react';
@@ -123,13 +123,14 @@ function buildNavItems(can, notifications) {
     return [
         { href: '/dashboard',  label: 'Tableau de bord',  icon: LayoutDashboard, show: true },
         { href: '/dossiers',   label: 'Dossiers',          icon: FolderOpen,      show: true },
-        { href: '/revisions',  label: 'Révisions',         icon: ClipboardCheck,  show: can?.reviser || can?.administrer, badge: notifications?.revisionCount || null },
+        { href: '/revisions',  label: 'Certifications',    icon: ClipboardCheck,  show: can?.reviser || can?.administrer, badge: notifications?.revisionCount || null },
         { href: '/formalites', label: 'Formalités',        icon: Building2,       show: can?.gererFormalites || can?.administrer, badge: notifications?.urgentCount || null },
         { href: '/facturation', label: 'Facturation',      icon: Banknote,        show: can?.gererFacturation || can?.administrer, badge: notifications?.factureImpayeCount || null },
         { href: '/modeles',    label: "Modèles d'actes",   icon: FileText,        show: true },
+        { href: '/ged',        label: 'GED',                icon: Archive,         show: true },
         { href: '/repertoire', label: 'Répertoire',        icon: Users,           show: true },
         { href: '/courriers',  label: 'Courriers',         icon: Mail,            show: true },
-        //{ href: '/demandes',   label: 'Demandes clients',  icon: Link2,           show: can?.creerDossier },
+        { href: '/demandes',   label: 'Demandes clients',  icon: Link2,           show: can?.creerDossier },
     ].filter(item => item.show);
 }
 
@@ -155,7 +156,20 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
 
     const navItems = buildNavItems(can, notifications);
 
-    useRealtimeNotifications(user?.id);
+    const [liveNotification, setLiveNotification] = useState(null);
+    const [liveUnreadDelta, setLiveUnreadDelta] = useState(0);
+
+    // Le compteur partagé via Inertia (notifications.unreadCount) n'est recalculé
+    // qu'à chaque visite de page — on réinitialise le delta temps réel dès qu'une
+    // nouvelle valeur serveur arrive pour ne pas compter les mêmes notifications deux fois.
+    useEffect(() => {
+        setLiveUnreadDelta(0);
+    }, [notifications?.unreadCount]);
+
+    useRealtimeNotifications(user?.id, (notification) => {
+        setLiveNotification(notification);
+        setLiveUnreadDelta((n) => n + 1);
+    });
 
     const initials = user?.initiales
         || (user?.name ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'U');
@@ -377,7 +391,10 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                         </button>
 
                         {/* Notifications */}
-                        <NotificationDropdown unreadCount={notifications?.unreadCount || 0} />
+                        <NotificationDropdown
+                            unreadCount={(notifications?.unreadCount || 0) + liveUnreadDelta}
+                            incoming={liveNotification}
+                        />
 
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
