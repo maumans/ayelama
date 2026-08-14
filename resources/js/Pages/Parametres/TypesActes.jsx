@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { NumberField } from '@/components/ui/number-field';
 import { Button } from '@/components/ui/button';
 import { FileText, Search, Check, X, Pencil } from 'lucide-react';
+import { PanneauProcessus } from '@/Components/Parametres/PanneauProcessus';
 
 const CAT_COLORS = {
     immobilier:  'bg-blue-50 text-blue-700 border-blue-200',
@@ -171,7 +172,8 @@ export default function ParametresTypesActes() {
                                         </thead>
                                         <tbody>
                                             {items.map(t => (
-                                                <tr key={t.id} className={!t.actif ? 'opacity-50' : ''}>
+                                                <React.Fragment key={t.id}>
+                                                <tr className={!t.actif ? 'opacity-50' : ''}>
                                                     <td className="font-mono text-seal text-xs">{t.code}</td>
                                                     <td>
                                                         <span className="font-medium text-sm">{t.label}</span>
@@ -186,6 +188,14 @@ export default function ParametresTypesActes() {
                                                         <Switch checked={t.actif} onCheckedChange={() => toggleActif(t)} />
                                                     </td>
                                                 </tr>
+                                                {/* La couverture du processus, sous la ligne du type
+                                                    d'acte : gabarits attendus, présents, manquants. */}
+                                                <tr>
+                                                    <td colSpan={5} className="p-0">
+                                                        <PanneauProcessus typeActe={t} />
+                                                    </td>
+                                                </tr>
+                                                </React.Fragment>
                                             ))}
                                         </tbody>
                                     </table>

@@ -4,6 +4,12 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
+        {{-- Jeton CSRF pour les appels axios (création d'une société ou d'un client depuis
+             l'assistant, dépôt d'une pièce…). Il manquait : ces requêtes ne reposaient que sur le
+             cookie XSRF-TOKEN, et son absence produisait un 419 renvoyant une page HTML — d'où un
+             message « session expirée » trompeur alors que la session était valide. --}}
+        <meta name="csrf-token" content="{{ csrf_token() }}">
+
         <title inertia>{{ config('app.name', 'Maître Ayelama Bah — Notaire') }}</title>
 
         <!-- Favicon -->

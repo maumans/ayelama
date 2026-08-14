@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Bareme;
 use App\Models\Dossier;
 use App\Models\Formalite;
 
@@ -21,7 +22,12 @@ class FormaliteGenerationService
     {
         $dossier->loadMissing('typeActe.baremes');
 
-        $baremes = $dossier->typeActe->baremes()->actif()->genereFormalite()->get();
+        // Même filtre conditionnel que la facturation (prédicat partagé
+        // Bareme::estApplicableA) : une démarche « enregistrement DNSV » ne doit pas être
+        // ouverte au formaliste sur un dossier qui n'augmente pas le capital.
+        $baremes = $dossier->typeActe->baremes()->actif()->genereFormalite()->get()
+            ->filter(fn (Bareme $bareme) => $bareme->estApplicableA($dossier))
+            ->values();
 
         // Passe 1 : créer/mettre à jour chaque Formalite, indexée par bareme_id afin
         // de pouvoir résoudre les dépendances (bareme->depend_de_bareme_id) ensuite.

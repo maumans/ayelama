@@ -30,6 +30,12 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            // Explicites plutôt que laissés aux valeurs par défaut de la table :
+            // create() ne relit pas la ligne, l'instance retournée aurait ces
+            // attributs à null — ce qui fait diverger les tests du comportement
+            // réel (un User chargé depuis la base a bien true).
+            'actif' => true,
+            'notifications_email' => true,
         ];
     }
 

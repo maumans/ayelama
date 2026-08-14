@@ -31,10 +31,9 @@ class TypeActe extends Model
         return $this->hasMany(Dossier::class);
     }
 
-    public function modeles()
-    {
-        return $this->hasMany(ModeleActe::class)->where('est_actif', true);
-    }
+    // `modeles()` a été supprimée avec la colonne `modeles_actes.type_acte_id` (2026-08-11) : un
+    // `hasMany` ne pouvait voir ni les gabarits partagés, ni `applicable_tous`, ni les variantes.
+    // `ModeleActe::pourTypeActe()` fait ce travail correctement.
 
     public function modelesCourriers()
     {

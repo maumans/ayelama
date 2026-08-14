@@ -8,7 +8,6 @@ export const STATUT_META = {
     en_attente:  { label: 'En attente retour',  badge: 'bg-amber-50 text-amber-700 border-amber-200',   border: 'border-l-amber-400' },
     retour_recu: { label: 'Retour reçu',        badge: 'bg-green-50 text-green-700 border-green-200',   border: 'border-l-green-500' },
     rejete:      { label: 'Rejeté — à corriger', badge: 'bg-danger-bg text-danger-text border-red-200', border: 'border-l-danger' },
-    cloture:     { label: 'Clôturé',            badge: 'bg-ink/5 text-ink/40 border-ink/10',            border: 'border-l-ink/20' },
 };
 
 export const ORGANISME_META = {

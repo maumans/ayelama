@@ -17,7 +17,17 @@ class CourrierController extends Controller
 {
     public function index(Request $request)
     {
+        $this->authorize('viewAny', Dossier::class);
+
+        // Cloisonnement par assignation, comme FormaliteController::index() et
+        // GedController::index() : sans ce filtre, tout utilisateur connecté voyait les
+        // courriers de tous les dossiers de l'office, y compris ceux auxquels il n'a
+        // aucun accès depuis la fiche dossier.
+        $user = auth()->user();
+        $visibles = fn ($q) => $q->whereHas('dossier', fn ($d) => $d->visiblePar($user));
+
         $query = Courrier::with(['dossier:id,reference,objet', 'redacteur:id,name,initiales'])
+            ->tap($visibles)
             ->when($request->q, fn ($q, $s) => $q->where(fn ($q2) =>
                 $q2->where('reference',    'like', "%{$s}%")
                    ->orWhere('objet',       'like', "%{$s}%")
@@ -28,13 +38,17 @@ class CourrierController extends Controller
             ->when($request->sort === 'envoye', fn ($q) => $q->orderByDesc('envoye_at'))
             ->when(!in_array($request->sort, ['objet', 'envoye']), fn ($q) => $q->orderByDesc('created_at'));
 
+        // Compteurs sur le même périmètre que la liste : afficher « 47 courriers » au-dessus
+        // d'une liste qui en montre 3 est un bug d'affichage autant qu'une fuite.
         $stats = [
-            'total'      => Courrier::count(),
-            'brouillons' => Courrier::brouillon()->count(),
-            'envoyes'    => Courrier::envoye()->count(),
-            'ceMois'     => Courrier::whereMonth('created_at', now()->month)
+            'total'      => Courrier::tap($visibles)->count(),
+            'brouillons' => Courrier::tap($visibles)->brouillon()->count(),
+            'envoyes'    => Courrier::tap($visibles)->envoye()->count(),
+            'ceMois'     => Courrier::tap($visibles)
+                                ->whereMonth('created_at', now()->month)
                                 ->whereYear('created_at', now()->year)->count(),
-            'parType'    => Courrier::selectRaw('type, count(*) as n')
+            'parType'    => Courrier::tap($visibles)
+                                ->selectRaw('type, count(*) as n')
                                 ->groupBy('type')
                                 ->get()
                                 ->map(fn ($r) => ['type' => $r->type, 'count' => (int) $r->n])
@@ -176,7 +190,6 @@ class CourrierController extends Controller
             'type'           => 'transmission',
             'statut'         => 'brouillon',
             'chemin_fichier' => $chemin,
-            'est_requis'     => $modele->obligatoire_cloture,
         ]);
 
         JournalActivite::enregistrer($dossier, "Courrier « {$modele->nom} » généré", 'expedition', []);

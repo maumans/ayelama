@@ -1,13 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Check, Clock, AlertTriangle, FileText, Download, Eye,
-    Building, Send, ClipboardCheck, Phone, MapPin,
-    ArrowRight, CheckCircle2, Plus, Trash2, Upload, PenSquare, X,
-    MailCheck, CheckCheck, Square, Pencil, RefreshCw, Zap,
-    XCircle, Shield, Mail, Lock, Banknote, Wallet, Receipt,
-    History, Users, Info,
+    Check, Clock, AlertTriangle, FileText, Download, Eye, Building, Send, ClipboardCheck, Phone, MapPin, ArrowRight, CheckCircle2, Plus, Trash2, Upload, PenSquare, X, MailCheck, CheckCheck, Square, Pencil, RefreshCw, Zap, XCircle, Shield, Mail, Lock, Banknote, Wallet, Receipt, History, Users, Info, FileSignature, CalendarDays, Building2, CopyCheck, AlertCircle
 } from 'lucide-react';
 import { STATUT_META as FORMALITE_STATUT_META, organismeBadgeClass, organismeShortLabel } from '@/data/formaliteStatuts';
 import { STATUT_META as REVISION_STATUT_META } from '@/data/revisionStatuts';
@@ -15,16 +10,26 @@ import { ETAPE_META, ETAPE_ORDER } from '@/data/etapeMeta';
 import { ModalDepotFormalite } from '@/Components/Formalites/ModalDepotFormalite';
 import { ModalRetourFormalite } from '@/Components/Formalites/ModalRetourFormalite';
 import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
+import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
 import { ModalEnregistrerPaiement } from '@/Components/Facturation/ModalEnregistrerPaiement';
 import { ModalLigneFacture } from '@/Components/Facturation/ModalLigneFacture';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { DateField } from '@/components/ui/date-field';
 import { NumberField } from '@/components/ui/number-field';
 import { PhoneField } from '@/components/ui/phone-field';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
-import { mapClientToPrefixedFields, buildPartieFields } from '@/lib/clientFields';
+import { ClientRoleSection } from '@/Components/ui/client-role-section';
+import { ChoixMultiple } from '@/Components/ui/choix-multiple';
+import { tableExclusionsModification } from '@/lib/exclusionsChoix';
+import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
+import { AccordClientCard, ANCRE_ACCORD_CLIENT } from '@/Components/Dossiers/AccordClientCard';
+import { ClotureTab } from '@/Components/Dossiers/ClotureTab';
+
+/** Ancre DOM de la carte « Parties & pièces » (onglet Informations). */
+const ANCRE_PIECES_PARTIES = 'pieces-parties';
+import { mapClientToPrefixedFields, buildPartieFields, estChampIdentite } from '@/lib/clientFields';
 import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles } from '@/lib/partiesPayload';
 import { isoDateToFR, frDateToISO } from '@/lib/dates';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -43,28 +48,17 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { notifyValidationError } from '@/lib/toast';
-import DocumentInlinePreview from '@/Components/documents/DocumentInlinePreview';
+import { ApercuSousLigne, useApercuEnLigne } from '@/Components/documents/ApercuSousLigne';
 
 const docStatutConfig = {
     a_editer: { label: 'À éditer', color: 'text-slate-500 bg-slate-50 border-slate-200' },
     edite:    { label: 'Édité',    color: 'text-blue-600 bg-blue-50 border-blue-200' },
 };
 
-const TYPE_DOC_LABELS = {
-    acte_principal: 'Acte principal',
-    page_garde:     'Page de garde',
-    attestation:    'Attestation',
-    declaration:    'Déclaration',
-    dnsv:           'DNSV',
-    insertion:      'Insertion au JORG',
-    rccm:           'RCCM',
-    note_frais:     'Note de frais',
-    bordereau:      'Bordereau / Tableau',
-    annexe:         'Annexe',
-    procedure:      'Procédure',
-    lettre:         'Lettre / Transmission',
-    recepisse:      'Récépissé',
-};
+// Le vocabulaire des types de document n'est plus recopié ici : le serveur sert `typeDocLabel`
+// avec chaque document (voir HasTypeDocumentLabel, seule référence). Les copies locales avaient
+// divergé — les quatre types de la modification statutaire y manquaient, et leur slug brut
+// s'affichait à l'écran.
 
 // ── Modal : modifier les infos générales du dossier ─────────────────────────
 
@@ -204,17 +198,65 @@ function initialClientLinks(fields, parties) {
     return links;
 }
 
+// Attache un `partie_id` à chaque item d'un bloc répétable en le faisant correspondre par
+// position aux `Partie` existantes du même rôle — rend explicite côté client la même
+// correspondance que le backend applique déjà (DossierController::updateQuestionnaire()),
+// pour permettre l'affichage de la checklist de pièces par personne et une resynchronisation
+// fiable à l'enregistrement (voir buildPartiesPayload()).
+function attachPartieIds(fields, values, parties) {
+    const next = { ...values };
+    for (const field of fields) {
+        if (field.type !== 'repeatable' || !field.clientRole) continue;
+        const items = next[field.id] ?? [];
+        const partiesDuRole = (parties ?? []).filter(p => p.role === field.clientRole);
+        // `client` (l'objet, pas seulement l'id) est réattaché ici : sans lui, la
+        // ligne rouvrirait en saisie libre et réafficherait les champs d'identité
+        // que la refonte a justement retirés (voir ClientRoleSection).
+        next[field.id] = items.map((item, i) => ({
+            ...item,
+            partie_id: partiesDuRole[i]?.id ?? undefined,
+            client: partiesDuRole[i]?.client ?? item.client ?? undefined,
+            client_id: partiesDuRole[i]?.client?.id ?? item.client_id ?? undefined,
+        }));
+    }
+    return next;
+}
+
 function ModalEditQuestionnaire({ open, onClose, dossier }) {
     const questKey  = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
     const fields    = QUESTIONNAIRES[questKey] ?? [];
     const [formValues, setFormValues] = useState(dossier.questionnaire ?? {});
+    const [stagedPieces, setStagedPieces] = useState({});
+    const [previewKey, setPreviewKey] = useState(null);
     const [clientLinks, setClientLinks] = useState(() => initialClientLinks(fields, dossier.parties));
     const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
+    const [editingClient, setEditingClient] = useState(null);
+    const [saisieLibreRoles, setSaisieLibreRoles] = useState({});
+    const partiesById = useMemo(
+        () => Object.fromEntries((dossier.parties ?? []).map(p => [p.id, p])),
+        [dossier.parties]
+    );
+    // Modifications statutaires mutuellement exclusives — mêmes exclusions qu'à la création : un
+    // garde-fou posé d'un seul côté laisserait la combinaison interdite ressaisissable ici.
+    const exclusionsModification = tableExclusionsModification(usePage().props.typesModification);
+
+    const handleStagedPieceChange = (groupName, key, file) => {
+        setStagedPieces(prev => ({
+            ...prev,
+            [groupName]: {
+                ...(prev[groupName] || {}),
+                [key]: file,
+            }
+        }));
+    };
 
     useEffect(() => {
         if (open) {
-            setFormValues(dossier.questionnaire ?? {});
+            setFormValues(attachPartieIds(fields, dossier.questionnaire ?? {}, dossier.parties));
             setClientLinks(initialClientLinks(fields, dossier.parties));
+            setSaisieLibreRoles({});
+            setStagedPieces({});
+            setPreviewKey(null);
         }
     }, [open]);
 
@@ -234,13 +276,45 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
         });
     };
 
+    const toggleSaisieLibre = (role, actif) => {
+        setSaisieLibreRoles(prev => ({ ...prev, [role]: actif }));
+        if (actif) unlinkClientFromSection(role);
+    };
+
+    // Dès qu'une fiche est rattachée, ses champs d'identité sortent du formulaire :
+    // même règle que dans l'assistant de création (voir Create.jsx).
+    const champsAffichables = (group) => {
+        if (!group.clientRole || !clientLinks[group.clientRole]) return group.fields;
+        return group.fields.filter(f =>
+            f.type === 'repeatable'
+            || f.type === 'checkbox'
+            || f.type === 'checkbox_required'
+            || f.type === 'checkbox_group'
+            || !estChampIdentite(f.id)
+        );
+    };
+
+    const champsIdentiteManquants = (group) => {
+        if (!group.clientRole || !clientLinks[group.clientRole]) return [];
+        return group.fields
+            .filter(f => f.required && estChampIdentite(f.id) && !formValues[f.id])
+            .map(f => f.label);
+    };
+
     const submit = (e) => {
         e.preventDefault();
+
+        // Purgé des champs des blocs décochés, exactement comme à la création : décocher une
+        // modification sans effacer ses valeurs les laisserait projetées dans les actes régénérés
+        // par cette action (voir purgerChampsInvisibles). Sert aussi aux `parties`, pour qu'une
+        // cession retirée ne conserve pas ses cédants.
+        const donneesSoumises = purgerChampsInvisibles(fields, formValues);
+
         router.patch(`/dossiers/${dossier.reference}/questionnaire`, {
-            donnees: formValues,
-            parties: buildPartiesPayload(fields, formValues, clientLinks),
+            donnees: donneesSoumises,
+            parties: buildPartiesPayload(fields, donneesSoumises, clientLinks, stagedPieces),
             managedRoles: getManagedClientRoles(fields),
-        }, { onSuccess: () => onClose(), onError: notifyValidationError });
+        }, { forceFormData: true, onSuccess: () => onClose(), onError: notifyValidationError });
     };
 
     // Si aucun schéma connu, afficher les champs existants en mode générique
@@ -267,16 +341,23 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                 )}
                                 {group.clientRole && (
                                     <div className="mb-1">
-                                        <ClientPicker
-                                            placeholder={`Rechercher un client existant (${group.name})…`}
+                                        {/* Même composant que l'assistant de création : la section
+                                            désigne une fiche client au lieu de resaisir son identité,
+                                            pour que création et édition ne divergent pas. */}
+                                        <ClientRoleSection
+                                            roleLabel={group.name}
                                             linked={clientLinks[group.clientRole] ?? null}
                                             onSelect={(client) => applyClientToSection(group, client)}
                                             onUnlink={() => unlinkClientFromSection(group.clientRole)}
                                             onCreateNew={() => setCreatingClientForGroup(group)}
+                                            onEditClient={(client) => setEditingClient(client)}
+                                            champsManquants={champsIdentiteManquants(group)}
+                                            saisieLibre={!!saisieLibreRoles[group.clientRole]}
+                                            onToggleSaisieLibre={(v) => toggleSaisieLibre(group.clientRole, v)}
                                         />
                                     </div>
                                 )}
-                                {group.fields.map(field => (
+                                {champsAffichables(group).map(field => (
                                     <div key={field.id} className="space-y-1.5">
                                         {field.type !== 'repeatable' && field.type !== 'checkbox' && field.type !== 'checkbox_required' && (
                                             <Label htmlFor={`qedit-${field.id}`}>
@@ -284,7 +365,15 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                                 {field.required && <span className="text-danger ml-1">*</span>}
                                             </Label>
                                         )}
-                                        {field.type === 'repeatable' ? (
+                                        {field.type === 'checkbox_group' ? (
+                                            <ChoixMultiple
+                                                field={field}
+                                                valeurs={formValues[field.id] ?? []}
+                                                onChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                                idPrefix="qedit-"
+                                                exclusions={exclusionsModification}
+                                            />
+                                        ) : field.type === 'repeatable' ? (
                                             <>
                                                 <p className="text-sm font-medium text-slate-700 mb-1">
                                                     {field.label}
@@ -294,6 +383,10 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                                     fieldDef={field}
                                                     value={formValues[field.id] ?? []}
                                                     onChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                                    partiesById={partiesById}
+                                                    piecesRequises={usePage().props.piecesRequises}
+                                                    stagedPieces={stagedPieces[field.id] || {}}
+                                                    onStagedPieceChange={(key, file) => handleStagedPieceChange(field.id, key, file)}
                                                 />
                                             </>
                                         ) : field.type === 'textarea' ? (
@@ -346,6 +439,20 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                                 onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
                                                 className={cn(field.mono && 'font-ref')}
                                             />
+                                        ) : field.type === 'year' ? (
+                                            <Input
+                                                id={`qedit-${field.id}`}
+                                                type="text"
+                                                inputMode="numeric"
+                                                maxLength={4}
+                                                placeholder={field.placeholder}
+                                                value={formValues[field.id] || ''}
+                                                onChange={e => {
+                                                    const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                                    setFormValues(p => ({ ...p, [field.id]: v }));
+                                                }}
+                                                className="font-ref"
+                                            />
                                         ) : field.type === 'tel' ? (
                                             <PhoneField
                                                 id={`qedit-${field.id}`}
@@ -365,6 +472,51 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                         )}
                                     </div>
                                 ))}
+                                {/* Pièces justificatives pour les rôles simples (non-répétables) */}
+                                {(() => {
+                                    if (!group.clientRole) return null;
+                                    if (group.fields.some(f => f.type === 'repeatable')) return null;
+
+                                    // Si la partie existe déjà, RepeatableGroup et la fiche client s'en occupent,
+                                    // mais pour les non-répétables, s'il existe déjà une Partie, on ne propose pas d'upload temporaire.
+                                    // On vérifie si un client (donc une partie) est déjà lié.
+                                    const hasExistingPartie = !!clientLinks[group.clientRole];
+                                    if (hasExistingPartie) return null;
+
+                                    let categorieRole = '';
+                                    if (group.clientRole === 'associe_unique') {
+                                        categorieRole = 'associe_physique';
+                                    } else if (['bailleur', 'locataire', 'vendeur', 'acheteur', 'liquidateur', 'creancier', 'debiteur'].includes(group.clientRole)) {
+                                        categorieRole = group.clientRole;
+                                    }
+                                    
+                                    const piecesRequisesSection = usePage().props.piecesRequises?.[categorieRole] ?? {};
+                                    const piecesKeys = Object.keys(piecesRequisesSection);
+                                    
+                                    if (piecesKeys.length === 0) return null;
+
+                                    return (
+                                        <div className="mt-4 pt-4 border-t border-slate-100 divide-y divide-slate-50/80">
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 px-1">
+                                                Pièces justificatives requises (création)
+                                            </p>
+                                            {piecesKeys.map(cat => {
+                                                const key = cat;
+                                                const previewId = `${group.clientRole}:${key}`;
+                                                return (
+                                                    <PieceStagedRow
+                                                        key={key}
+                                                        piece={{ label: piecesRequisesSection[key] }}
+                                                        file={stagedPieces[group.clientRole]?.[key]}
+                                                        onFileSelected={(f) => handleStagedPieceChange(group.clientRole, key, f)}
+                                                        isPreviewOpen={previewKey === previewId}
+                                                        onTogglePreview={() => setPreviewKey(k => k === previewId ? null : previewId)}
+                                                    />
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                })()}
                             </React.Fragment>
                         ))}
                         {allFields.length === 0 && (
@@ -384,6 +536,20 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
             onCreated={(client) => {
                 applyClientToSection(creatingClientForGroup, client);
                 setCreatingClientForGroup(null);
+            }}
+        />
+        {/* Correction en place de la fiche rattachée — la nouvelle valeur se propage
+            à tous les rôles qui la désignent, ici et dans les autres dossiers
+            (voir ClientProjectionService côté serveur). */}
+        <ModalNouveauClient
+            open={editingClient !== null}
+            client={editingClient}
+            onClose={() => setEditingClient(null)}
+            onCreated={(client) => {
+                setClientLinks(prev => Object.fromEntries(
+                    Object.entries(prev).map(([role, c]) => [role, c?.id === client.id ? client : c])
+                ));
+                setEditingClient(null);
             }}
         />
         </>
@@ -535,8 +701,175 @@ function ModalAjouterPiecePartie({ partie, onClose }) {
     );
 }
 
-function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPersonne, onSupprimerPersonne }) {
+/**
+ * Société du registre sur laquelle porte le dossier, et — pour une modification — ce que
+ * celle-ci implique : impact statutaire, actes produits, formalités à venir.
+ *
+ * Ces informations étaient calculées côté serveur depuis le 2026-08-05
+ * (`TypeModificationStatutaire`, `ReglesSocieteService::modificationStatutaire()`) sans être
+ * affichées nulle part : en consultant un dossier, on ne pouvait pas savoir pourquoi tel acte
+ * y figure et tel autre non, ni quelles démarches allaient suivre.
+ */
+function SocieteEtModificationCard({ societe, modificationStatutaire }) {
+    if (!societe && !modificationStatutaire) return null;
+
+    const montant = (v) => v ? `${Math.round(Number(v)).toLocaleString('fr-FR')} GNF` : '—';
+
+    return (
+        <Card>
+            <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-blue-600" />
+                    {modificationStatutaire ? 'Société modifiée' : 'Société concernée'}
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {societe && (
+                    <dl className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-3">
+                        <div className="space-y-0.5">
+                            <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">Dénomination</dt>
+                            <dd className="text-sm text-slate-800">{societe.nom_complet || societe.denomination}</dd>
+                        </div>
+                        <div className="space-y-0.5">
+                            <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">Forme</dt>
+                            <dd className="text-sm text-slate-800">{societe.forme_label || societe.forme || '—'}</dd>
+                        </div>
+                        <div className="space-y-0.5">
+                            <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">RCCM</dt>
+                            <dd className="font-ref text-sm text-slate-800">{societe.rccm_numero || '—'}</dd>
+                        </div>
+                        <div className="space-y-0.5">
+                            <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">Capital au registre</dt>
+                            <dd className="font-ref text-sm text-slate-800">{montant(societe.capital_chiffres)}</dd>
+                        </div>
+                        <div className="space-y-0.5 sm:col-span-2">
+                            <dt className="text-xs font-semibold uppercase tracking-wider text-slate-400">Siège au registre</dt>
+                            <dd className="text-sm text-slate-800">
+                                {[societe.siege_quartier, societe.siege_commune, societe.siege_ville].filter(Boolean).join(', ') || '—'}
+                            </dd>
+                        </div>
+                    </dl>
+                )}
+
+                {societe && modificationStatutaire && (
+                    <p className="rounded-md border border-slate-200 bg-slate-50/70 p-2.5 text-xs text-slate-500">
+                        Ces valeurs sont celles du registre. Elles seront mises à jour automatiquement
+                        quand la modification deviendra effective, à l'entrée du dossier en Expédition —
+                        c'est-à-dire une fois les formalités RCCM revenues.
+                    </p>
+                )}
+
+                {modificationStatutaire && (
+                    <div className="space-y-3 rounded-lg border border-seal/30 bg-seal-light/50 p-3">
+                        <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                                Modifications décidées
+                            </p>
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                                {modificationStatutaire.types.map(t => (
+                                    <span key={t.valeur} className="rounded-full border border-seal/30 bg-white px-2.5 py-0.5 text-xs text-slate-700">
+                                        {t.label}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Impact</p>
+                                <ul className="mt-0.5 space-y-0.5 text-xs text-slate-600">
+                                    <li>
+                                        {modificationStatutaire.impacteStatuts
+                                            ? 'Statuts à mettre à jour'
+                                            : 'Statuts inchangés'}
+                                    </li>
+                                    <li>
+                                        {modificationStatutaire.impacteRccm
+                                            ? 'Enregistrement au RCCM requis'
+                                            : 'Pas de passage au RCCM'}
+                                    </li>
+                                    <li>
+                                        {modificationStatutaire.exigeDnsv
+                                            ? 'DNSV à établir (capital augmenté)'
+                                            : 'Aucune DNSV'}
+                                    </li>
+                                </ul>
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                                    Actes attendus au dossier
+                                </p>
+                                {/* Chaque acte dit s'il est réellement produisible. Le panneau
+                                    dérive de l'enum, la génération lit les modèles : annoncer
+                                    « Déclaration de modification RCCM » quand aucun modèle actif ne
+                                    peut la produire rendait l'onglet Actes vide et inexplicable. */}
+                                <ul className="mt-0.5 space-y-0.5 text-xs text-slate-600">
+                                    {(modificationStatutaire.documents
+                                        ?? Object.entries(modificationStatutaire.documentsRequis).map(([slug, label]) => ({ slug, label, disponible: true }))
+                                    ).map(doc => (
+                                        <li key={doc.slug} className="flex items-start gap-1.5">
+                                            {doc.disponible
+                                                ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+                                                : <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-warning-text" />}
+                                            <span className={doc.disponible ? '' : 'text-warning-text'}>
+                                                {doc.label}
+                                                {!doc.disponible && (
+                                                    <>
+                                                        {' — '}
+                                                        <Link href="/modeles" className="underline hover:no-underline">
+                                                            modèle manquant
+                                                        </Link>
+                                                    </>
+                                                )}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPersonne, onSupprimerPersonne, societe, modificationStatutaire }) {
     const [pieceModalPartie, setPieceModalPartie] = useState(null);
+    const [previewPieceKey, setPreviewPieceKey] = useState(null);
+    const togglePreviewPiece = (partieId, categorie) => {
+        const key = `${partieId}:${categorie}`;
+        setPreviewPieceKey(k => k === key ? null : key);
+    };
+
+    // Redirection depuis la création du dossier (?focus=pieces, voir DossierController::store())
+    // — amène directement l'attention sur les pièces à fournir plutôt que de laisser l'utilisateur
+    // les découvrir en scrollant.
+    const piecesCardRef = useRef(null);
+    const [showFocusPiecesBanner] = useState(
+        () => new URLSearchParams(window.location.search).get('focus') === 'pieces'
+    );
+    useEffect(() => {
+        if (showFocusPiecesBanner) {
+            piecesCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, []);
+
+    /**
+     * Rôles réellement présents au dossier et porteurs de pièces — « associé/gérant » était écrit
+     * pour une constitution et s'affichait tel quel sur une modification, dont les personnes sont
+     * des cédants, cessionnaires, souscripteurs ou gérants entrants.
+     */
+    const rolesAvecPieces = [...new Set(
+        (dossier.parties ?? [])
+            .filter(p => p.piecesChecklist?.length > 0)
+            .map(p => String(p.role ?? '').replace(/_/g, ' '))
+    )].join(', ');
+
+    /** Pièces que cette personne a déjà fournies ailleurs et qui manquent ici. */
+    const nbReprises = (partie) =>
+        (partie.piecesChecklist ?? []).filter(i => !i.aUnFichier && i.reprise).length;
+
     const questKey    = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
     const questFields = QUESTIONNAIRES[questKey] ?? [];
     const hasQuestData = dossier.questionnaire && Object.keys(dossier.questionnaire).length > 0;
@@ -579,6 +912,10 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                                                     <dd className={cn('text-sm text-slate-800', field.mono && 'font-ref')}>
                                                         {typeof dossier.questionnaire[field.id] === 'boolean'
                                                             ? (dossier.questionnaire[field.id] ? 'Oui' : 'Non')
+                                                            // Choix multiple (`checkbox_group`) : String() sur un
+                                                            // tableau colle les libellés séparés par des virgules.
+                                                            : Array.isArray(dossier.questionnaire[field.id])
+                                                            ? dossier.questionnaire[field.id].join(' · ')
                                                             : String(dossier.questionnaire[field.id])}
                                                     </dd>
                                                 </div>
@@ -628,34 +965,89 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
 
     return (
         <div className="space-y-5">
+            {/* En tête de l'onglet : c'est la condition bloquante pour quitter
+                l'Édition (DossierStepService::verifierEdition), elle doit être la
+                première chose vue — même après réception, pour que l'utilisateur
+                sache d'un coup d'œil où en est cette pièce du dossier. */}
+            <AccordClientCard dossier={dossier} can={can} />
+
+            {/* Placée avant le questionnaire : pour une modification, savoir de quelle société
+                on part et ce que le changement implique conditionne la lecture de tout le reste. */}
+            <SocieteEtModificationCard societe={societe} modificationStatutaire={modificationStatutaire} />
+
+            {/* Dossier constitutif — juste après la société, et avant les personnes : c'est la base
+                documentaire sur laquelle les actes seront produits. Modifiable à la même condition
+                que le questionnaire, donc à l'Initialisation. */}
+            {societe && (
+                <PiecesConstitutivesCard
+                    societe={societe}
+                    dossierReference={dossier.reference}
+                    modifiable={!!can?.modifierQuestionnaire}
+                    // Seule la prop `societe` est rechargée : la fiche dossier est lourde, et
+                    // recharger la page entière refermerait les onglets et les aperçus ouverts.
+                    onRafraichir={() => router.reload({ only: ['societe'] })}
+                />
+            )}
+
             <Card>
                 <CardHeader className="pb-3 flex flex-row items-center justify-between">
                     <CardTitle>Fiche dossier — {dossier.typeActe?.label}</CardTitle>
-                    {can?.update && (
-                        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onEditQuest}>
-                            <PenSquare className="h-3.5 w-3.5" />
-                            Modifier le questionnaire
+                    <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" className="h-8 gap-1.5" asChild>
+                            <a href={`/dossiers/${dossier.reference}/fiche-recueil`} target="_blank" rel="noopener noreferrer">
+                                <Download className="h-3.5 w-3.5" />
+                                Imprimer / télécharger la fiche
+                            </a>
                         </Button>
-                    )}
+                        {/* `modifierQuestionnaire` et non `update` : le questionnaire n'est
+                            modifiable qu'à l'Édition — le modifier plus tard régénérerait les
+                            actes sur un contenu que la certification n'a pas vu. La raison est
+                            affichée plutôt que le bouton simplement absent. */}
+                        {can?.modifierQuestionnaire ? (
+                            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onEditQuest}>
+                                <PenSquare className="h-3.5 w-3.5" />
+                                Modifier le questionnaire
+                            </Button>
+                        ) : can?.update && (
+                            <span className="text-xs text-slate-400 max-w-[260px] text-right leading-snug">
+                                Questionnaire modifiable uniquement à l'étape Édition — passez par
+                                le renvoi en correction.
+                            </span>
+                        )}
+                    </div>
                 </CardHeader>
                 <CardContent>
                     {renderQuestContent()}
                 </CardContent>
             </Card>
 
-            <Card>
+            <Card id={ANCRE_PIECES_PARTIES} ref={piecesCardRef}>
                 <CardHeader className="pb-3 flex flex-row items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
                         <Users className="h-4 w-4 text-seal" />
                         Personnes associées au dossier
                     </CardTitle>
-                    {can?.update && (
+                    {can?.modifierQuestionnaire ? (
                         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onAjouterPersonne}>
                             <Plus className="h-3.5 w-3.5" /> Ajouter une personne
                         </Button>
+                    ) : can?.update && (
+                        <span className="text-xs text-slate-400 max-w-[240px] text-right leading-snug">
+                            Composition de l'acte arrêtée depuis l'Édition.
+                        </span>
                     )}
                 </CardHeader>
                 <CardContent className="space-y-3">
+                    {showFocusPiecesBanner && (
+                        <div className="flex items-start gap-3 p-3 rounded-lg bg-seal-light border border-seal/30">
+                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-seal" />
+                            <div className="text-sm text-ink">
+                                Dossier créé — pensez à téléverser les pièces justificatives
+                                {rolesAvecPieces ? ` de chaque ${rolesAvecPieces}` : ' des personnes'}{' '}
+                                ci-dessous avant de faire confirmer le client.
+                            </div>
+                        </div>
+                    )}
                     {!dossier.parties?.length ? (
                         <p className="text-sm text-slate-400 italic py-2">Aucune partie enregistrée.</p>
                     ) : dossier.parties.map((partie, i) => {
@@ -664,7 +1056,7 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                             <Card key={i}>
                                 <CardContent className="p-4">
                                     <div className="flex items-start gap-4">
-                                        <PartiePhotoAvatar partie={partie} canEdit={can?.genererDocuments} />
+                                        <PartiePhotoAvatar partie={partie} canEdit={can?.gererPieces} />
                                         <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                             <div>
                                                 <div className="font-medium text-slate-800">{partie.nom}</div>
@@ -691,16 +1083,46 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                                                 )}
                                             </div>
                                         </div>
-                                        {can?.update && estLibre && (
+                                        {/* Une personne déjà connue de l'étude a rarement une seule
+                                            pièce à reprendre — les cliquer une à une n'apporte rien. */}
+                                        {can?.gererPieces && nbReprises(partie) > 0 && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-8 shrink-0 gap-1.5 border-seal/40 bg-seal-light text-seal-hover hover:border-seal"
+                                                onClick={() => router.post(`/parties/${partie.id}/pieces/reprendre-tout`, {}, { preserveScroll: true, preserveState: true })}
+                                                title="Copier dans ce dossier les pièces déjà fournies par cette personne"
+                                            >
+                                                <CopyCheck className="h-3.5 w-3.5" />
+                                                Reprendre {nbReprises(partie)} pièce{nbReprises(partie) > 1 ? 's' : ''}
+                                            </Button>
+                                        )}
+                                        {can?.modifierQuestionnaire && estLibre && (
                                             <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger shrink-0"
                                                 onClick={() => onSupprimerPersonne(partie)} title="Retirer cette personne">
                                                 <Trash2 className="h-3.5 w-3.5" />
                                             </Button>
                                         )}
                                     </div>
+                                    {partie.piecesChecklist?.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-slate-100 divide-y divide-slate-50">
+                                            {partie.piecesChecklist.map(item => (
+                                                <PieceGedRow
+                                                    key={item.categorie}
+                                                    piece={item}
+                                                    peutGerer={can?.gererPieces}
+                                                    isPreviewOpen={previewPieceKey === `${partie.id}:${item.categorie}`}
+                                                    onTogglePreview={() => togglePreviewPiece(partie.id, item.categorie)}
+                                                    uploadUrl={`/parties/${partie.id}/pieces/${item.categorie}/televerser`}
+                                                    downloadUrl={`/documents/${item.id}/download`}
+                                                    repriseUrl={`/parties/${partie.id}/pieces/${item.categorie}/reprendre`}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
                                     <PartiePiecesList
                                         partie={partie}
-                                        canEdit={can?.genererDocuments}
+                                        canEdit={can?.gererPieces}
                                         onAjouter={() => setPieceModalPartie(partie)}
                                     />
                                 </CardContent>
@@ -709,8 +1131,155 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                     })}
                 </CardContent>
             </Card>
+
             <ModalAjouterPiecePartie partie={pieceModalPartie} onClose={() => setPieceModalPartie(null)} />
         </div>
+    );
+}
+
+function SignatureTab({ dossier, can }) {
+    const [signatureTypeEdit, setSignatureTypeEdit] = useState(null); // 'client' or 'notaire'
+
+    return (
+        <div className="space-y-5">
+            <Card>
+                <CardHeader className="pb-3 border-b border-slate-100 flex flex-row justify-between items-center">
+                    <div>
+                        <CardTitle className="flex items-center gap-2">
+                            <FileSignature className="h-4 w-4 text-seal" />
+                            Signatures
+                        </CardTitle>
+                        <p className="text-xs text-slate-500 mt-1">Renseignez les dates de signature pour chaque partie concernée.</p>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <table className="w-full text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs text-left">
+                            <tr>
+                                <th className="px-6 py-3 font-medium">Partie</th>
+                                <th className="px-6 py-3 font-medium">Date de signature</th>
+                                {can?.enregistrerSignatures && <th className="px-6 py-3 font-medium text-right w-32">Action</th>}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {/* Client */}
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-6 py-4">
+                                    <div className="font-medium text-slate-800">{dossier.parties?.map(p => p.nom).join(' & ') || 'Client'}</div>
+                                    <div className="text-xs text-slate-500">Partie(s) au dossier</div>
+                                </td>
+                                <td className="px-6 py-4">
+                                    {dossier.date_signature_client ? (
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 text-green-700 font-medium text-sm">
+                                            <CheckCircle2 className="h-4 w-4" />
+                                            {isoDateToFR(dossier.date_signature_client)}
+                                        </span>
+                                    ) : (
+                                        <span className="text-slate-400 italic">Non renseignée</span>
+                                    )}
+                                </td>
+                                {can?.enregistrerSignatures && (
+                                    <td className="px-6 py-4 text-right">
+                                        <Button variant="outline" size="sm" onClick={() => setSignatureTypeEdit('client')}>
+                                            <CalendarDays className="h-3.5 w-3.5 mr-1.5" />
+                                            {dossier.date_signature_client ? 'Modifier' : 'Renseigner'}
+                                        </Button>
+                                    </td>
+                                )}
+                            </tr>
+                            {/* Notaire */}
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-6 py-4">
+                                    <div className="font-medium text-slate-800">{dossier.notaire?.name || 'Notaire'}</div>
+                                    <div className="text-xs text-slate-500">Notaire instrumentant</div>
+                                </td>
+                                <td className="px-6 py-4">
+                                    {dossier.date_signature_notaire ? (
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 text-green-700 font-medium text-sm">
+                                            <CheckCircle2 className="h-4 w-4" />
+                                            {isoDateToFR(dossier.date_signature_notaire)}
+                                        </span>
+                                    ) : (
+                                        <span className="text-slate-400 italic">Non renseignée</span>
+                                    )}
+                                </td>
+                                {can?.enregistrerSignatures && (
+                                    <td className="px-6 py-4 text-right">
+                                        <Button variant="outline" size="sm" onClick={() => setSignatureTypeEdit('notaire')}>
+                                            <CalendarDays className="h-3.5 w-3.5 mr-1.5" />
+                                            {dossier.date_signature_notaire ? 'Modifier' : 'Renseigner'}
+                                        </Button>
+                                    </td>
+                                )}
+                            </tr>
+                        </tbody>
+                    </table>
+                </CardContent>
+            </Card>
+
+            <ModalSaisieDateSignature
+                open={!!signatureTypeEdit}
+                onClose={() => setSignatureTypeEdit(null)}
+                type={signatureTypeEdit}
+                dossier={dossier}
+            />
+        </div>
+    );
+}
+
+function ModalSaisieDateSignature({ open, onClose, type, dossier }) {
+    const isClient = type === 'client';
+    const existingDate = isClient ? dossier?.date_signature_client : dossier?.date_signature_notaire;
+    const [date, setDate] = useState(existingDate ?? '');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (open) {
+            setDate(existingDate ?? '');
+        }
+    }, [open, existingDate]);
+
+    const submit = (e) => {
+        e.preventDefault();
+        setSaving(true);
+        // Route dédiée : ces deux champs ne sont plus acceptés par la mise à jour
+        // générique du dossier, ils ne sont modifiables qu'à l'étape Signature.
+        router.patch(`/dossiers/${dossier.reference}/signatures`, {
+            [isClient ? 'date_signature_client' : 'date_signature_notaire']: date || null,
+        }, {
+            preserveScroll: true,
+            preserveState: true,
+            onError: notifyValidationError,
+            onFinish: () => setSaving(false),
+            onSuccess: onClose,
+        });
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={o => !o && onClose()}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>
+                        Date de signature — {isClient ? (dossier.parties?.map(p => p.nom).join(' & ') || 'Client') : (dossier.notaire?.name || 'Notaire')}
+                    </DialogTitle>
+                </DialogHeader>
+                <form onSubmit={submit} className="space-y-4">
+                    <div className="space-y-1.5">
+                        <Label>Date de signature</Label>
+                        <DateField 
+                            value={isoDateToFR(date)}
+                            onValueChange={val => setDate(frDateToISO(val))}
+                        />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                        <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>Annuler</Button>
+                        <Button type="submit" variant="seal" disabled={saving || date === (existingDate ?? '')}>
+                            {saving ? 'Enregistrement…' : 'Enregistrer'}
+                        </Button>
+                    </div>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -806,111 +1375,13 @@ function UploadSigneButton({ doc }) {
     );
 }
 
-function ClotureItemRow({ item, nom, onPreview, peutDeposer }) {
-    return (
-        <div className="flex items-center justify-between gap-3 py-3">
-            <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                    <FileText className="h-3.5 w-3.5 text-slate-300 shrink-0" />
-                    <span className="text-sm font-medium text-slate-800 truncate">{nom}</span>
-                    {item.est_signe_cachete ? (
-                        <Badge variant="outline" className="bg-success-bg text-success-text border-success/30 text-[10px] gap-1">
-                            <Lock className="h-2.5 w-2.5" /> Signé/cacheté
-                        </Badge>
-                    ) : (
-                        <Badge variant="outline" className="bg-warning-bg text-warning-text border-warning/30 text-[10px]">
-                            En attente
-                        </Badge>
-                    )}
-                </div>
-                {item.est_signe_cachete && item.signe_cachete_par && (
-                    <p className="text-[10px] text-slate-400 mt-0.5 ml-5">
-                        Par {item.signe_cachete_par} le {item.signe_cachete_at}
-                    </p>
-                )}
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-                {item.has_file && (
-                    <>
-                        <Button variant="ghost" size="icon-sm" title="Prévisualiser"
-                            onClick={() => onPreview({ id: item.id, nom, chemin_fichier: item.chemin_fichier, version: item.version }, item.url_preview, item.url_download)}>
-                            <Eye className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
-                            <a href={item.url_download} download><Download className="h-3.5 w-3.5" /></a>
-                        </Button>
-                    </>
-                )}
-                {!item.est_signe_cachete && peutDeposer && (
-                    <UploadSigneButton doc={item} />
-                )}
-            </div>
-        </div>
-    );
-}
+function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevision, onEditQuest }) {
+    // Aperçu déplié sous la ligne du document, et non dans le panneau de pied de page.
+    const apercu = useApercuEnLigne();
 
-function ClotureTab({ dossier, can, onPreview }) {
-    const documentsRequis = (dossier.documents ?? []).filter(d => d.est_requis);
-    const courriersRequis = (dossier.courriers ?? []).filter(c => c.est_requis);
-    const total  = documentsRequis.length + courriersRequis.length;
-    const signes = documentsRequis.filter(d => d.est_signe_cachete).length + courriersRequis.filter(c => c.est_signe_cachete).length;
-
-    return (
-        <div className="space-y-4">
-            {total === 0 ? (
-                <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                        <Lock className="h-10 w-10 text-slate-200 mb-3" />
-                        <p className="text-sm text-slate-500 font-medium">Aucun document ou courrier obligatoire</p>
-                        <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                            Rien n'est configuré comme obligatoire à la clôture pour ce type d'acte
-                            (Paramètres &gt; Clôture).
-                        </p>
-                    </CardContent>
-                </Card>
-            ) : (
-                <div className={cn(
-                    'px-4 py-3 rounded-lg border flex items-center gap-2 text-sm',
-                    signes === total ? 'bg-success-bg border-success/30 text-success-text' : 'bg-warning-bg border-warning/30 text-warning-text'
-                )}>
-                    <Lock className="h-4 w-4 shrink-0" />
-                    {signes}/{total} élément{total > 1 ? 's' : ''} obligatoire{total > 1 ? 's' : ''} signé{total > 1 ? 's' : ''}/cacheté{total > 1 ? 's' : ''}
-                    {signes < total && ' — requis avant de clôturer le dossier'}
-                </div>
-            )}
-
-            {documentsRequis.length > 0 && (
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-sm">Documents requis</CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0 divide-y divide-slate-100">
-                        {documentsRequis.map(doc => (
-                            <ClotureItemRow key={`doc-${doc.id}`} item={doc} nom={doc.nom} onPreview={onPreview} peutDeposer={can?.cloturerDocuments} />
-                        ))}
-                    </CardContent>
-                </Card>
-            )}
-
-            {courriersRequis.length > 0 && (
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-sm">Courriers de transmission requis</CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0 divide-y divide-slate-100">
-                        {courriersRequis.map(c => (
-                            <ClotureItemRow key={`courrier-${c.id}`} item={c} nom={c.objet} onPreview={onPreview} peutDeposer={can?.cloturerDocuments} />
-                        ))}
-                    </CardContent>
-                </Card>
-            )}
-        </div>
-    );
-}
-
-function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevision, onPreview, onEditQuest }) {
     const [confirmState, setConfirmState] = useState(null);
     const [generating, setGenerating] = useState(false);
+    const [depotActe, setDepotActe] = useState(false);
     const [regenerating, setRegenerating] = useState(new Set());
     const [historyDoc, setHistoryDoc] = useState(null);
 
@@ -957,6 +1428,15 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
                 <CardTitle>Actes &amp; documents</CardTitle>
                 <div className="flex items-center gap-2">
+                    {/* Sans modèle actif, « Générer » ne produit rien et l'étape Édition exige
+                        pourtant au moins un acte : le dépôt manuel est la seule issue. La route
+                        serveur existait déjà, seule cette entrée manquait. */}
+                    {can?.genererDocuments && (
+                        <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => setDepotActe(true)}>
+                            <Upload className="h-3.5 w-3.5" />
+                            Déposer un acte
+                        </Button>
+                    )}
                     {can?.genererDocuments && (
                         <Button size="sm" variant="outline" className="h-8 gap-1" onClick={handleGenererModeles} disabled={generating}>
                             <RefreshCw className={cn('h-3.5 w-3.5', generating && 'animate-spin')} />
@@ -984,7 +1464,7 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
                                 ))}
                             </ul>
                         </div>
-                        {can?.update && (
+                        {can?.modifierQuestionnaire && (
                             <Button size="sm" variant="warning" className="shrink-0" onClick={onEditQuest}>
                                 <PenSquare className="h-3.5 w-3.5" />
                                 Modifier le questionnaire
@@ -1010,6 +1490,31 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
                                 ))}
                             </ul>
                         </div>
+                    </div>
+                )}
+                {/* Actes que la configuration prévoit et qui manquent au dossier. Corriger un
+                    rattachement de gabarit ne réveille pas les dossiers existants — une correction
+                    ne doit pas modifier en silence les dossiers d'autres clercs — mais sans cet
+                    encart, l'acte manquant restait invisible tant qu'on ne le cherchait pas. */}
+                {(dossier.actesManquants?.length ?? 0) > 0 && (
+                    <div className="mx-5 mt-1 mb-4 flex flex-col gap-3 rounded-lg border border-amber-200 bg-warning-bg p-4 sm:flex-row sm:items-start">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-text" />
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-warning-text">
+                                {dossier.actesManquants.length} acte{dossier.actesManquants.length > 1 ? 's' : ''} prévu{dossier.actesManquants.length > 1 ? 's' : ''} par la configuration {dossier.actesManquants.length > 1 ? 'ne sont' : "n'est"} pas au dossier
+                            </p>
+                            <ul className="mt-1.5 space-y-0.5">
+                                {dossier.actesManquants.map(a => (
+                                    <li key={a.nom} className="text-xs text-warning-text">
+                                        {a.nom} <span className="text-slate-400">— {a.type_document}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                        <Button size="sm" variant="warning" className="shrink-0" onClick={handleGenererModeles} disabled={generating}>
+                            <RefreshCw className={cn('h-3.5 w-3.5', generating && 'animate-spin')} />
+                            {generating ? 'Génération…' : 'Produire les actes manquants'}
+                        </Button>
                     </div>
                 )}
                 {!dossier.documents?.length ? (
@@ -1038,7 +1543,8 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
                                 const aCorreiger = pointDoc?.etat === 'a_corriger' && !pointDoc?.perime;
                                 const corrigeEnAttente = pointDoc?.etat === 'a_corriger' && pointDoc?.perime;
                                 return (
-                                    <tr key={doc.id}>
+                                    <React.Fragment key={doc.id}>
+                                    <tr>
                                         <td className="pl-5">
                                             <div className="flex items-center gap-2">
                                                 <FileText className="h-3.5 w-3.5 text-slate-400 shrink-0" />
@@ -1067,13 +1573,13 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="text-xs text-slate-500">{TYPE_DOC_LABELS[doc.categorie] ?? doc.categorie}</td>
+                                        <td className="text-xs text-slate-500">{doc.typeDocLabel ?? doc.categorie}</td>
                                         <td className="pr-5">
                                             <div className="flex items-center gap-1 justify-end flex-wrap">
                                                 {doc.chemin_fichier && (
                                                     <>
                                                         <Button variant="ghost" size="icon-sm" title="Prévisualiser"
-                                                            onClick={() => onPreview(doc)}>
+                                                            onClick={() => apercu.basculer(`doc-${doc.id}`)}>
                                                             <Eye className="h-3.5 w-3.5" />
                                                         </Button>
                                                         <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
@@ -1106,6 +1612,23 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
                                             </div>
                                         </td>
                                     </tr>
+                                    {/* Dans un tableau, l'aperçu doit occuper sa propre ligne
+                                        sur toute la largeur — colSpan={3} suit les trois
+                                        colonnes de l'en-tête. */}
+                                    {apercu.estOuvert(`doc-${doc.id}`) && doc.has_file && (
+                                        <tr>
+                                            <td colSpan={3} className="px-5 pb-3">
+                                                <ApercuSousLigne
+                                                    ouvert
+                                                    doc={doc}
+                                                    previewUrl={doc.url_preview}
+                                                    downloadUrl={doc.url_download}
+                                                    onFermer={apercu.fermer}
+                                                />
+                                            </td>
+                                        </tr>
+                                    )}
+                                    </React.Fragment>
                                 );
                             })}
                         </tbody>
@@ -1130,7 +1653,97 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
                 onConfirm={confirmState?.onConfirm ?? (() => {})}
             />
             <DocumentHistoryDialog doc={historyDoc} onClose={() => setHistoryDoc(null)} />
+            <ModalDeposerActe dossier={dossier} ouvert={depotActe} onClose={() => setDepotActe(false)} />
         </Card>
+    );
+}
+
+/**
+ * Dépôt manuel d'un acte au dossier.
+ *
+ * L'étape Édition exige au moins un acte pour être franchie, et n'offrait que « Générer depuis les
+ * modèles » : un dossier dont aucun modèle n'est actif — le cas de toutes les modifications de
+ * statuts tant que les gabarits ne sont pas fournis — restait bloqué sans recours.
+ * `DocumentController::store` et sa route existaient déjà : seule cette entrée manquait.
+ */
+function ModalDeposerActe({ dossier, ouvert, onClose }) {
+    const [nom, setNom] = useState('');
+    const [categorie, setCategorie] = useState('acte_principal');
+    const [fichier, setFichier] = useState(null);
+    const [envoi, setEnvoi] = useState(false);
+
+    const fermer = () => {
+        setNom(''); setCategorie('acte_principal'); setFichier(null);
+        onClose();
+    };
+
+    const soumettre = (e) => {
+        e.preventDefault();
+        setEnvoi(true);
+        router.post(`/dossiers/${dossier.reference}/documents`, { nom, categorie, fichier }, {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: fermer,
+            onError: notifyValidationError,
+            onFinish: () => setEnvoi(false),
+        });
+    };
+
+    return (
+        <Dialog open={ouvert} onOpenChange={(o) => !o && fermer()}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Déposer un acte</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={soumettre} className="space-y-4">
+                    <div>
+                        <Label htmlFor="acte-nom">Nom de l'acte</Label>
+                        <Input
+                            id="acte-nom"
+                            value={nom}
+                            onChange={(e) => setNom(e.target.value)}
+                            placeholder="Procès-verbal de l'assemblée"
+                            required
+                            className="mt-1"
+                        />
+                    </div>
+                    <div>
+                        <Label htmlFor="acte-categorie">Catégorie</Label>
+                        <select
+                            id="acte-categorie"
+                            value={categorie}
+                            onChange={(e) => setCategorie(e.target.value)}
+                            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                        >
+                            <option value="acte_principal">Acte principal</option>
+                            <option value="annexe">Annexe</option>
+                            <option value="procedure">Procédure</option>
+                            <option value="lettre">Lettre</option>
+                            <option value="recepisse">Récépissé</option>
+                        </select>
+                    </div>
+                    <div>
+                        <Label htmlFor="acte-fichier">Fichier</Label>
+                        <Input
+                            id="acte-fichier"
+                            type="file"
+                            accept=".pdf,.doc,.docx,.odt,.xlsx,.xls"
+                            onChange={(e) => setFichier(e.target.files?.[0] ?? null)}
+                            className="mt-1"
+                        />
+                        <p className="mt-1 text-xs text-slate-400">
+                            Facultatif — un acte peut être créé maintenant et son fichier déposé plus tard.
+                        </p>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="ghost" onClick={fermer}>Annuler</Button>
+                        <Button type="submit" disabled={envoi || !nom.trim()}>
+                            {envoi ? 'Dépôt…' : 'Déposer'}
+                        </Button>
+                    </div>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -1154,13 +1767,6 @@ function FormaliteCardDossier({ f, peutGerer }) {
     const patch = (data) =>
         router.patch(`/formalites/${f.id}`, data, { preserveState: true, onError: notifyValidationError });
 
-    const handleCloture  = () => setConfirmState({
-        title: 'Clôturer cette formalité ?',
-        description: 'La formalité sera marquée comme clôturée.',
-        confirmLabel: 'Clôturer',
-        variant: 'default',
-        onConfirm: () => patch({ statut: 'cloture' }),
-    });
     const handleTogglePreview = (p) => setPreviewPieceId(id => id === p.id ? null : p.id);
     const handleSupprimer = () => setConfirmState({
         title: `Supprimer la formalité ${f.libelle || f.organismeLabel} ?`,
@@ -1170,7 +1776,6 @@ function FormaliteCardDossier({ f, peutGerer }) {
         onConfirm: () => router.delete(`/formalites/${f.id}`, { preserveState: true, onError: notifyValidationError }),
     });
 
-    const isCloture  = f.statut === 'cloture';
     const meta = FORMALITE_STATUT_META[f.statut] ?? FORMALITE_STATUT_META.a_deposer;
     const peutDeposer = f.statut === 'a_deposer' || f.statut === 'rejete';
 
@@ -1190,12 +1795,10 @@ function FormaliteCardDossier({ f, peutGerer }) {
         <Card className={cn(
             'border-l-4',
             f.estDepassee                                               && 'border-l-danger',
-            !f.estDepassee && isCloture                                 && 'border-l-slate-300',
             !f.estDepassee && f.statut === 'retour_recu'                && 'border-l-success',
             !f.estDepassee && (f.statut === 'depose' || f.statut === 'en_attente') && 'border-l-blue-400',
             !f.estDepassee && f.statut === 'a_deposer'                  && 'border-l-slate-200',
             !f.estDepassee && f.statut === 'rejete'                     && 'border-l-danger',
-            isCloture && 'opacity-60',
         )}>
             <CardContent className="p-4">
                 {/* Ligne organisme + badge statut */}
@@ -1235,8 +1838,11 @@ function FormaliteCardDossier({ f, peutGerer }) {
                     </span>
                 </div>
 
-                {/* Pièces collapsible */}
-                {pieces.length > 0 && (
+                {/* Pièces attendues au RETOUR de l'organisme, pas au dépôt : masquées tant
+                    que la formalité n'a pas été déposée. Les afficher dès « à déposer »
+                    laissait croire qu'il fallait les téléverser avant d'aller à l'organisme.
+                    `rejete` compte comme déposé — la formalité a fait l'aller-retour. */}
+                {pieces.length > 0 && f.statut !== 'a_deposer' && (
                     <div className="mt-3 border-t border-slate-100 pt-2">
                         <button
                             type="button"
@@ -1275,7 +1881,7 @@ function FormaliteCardDossier({ f, peutGerer }) {
                     <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2 flex-wrap">
                         {peutDeposer && !f.estBloquee && (
                             <Button size="sm" variant="seal" className="h-7 text-xs gap-1" onClick={() => setDepotOpen(true)}>
-                                <Upload className="h-3.5 w-3.5" /> {f.statut === 'rejete' ? 'Redéposer' : 'Préparer dépôt'}
+                                <Upload className="h-3.5 w-3.5" /> {f.statut === 'rejete' ? 'Redéposer' : 'Marquer le dépôt'}
                             </Button>
                         )}
                         {(f.statut === 'depose' || f.statut === 'en_attente') && (
@@ -1288,24 +1894,11 @@ function FormaliteCardDossier({ f, peutGerer }) {
                                 <MailCheck className="h-3.5 w-3.5" /> Enregistrer un retour
                             </Button>
                         )}
-                        {f.statut === 'retour_recu' && (
-                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50"
-                                onClick={handleCloture}>
-                                <CheckCheck className="h-3.5 w-3.5" /> Clôturer
-                            </Button>
-                        )}
-                        {isCloture && (
-                            <span className="flex items-center gap-1 text-xs text-slate-400">
-                                <Check className="h-3.5 w-3.5 text-success" /> Clôturée
-                            </span>
-                        )}
                         <div className="flex-1" />
-                        {!isCloture && (
-                            <Button size="icon-sm" variant="ghost" className="text-slate-300 hover:text-red-500"
-                                onClick={handleSupprimer} title="Supprimer cette formalité">
-                                <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                        )}
+                        <Button size="icon-sm" variant="ghost" className="text-slate-300 hover:text-red-500"
+                            onClick={handleSupprimer} title="Supprimer cette formalité">
+                            <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                     </div>
                 )}
             </CardContent>
@@ -1318,8 +1911,8 @@ function FormalitesTab({ dossier, reference, can }) {
     const peutGerer = can?.gererFormalites;
     const formalites = dossier.formalites ?? [];
 
-    const termine  = formalites.filter(f => f.statut === 'retour_recu' || f.statut === 'cloture').length;
-    const retard   = formalites.filter(f => f.estDepassee && f.statut !== 'retour_recu' && f.statut !== 'cloture').length;
+    const termine  = formalites.filter(f => f.statut === 'retour_recu').length;
+    const retard   = formalites.filter(f => f.estDepassee && f.statut !== 'retour_recu').length;
     const bloque   = formalites.filter(f => f.estBloquee).length;
     const aDeposer = formalites.filter(f => (f.statut === 'a_deposer' || f.statut === 'rejete') && !f.estBloquee && !f.estDepassee).length;
 
@@ -1383,7 +1976,10 @@ function FormalitesTab({ dossier, reference, can }) {
     );
 }
 
-function ExpeditionTab({ dossier, reference, can, onPreview }) {
+function ExpeditionTab({ dossier, reference, can }) {
+    // Aperçu déplié sous la ligne concernée, et non dans le panneau de pied de page.
+    const apercu = useApercuEnLigne();
+
     const [generatingId, setGeneratingId] = useState(null);
     const peutGerer  = can?.genererCourriers;
     const modeles    = dossier.courrierModelesApplicables ?? [];
@@ -1430,8 +2026,10 @@ function ExpeditionTab({ dossier, reference, can, onPreview }) {
                     <CardContent className="pt-0 space-y-2">
                         {modeles.map(m => {
                             const genere = dernierParModele.get(m.id);
+                            const cleApercu = `modele-${m.id}`;
                             return (
-                                <div key={m.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
+                                <div key={m.id}>
+                                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <span className="text-sm font-medium text-slate-800 truncate">{m.nom}</span>
@@ -1449,10 +2047,11 @@ function ExpeditionTab({ dossier, reference, can, onPreview }) {
                                         {genere?.has_file && (
                                             <>
                                                 <Button
-                                                    variant="ghost" size="icon-sm" title="Aperçu"
-                                                    onClick={() => onPreview({ id: genere.id, nom: genere.objet, chemin_fichier: genere.chemin_fichier }, genere.url_preview, genere.url_download)}
+                                                    variant="ghost" size="icon-sm"
+                                                    title={apercu.estOuvert(cleApercu) ? "Masquer l'aperçu" : 'Aperçu'}
+                                                    onClick={() => apercu.basculer(cleApercu)}
                                                 >
-                                                    <Eye className="h-3.5 w-3.5" />
+                                                    <Eye className={cn('h-3.5 w-3.5', apercu.estOuvert(cleApercu) && 'text-seal')} />
                                                 </Button>
                                                 <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
                                                     <a href={genere.url_download} download>
@@ -1479,6 +2078,16 @@ function ExpeditionTab({ dossier, reference, can, onPreview }) {
                                             </Button>
                                         )}
                                     </div>
+                                </div>
+                                {genere?.has_file && (
+                                    <ApercuSousLigne
+                                        ouvert={apercu.estOuvert(cleApercu)}
+                                        doc={{ id: genere.id, nom: genere.objet, chemin_fichier: genere.chemin_fichier }}
+                                        previewUrl={genere.url_preview}
+                                        downloadUrl={genere.url_download}
+                                        onFermer={apercu.fermer}
+                                    />
+                                )}
                                 </div>
                             );
                         })}
@@ -1518,10 +2127,11 @@ function ExpeditionTab({ dossier, reference, can, onPreview }) {
                                     {c.has_file && (
                                         <>
                                             <Button
-                                                variant="ghost" size="icon-sm" title="Aperçu"
-                                                onClick={() => onPreview({ id: c.id, nom: c.objet, chemin_fichier: c.chemin_fichier }, c.url_preview, c.url_download)}
+                                                variant="ghost" size="icon-sm"
+                                                title={apercu.estOuvert(`courrier-${c.id}`) ? "Masquer l'aperçu" : 'Aperçu'}
+                                                onClick={() => apercu.basculer(`courrier-${c.id}`)}
                                             >
-                                                <Eye className="h-3.5 w-3.5" />
+                                                <Eye className={cn('h-3.5 w-3.5', apercu.estOuvert(`courrier-${c.id}`) && 'text-seal')} />
                                             </Button>
                                             <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
                                                 <a href={c.url_download} download>
@@ -1537,6 +2147,17 @@ function ExpeditionTab({ dossier, reference, can, onPreview }) {
                                     )}
                                 </div>
                             </CardContent>
+                            {c.has_file && (
+                                <div className="px-4 pb-3">
+                                    <ApercuSousLigne
+                                        ouvert={apercu.estOuvert(`courrier-${c.id}`)}
+                                        doc={{ id: c.id, nom: c.objet, chemin_fichier: c.chemin_fichier }}
+                                        previewUrl={c.url_preview}
+                                        downloadUrl={c.url_download}
+                                        onFermer={apercu.fermer}
+                                    />
+                                </div>
+                            )}
                         </Card>
                     ))}
                 </div>
@@ -1545,45 +2166,112 @@ function ExpeditionTab({ dossier, reference, can, onPreview }) {
     );
 }
 
+/**
+ * Conditions restant à remplir pour quitter l'étape courante.
+ *
+ * ⚠️ Miroir de DossierStepService::verifierPrerequis(), qui reste l'autorité : ce
+ * fichier n'affiche que ce que le serveur appliquera. Toute règle modifiée là-bas
+ * doit l'être ici — contrairement aux deux `match` PHP (exhaustifs), ce `switch`
+ * JavaScript n'a aucun filet si une étape est ajoutée.
+ *
+ * Chaque blocage est un objet { texte, tab?, ancre? } : `tab`/`ancre` rendent le
+ * message cliquable pour amener directement à l'endroit où agir, plutôt que de
+ * laisser l'utilisateur chercher la section concernée.
+ */
 function getStepBlockers(dossier) {
     const etape = dossier?.etape?.value;
     const docs = dossier?.documents ?? [];
     const formalites = dossier?.formalites ?? [];
     const revision = dossier?.revision;
-    const modelesCourrier = dossier?.courrierModelesApplicables ?? [];
-    const courriers = dossier?.courriers ?? [];
 
     switch (etape) {
-        case 'initialisation': {
-            const b = [];
-            if (!dossier.objet?.trim()) b.push("L'objet du dossier n'est pas renseigné");
-            if (!dossier.notaire) b.push("Aucun notaire n'est assigné au dossier");
-            if (!dossier.reviseur) b.push("Aucun certificateur n'est assigné au dossier");
-            return b;
-        }
+
+        // Constitution du dossier — miroir de
+        // DossierStepService::erreursDeConstitution(). Partagé par les deux premières
+        // étapes : l'Édition rejoue ces contrôles pour les dossiers antérieurs au
+        // 2026-08-04, qui n'ont jamais franchi d'Initialisation.
+        case 'initialisation':
         case 'edition': {
-            if (docs.length === 0) return ["Aucun document n'a été ajouté — au moins un acte est requis"];
-            return [];
+            const b = [];
+            if (!dossier.objet?.trim()) b.push({ texte: "L'objet du dossier n'est pas renseigné" });
+            if (!dossier.notaire) b.push({ texte: "Aucun notaire n'est assigné au dossier" });
+            if (!dossier.reviseur) b.push({ texte: "Aucun certificateur n'est assigné au dossier" });
+            const partiesIncompletes = (dossier.parties ?? []).filter(p =>
+                (p.piecesChecklist ?? []).some(item => !item.est_fourni));
+            if (partiesIncompletes.length > 0) {
+                b.push({
+                    texte: `Pièces justificatives manquantes pour : ${partiesIncompletes.map(p => p.nom).join(', ')}`,
+                    tab: 'informations',
+                    ancre: ANCRE_PIECES_PARTIES,
+                    action: 'Compléter les pièces',
+                });
+            }
+            if (!dossier.accordClient?.est_signe_cachete) {
+                // Libellé porté par le dossier : une modification de statuts attend la décision
+                // des associés, pas une fiche de recueil signée.
+                const attendu = dossier.accordAttendu;
+                b.push({
+                    texte: attendu
+                        ? `« ${attendu.nom} » n'a pas été téléversé`
+                        : "L'accord signé du client sur le questionnaire n'a pas été téléversé",
+                    tab: 'informations',
+                    ancre: ANCRE_ACCORD_CLIENT,
+                    action: attendu?.imprimable === false ? 'Déposer la décision' : "Déposer l'accord",
+                });
+            }
+            // Les actes ne sont générés qu'à l'entrée en Édition : ne rien exiger avant.
+            if (etape === 'edition' && docs.length === 0) {
+                b.push({ texte: "Aucun acte n'a été produit — au moins un est requis", tab: 'documents', action: 'Voir les actes' });
+            }
+            return b;
         }
         case 'revision': {
             if (revision?.statut === 'valide') return [];
-            return [{
-                renvoye:     "Certification renvoyée en correction — les points signalés doivent être corrigés",
-                en_attente:  "Certification en attente — elle doit être évaluée par le certificateur",
-                en_cours:    "Certification en cours — elle doit être validée pour continuer",
-            }[revision?.statut] ?? "La certification doit être validée avant de passer aux formalités"];
+            const texte = {
+                renvoye:    'Certification renvoyée en correction — les points signalés doivent être corrigés',
+                en_attente: 'Certification en attente — elle doit être évaluée par le certificateur',
+                en_cours:   'Certification en cours — elle doit être validée pour continuer',
+            }[revision?.statut] ?? 'La certification doit être validée avant de passer aux signatures';
+            return [{ texte, tab: 'revision', action: 'Ouvrir la certification' }];
+        }
+        case 'signature': {
+            const b = [];
+            if (!dossier.date_signature_client) {
+                b.push({ texte: "La date de signature du client n'est pas renseignée", tab: 'signature', action: 'Renseigner' });
+            }
+            if (!dossier.date_signature_notaire) {
+                b.push({ texte: "La date de signature du notaire n'est pas renseignée", tab: 'signature', action: 'Renseigner' });
+            }
+            return b;
         }
         case 'formalites': {
-            const nonClos = formalites.filter(f => f.statut !== 'cloture');
-            if (nonClos.length > 0) return [`${nonClos.length} formalité(s) non clôturée(s) : ${nonClos.map(f => f.libelle || f.organismeLabel || f.organisme).join(', ')}`];
-            return [];
+            // « Terminée » = retour reçu (le statut `cloture` par formalité a été
+            // supprimé) — voir StatutFormalite::estTerminee() côté serveur.
+            const nonClos = formalites.filter(f => f.statut !== 'retour_recu');
+            if (nonClos.length === 0) return [];
+            const noms = nonClos.map(f => f.libelle || f.organismeLabel || f.organisme).join(', ');
+            return [{
+                texte: `${nonClos.length} formalité(s) sans retour enregistré : ${noms}`,
+                tab: 'formalites',
+                action: 'Ouvrir les formalités',
+            }];
         }
         case 'expedition': {
-            if (modelesCourrier.length === 0) return [];
-            const envoye = courriers.some(c => c.type === 'transmission' && c.statut === 'envoye');
-            if (!envoye) return ["Au moins une lettre de transmission doit être générée et marquée « envoyée »"];
-            return [];
+            // Règle alignée sur verifierExpedition() : la facture doit être soldée.
+            const b = [];
+            const factures = dossier?.factures ?? [];
+            const resteAPayer = factures.reduce((acc, f) => acc + (f.soldeRestant ?? 0), 0);
+            if (resteAPayer > 0) {
+                b.push({
+                    texte: `Facture non soldée : ${fmtGNF(resteAPayer)} GNF restent à encaisser.`,
+                    tab: 'facturation',
+                    action: "Aller à la facturation",
+                });
+            }
+
+            return b;
         }
+        // 'cloture' : étape terminale, aucun bouton « Avancer » n'est rendu.
         default:
             return [];
     }
@@ -1591,7 +2279,10 @@ function getStepBlockers(dossier) {
 
 const fmtGNF = (n) => Number(n || 0).toLocaleString('fr-FR');
 
-function FacturationTab({ dossier, can, onPreview }) {
+function FacturationTab({ dossier, can }) {
+    // Aperçu du reçu déplié sous la ligne de paiement concernée.
+    const apercu = useApercuEnLigne();
+
     const [paiementOpen, setPaiementOpen] = useState(false);
     const [paiementEnEdition, setPaiementEnEdition] = useState(null);
     const [paiementASupprimer, setPaiementASupprimer] = useState(null);
@@ -1600,9 +2291,6 @@ function FacturationTab({ dossier, can, onPreview }) {
     const [ligneASupprimer, setLigneASupprimer] = useState(null);
     const peutGerer = !!can?.gererFacturation;
 
-    const consulterRecu = (recu) => {
-        onPreview({ id: recu.id, nom: `Reçu ${recu.numero}`, chemin_fichier: 'recu.pdf' }, recu.url_apercu, recu.url_telechargement);
-    };
 
     const genererRecu = (p) => {
         router.post(`/paiements/${p.id}/recu`, {}, { preserveScroll: true, onError: notifyValidationError });
@@ -1679,11 +2367,28 @@ function FacturationTab({ dossier, can, onPreview }) {
                     <div className="text-[10px] text-slate-400 uppercase tracking-wide">
                         {soldeRestant < 0 ? 'Trop-perçu' : 'Solde restant dû'}
                     </div>
-                    <div className={cn('text-lg font-semibold font-ref mt-0.5', soldeRestant > 0 ? 'text-warning-text' : 'text-success')}>
+                    {/* Un trop-perçu n'est plus un état atteignable (le total des paiements
+                        est plafonné au total facturé) : quand il apparaît, c'est une anomalie
+                        de données antérieures — donc en rouge, pas en vert. */}
+                    <div className={cn('text-lg font-semibold font-ref mt-0.5',
+                        soldeRestant < 0 ? 'text-danger' : soldeRestant > 0 ? 'text-warning-text' : 'text-success')}>
                         {fmtGNF(Math.abs(soldeRestant))} GNF
                     </div>
                 </CardContent></Card>
             </div>
+
+            {facture.estTropPercue && (
+                <div className="flex items-start gap-2.5 p-3 rounded-lg bg-danger-bg border border-danger/20 text-xs text-danger-text">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>
+                        <strong>Anomalie à corriger.</strong> Cette facture a encaissé{' '}
+                        <span className="font-ref">{fmtGNF(Math.abs(soldeRestant))} GNF</span> de plus que son
+                        total. Le total des paiements ne peut plus dépasser le total facturé — cet écart
+                        vient d'un enregistrement antérieur à cette règle. Corrigez ou supprimez un paiement
+                        ci-dessous (possible tant qu'aucun reçu n'a été émis).
+                    </span>
+                </div>
+            )}
 
             <Card>
                 <CardHeader className="pb-3 border-b border-slate-100 flex flex-row justify-between items-center">
@@ -1698,7 +2403,18 @@ function FacturationTab({ dossier, can, onPreview }) {
                             </Button>
                         )}
                         {peutGerer && (
-                            <Button variant="seal" size="sm" className="h-8 gap-1" onClick={() => setPaiementOpen(true)}>
+                            <Button
+                                variant="seal"
+                                size="sm"
+                                className="h-8 gap-1"
+                                onClick={() => setPaiementOpen(true)}
+                                disabled={!facture.peutRecevoirPaiement}
+                                title={facture.peutRecevoirPaiement
+                                    ? undefined
+                                    : facture.total_chiffres > 0
+                                        ? 'Facture entièrement soldée — le total des paiements ne peut pas dépasser le total facturé'
+                                        : "Aucun montant à encaisser : ajoutez d'abord une ligne à la facture"}
+                            >
                                 <Wallet className="h-3.5 w-3.5" /> Enregistrer paiement
                             </Button>
                         )}
@@ -1791,7 +2507,8 @@ function FacturationTab({ dossier, can, onPreview }) {
                             </thead>
                             <tbody className="divide-y divide-slate-50">
                                 {paiements.map(p => (
-                                    <tr key={p.id}>
+                                    <React.Fragment key={p.id}>
+                                    <tr>
                                         <td className="py-2.5 text-slate-600">{p.date_paiement}</td>
                                         <td className="py-2.5 text-slate-700">
                                             Paiement{p.moyen_paiement && ` (${p.moyen_paiement})`}
@@ -1811,7 +2528,7 @@ function FacturationTab({ dossier, can, onPreview }) {
                                         {peutGerer && (
                                             <td className="py-2.5 text-right">
                                                 {p.recu ? (
-                                                    <Button variant="ghost" size="icon-sm" className="h-7 w-7 text-slate-400 hover:text-seal" title={`Consulter le reçu ${p.recu.numero}`} onClick={() => consulterRecu(p.recu)}>
+                                                    <Button variant="ghost" size="icon-sm" className="h-7 w-7 text-slate-400 hover:text-seal" title={`Consulter le reçu ${p.recu.numero}`} onClick={() => apercu.basculer(`recu-${p.recu.id}`)}>
                                                         <Eye className="h-3.5 w-3.5" />
                                                     </Button>
                                                 ) : (
@@ -1830,6 +2547,20 @@ function FacturationTab({ dossier, can, onPreview }) {
                                             </td>
                                         )}
                                     </tr>
+                                    {p.recu && apercu.estOuvert(`recu-${p.recu.id}`) && (
+                                        <tr>
+                                            <td colSpan={peutGerer ? 5 : 4} className="pb-3">
+                                                <ApercuSousLigne
+                                                    ouvert
+                                                    doc={{ id: p.recu.id, nom: `Reçu ${p.recu.numero}`, chemin_fichier: 'recu.pdf' }}
+                                                    previewUrl={p.recu.url_apercu}
+                                                    downloadUrl={p.recu.url_telechargement}
+                                                    onFermer={apercu.fermer}
+                                                />
+                                            </td>
+                                        </tr>
+                                    )}
+                                    </React.Fragment>
                                 ))}
                                 {soldeRestant > 0 && (
                                     <tr>
@@ -1891,9 +2622,12 @@ function buildInitialRevisionEtats(documents, points) {
 // à ouvrir le bon onglet à l'arrivée sur le dossier et à y basculer
 // automatiquement dès que l'étape change (avancer, renvoyer en correction…).
 const ETAPE_TAB = {
+    // L'Initialisation se joue dans l'onglet Informations : accord client à déposer,
+    // pièces des personnes à compléter, questionnaire à relire.
     initialisation: 'informations',
     edition:        'documents',
     revision:       'revision',
+    signature:      'signature',
     formalites:     'formalites',
     expedition:     'expedition',
     cloture:        'informations',
@@ -1908,12 +2642,20 @@ const ETAPE_TAB = {
 // Étape minimale à partir de laquelle chaque onglet devient pleinement pertinent.
 // Les onglets absents de cette table (informations, facturation) sont
 // transversaux et ne sont jamais estompés.
+// Étape à partir de laquelle un onglet devient pleinement actif — c'est-à-dire l'étape
+// PENDANT laquelle on y travaille, pas celle qu'il porte dans son nom.
 const TAB_STAGE = {
     documents:   'edition',
     revision:    'revision',
+    signature:   'signature',
     formalites:  'formalites',
     expedition:  'expedition',
-    cloture:     'cloture',
+    // ⚠️ `expedition`, pas `cloture` : la vérification de l'inventaire se fait PENDANT
+    // l'Expédition — c'est le prérequis pour en sortir, et `DossierPolicy::cloturerDocuments`
+    // ne l'autorise qu'à cette étape. Le régler sur `cloture` estompait l'onglet au moment
+    // précis où il fallait y agir : on demandait de vérifier 19 pièces dans un onglet qui
+    // s'affichait comme non atteint. Contradiction signalée en usage réel.
+    cloture:     'expedition',
 };
 
 // Un onglet déjà atteint une fois (des données concrètes y existent déjà) reste
@@ -1932,7 +2674,9 @@ function tabPasEncoreAtteint(tabValue, etapeActuelle, dossier) {
         revision:   !!dossier.revision,
         formalites: dossier.formalites?.length > 0,
         expedition: dossier.courriers?.length > 0,
-        cloture:    (dossier.documents ?? []).some(d => d.est_signe_cachete) || (dossier.courriers ?? []).some(c => c.est_signe_cachete),
+        // Atteint dès qu'une pièce a été vérifiée — sert au cas où le dossier reculerait
+        // d'Expédition à Formalités : le travail déjà fait reste consultable.
+        cloture:    (dossier.clotureProgression?.verifiees ?? 0) > 0,
     }[tabValue];
 
     return !dejaDesDonnees;
@@ -2013,7 +2757,7 @@ function ModalAjouterPersonne({ open, onClose, reference }) {
 }
 
 export default function DossierShow() {
-    const { dossier, can, reviseurs, formalistes, notaires } = usePage().props;
+    const { dossier, can, reviseurs, formalistes, notaires, societe, modificationStatutaire } = usePage().props;
     const [activeTab, setActiveTab] = useState(() => {
         const requested = new URLSearchParams(window.location.search).get('tab');
         return requested || ETAPE_TAB[dossier?.etape?.value] || 'informations';
@@ -2024,19 +2768,25 @@ export default function DossierShow() {
     const [editQuestOpen, setEditQuestOpen] = useState(false);
     const [ajoutPersonneOpen, setAjoutPersonneOpen] = useState(false);
     const [historiqueOpen, setHistoriqueOpen] = useState(false);
-    const [previewDoc, setPreviewDoc] = useState(null);
-    const openPreview = (doc, previewUrl, downloadUrl) => setPreviewDoc({ doc, previewUrl, downloadUrl });
-    const previewRef = useRef(null);
+    // Aperçu des documents de l'onglet Certification, déplié sous la carte concernée.
+    // Le panneau d'aperçu unique en pied de page a été supprimé : chaque liste déplie
+    // désormais l'aperçu sous la ligne concernée (voir Components/documents/ApercuSousLigne).
+    const apercuCertif = useApercuEnLigne();
 
-    // Ferme l'aperçu en cours quand on change d'onglet — sinon il resterait affiché
-    // sous un onglet sans rapport avec le document consulté.
-    useEffect(() => { setPreviewDoc(null); }, [activeTab]);
-
-    // Amène le panneau d'aperçu dans le champ de vision dès son ouverture, sans
-    // quoi l'utilisateur devrait défiler manuellement pour le voir apparaître.
+    // L'onglet actif est reporté dans l'URL (?tab=…), lue par l'initialiseur ci-dessus.
+    // Deux bénéfices : un remontage du composant — quelle qu'en soit la cause — retrouve
+    // l'onglet consulté au lieu de sauter sur celui de l'étape courante (c'est ce qui se
+    // produisait après « Tout vérifier » dans l'onglet Clôture), et un lien vers un
+    // onglet précis devient partageable.
+    // replaceState et non pushState : chaque changement d'onglet n'a pas à créer une
+    // entrée d'historique que le bouton Retour devrait défaire une par une.
     useEffect(() => {
-        if (previewDoc) previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, [previewDoc]);
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('tab') === activeTab) return;
+        url.searchParams.set('tab', activeTab);
+        window.history.replaceState(window.history.state, '', url);
+    }, [activeTab]);
+
 
     // Révision — évaluation inline des documents (onglet "Révision")
     const [revisionEtats, setRevisionEtats] = useState(() => buildInitialRevisionEtats(dossier.documents, dossier.revision?.points));
@@ -2072,6 +2822,19 @@ export default function DossierShow() {
     }, [etape]);
 
     const blockers = can?.avancer ? getStepBlockers(dossier) : [];
+
+    /**
+     * Amène à l'endroit où lever un blocage : bascule sur l'onglet concerné puis fait
+     * défiler jusqu'à la section. Le défilement est différé d'un tick — l'onglet
+     * cible n'est monté qu'après le rendu déclenché par setActiveTab.
+     */
+    const allerAuBlocage = ({ tab, ancre }) => {
+        if (tab) setActiveTab(tab);
+        if (!ancre) return;
+        setTimeout(() => {
+            document.getElementById(ancre)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 60);
+    };
 
     const actionContextuel = {
         revision:   { label: 'Voir la certification', tab: 'revision', variant: 'seal',    icon: ClipboardCheck },
@@ -2184,28 +2947,66 @@ export default function DossierShow() {
                         largeur d'écran (le panneau latéral droit est masqué sous xl). */}
                     {can?.avancer && (
                         <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-3 shadow-sm">
-                            <div className="flex items-center gap-2 min-w-0">
+                            {/* Le statut était un petit badge pâle, difficile à repérer alors
+                                que c'est l'information qui commande tout le reste de l'écran :
+                                pastille de couleur, libellé lisible, et position dans le
+                                workflow (« 4 / 6 ») pour savoir d'un coup d'œil où en est le
+                                dossier. */}
+                            <div className="flex min-w-0 items-center gap-3">
                                 <span className={cn(
-                                    'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full border shrink-0',
+                                    'inline-flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold',
                                     ETAPE_META[dossier.etape?.value]?.badge ?? 'bg-slate-100 text-slate-600 border-slate-200'
                                 )}>
+                                    <span className={cn(
+                                        'h-2 w-2 rounded-full',
+                                        ETAPE_META[dossier.etape?.value]?.dot ?? 'bg-slate-400'
+                                    )} />
                                     {dossier.etape?.label}
+                                    <span className="text-[11px] font-normal opacity-70">
+                                        {(ETAPE_ORDER.indexOf(dossier.etape?.value) + 1) || '?'} / {ETAPE_ORDER.length}
+                                    </span>
                                 </span>
                                 {(avancerErrors.length > 0 || blockers.length > 0) && (
-                                    <span className="text-xs text-amber-600 flex items-center gap-1 shrink-0">
+                                    <span className="flex shrink-0 items-center gap-1 text-xs text-amber-600">
                                         <AlertTriangle className="h-3 w-3" />
                                         {(avancerErrors.length > 0 ? avancerErrors : blockers).length} condition(s) requise(s)
                                     </span>
                                 )}
                             </div>
+                            {/* Le bouton n'affichait que le nom de l'étape cible, précédé d'une
+                                icône flèche ET suivi d'un « → » en texte : « → Expédition → ».
+                                Rien n'indiquait qu'il s'agissait de faire avancer le dossier, et
+                                la double flèche brouillait la lecture. Désormais une étiquette
+                                « Étape suivante » surmonte la destination : l'action et la cible
+                                sont lisibles séparément. */}
                             <Button
                                 variant="seal"
+                                size="lg"
+                                className="h-auto shrink-0 gap-2.5 py-2"
                                 onClick={() => handleAvancer()}
                                 disabled={avancing || blockers.length > 0}
-                                title={blockers.length > 0 ? 'Des conditions sont requises avant d\'avancer' : ''}
+                                title={blockers.length > 0
+                                    ? 'Des conditions sont requises avant de passer à l\'étape suivante'
+                                    : (dossier.etapeSuivante ? `Faire passer le dossier à l'étape ${dossier.etapeSuivante.label}` : '')}
                             >
-                                <ArrowRight className="h-4 w-4" />
-                                {avancing ? 'En cours…' : (dossier.etapeSuivante ? `${dossier.etapeSuivante.label} →` : 'Avancer →')}
+                                {avancing ? (
+                                    <>
+                                        <RefreshCw className="h-4 w-4 animate-spin" />
+                                        Passage en cours…
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="flex flex-col items-start leading-tight text-left">
+                                            <span className="text-[10px] font-normal uppercase tracking-wide opacity-80">
+                                                {dossier.etapeSuivante?.value === 'cloture' ? 'Dernière étape' : 'Étape suivante'}
+                                            </span>
+                                            <span className="text-sm font-semibold">
+                                                {dossier.etapeSuivante?.label ?? 'Avancer'}
+                                            </span>
+                                        </span>
+                                        <ArrowRight className="h-4 w-4 shrink-0" />
+                                    </>
+                                )}
                             </Button>
                         </div>
                     )}
@@ -2219,6 +3020,20 @@ export default function DossierShow() {
                                         <div className="space-y-2">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-ref text-sm text-seal">{reference}</span>
+                                                {/* Statut également ici : l'en-tête collant n'apparaît
+                                                    que si l'utilisateur peut faire avancer le dossier
+                                                    (voir la condition plus haut), or tout le monde doit
+                                                    savoir où il en est. */}
+                                                <span className={cn(
+                                                    'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold',
+                                                    ETAPE_META[dossier.etape?.value]?.badge ?? 'bg-slate-100 text-slate-600 border-slate-200'
+                                                )}>
+                                                    <span className={cn(
+                                                        'h-1.5 w-1.5 rounded-full',
+                                                        ETAPE_META[dossier.etape?.value]?.dot ?? 'bg-slate-400'
+                                                    )} />
+                                                    {dossier.etape?.label}
+                                                </span>
                                                 {dossier.typeActe?.categorie && (
                                                     <Badge variant="secondary">{dossier.typeActe.categorie}</Badge>
                                                 )}
@@ -2292,10 +3107,31 @@ export default function DossierShow() {
                                                         Conditions requises avant de passer à l'étape suivante
                                                     </p>
                                                     <ul className="space-y-1">
-                                                        {(avancerErrors.length > 0 ? avancerErrors : blockers).map((msg, i) => (
+                                                        {/* Les erreurs serveur arrivent en chaînes brutes, les blocages
+                                                            calculés en objets { texte, tab?, ancre? } — normalisés ici
+                                                            pour n'avoir qu'un seul rendu. */}
+                                                        {(avancerErrors.length > 0
+                                                            ? avancerErrors.map(texte => ({ texte }))
+                                                            : blockers
+                                                        ).map((item, i) => (
                                                             <li key={i} className="text-xs text-amber-700 flex items-start gap-1.5">
                                                                 <span className="mt-1.5 h-1 w-1 rounded-full bg-amber-400 shrink-0" />
-                                                                {msg}
+                                                                {/* Bouton explicite et non simple soulignement : le
+                                                                    lien passait inaperçu, et l'utilisateur ne voyait pas
+                                                                    par où lever le blocage — signalé en usage réel. */}
+                                                                {item.tab ? (
+                                                                    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                                                        <span>{item.texte}</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => allerAuBlocage(item)}
+                                                                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-white"
+                                                                        >
+                                                                            {item.action ?? 'Corriger'}
+                                                                            <ArrowRight className="h-3 w-3" />
+                                                                        </button>
+                                                                    </span>
+                                                                ) : item.texte}
                                                             </li>
                                                         ))}
                                                     </ul>
@@ -2388,6 +3224,11 @@ export default function DossierShow() {
                                         <span className="flex items-center gap-1.5">
                                             <Info className="h-3.5 w-3.5" />
                                             Informations
+                                            {/* L'Initialisation se joue dans cet onglet : même
+                                                pastille « étape en cours » que les autres. */}
+                                            {etape === 'initialisation' && activeTab !== 'informations' && (
+                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
+                                            )}
                                         </span>
                                     </TabsTrigger>
                                     <TabsTrigger value="documents" className={cn(tabPasEncoreAtteint('documents', etape, dossier) && 'opacity-40')}>
@@ -2412,6 +3253,15 @@ export default function DossierShow() {
                                                 <span className="h-1.5 w-1.5 rounded-full bg-warning" />
                                             )}
                                             {etape === 'revision' && activeTab !== 'revision' && (
+                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
+                                            )}
+                                        </span>
+                                    </TabsTrigger>
+                                    <TabsTrigger value="signature" className={cn(tabPasEncoreAtteint('signature', etape, dossier) && 'opacity-40')}>
+                                        <span className="flex items-center gap-1.5">
+                                            <FileSignature className="h-3.5 w-3.5" />
+                                            Signature
+                                            {etape === 'signature' && activeTab !== 'signature' && (
                                                 <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
                                             )}
                                         </span>
@@ -2444,24 +3294,6 @@ export default function DossierShow() {
                                             )}
                                         </span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="cloture" className={cn(tabPasEncoreAtteint('cloture', etape, dossier) && 'opacity-40')}>
-                                        <span className="flex items-center gap-1.5">
-                                            <Lock className="h-3.5 w-3.5" />
-                                            Clôture
-                                            {(() => {
-                                                const restants = (dossier.documents ?? []).filter(d => d.est_requis && !d.est_signe_cachete).length
-                                                    + (dossier.courriers ?? []).filter(c => c.est_requis && !c.est_signe_cachete).length;
-                                                return restants > 0 ? (
-                                                    <span className="text-[10px] bg-warning-bg text-warning-text px-1.5 py-0.5 rounded-full">
-                                                        {restants}
-                                                    </span>
-                                                ) : null;
-                                            })()}
-                                            {etape === 'cloture' && activeTab !== 'cloture' && (
-                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
-                                            )}
-                                        </span>
-                                    </TabsTrigger>
                                     <TabsTrigger value="facturation">
                                         <span className="flex items-center gap-1.5">
                                             <Receipt className="h-3.5 w-3.5" />
@@ -2470,6 +3302,31 @@ export default function DossierShow() {
                                                 <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">
                                                     {dossier.factures.length}
                                                 </span>
+                                            )}
+                                        </span>
+                                    </TabsTrigger>
+                                    <TabsTrigger value="cloture" className={cn(tabPasEncoreAtteint('cloture', etape, dossier) && 'opacity-40')}>
+                                        <span className="flex items-center gap-1.5">
+                                            <Lock className="h-3.5 w-3.5" />
+                                            Clôture
+                                            {(() => {
+                                                // Pièces restant à vérifier dans l'inventaire. Le compteur
+                                                // lisait `est_requis`, colonne vidée lors du passage à
+                                                // l'inventaire dérivé : il affichait donc toujours 0.
+                                                const { total = 0, verifiees = 0 } = dossier.clotureProgression ?? {};
+                                                const restantes = total - verifiees;
+                                                return restantes > 0 ? (
+                                                    <span className="text-[10px] bg-warning-bg text-warning-text px-1.5 py-0.5 rounded-full">
+                                                        {restantes}
+                                                    </span>
+                                                ) : total > 0 ? (
+                                                    <span className="text-[10px] bg-success-bg text-success-text px-1.5 py-0.5 rounded-full">
+                                                        ✓
+                                                    </span>
+                                                ) : null;
+                                            })()}
+                                            {etape === 'cloture' && activeTab !== 'cloture' && (
+                                                <span className="h-1.5 w-1.5 rounded-full bg-seal" title="Étape en cours" />
                                             )}
                                         </span>
                                     </TabsTrigger>
@@ -2485,6 +3342,8 @@ export default function DossierShow() {
                                         managedRoles={managedRoles}
                                         onAjouterPersonne={() => setAjoutPersonneOpen(true)}
                                         onSupprimerPersonne={supprimerPersonne}
+                                        societe={societe}
+                                        modificationStatutaire={modificationStatutaire}
                                     />
                                 </TabsContent>
 
@@ -2497,7 +3356,6 @@ export default function DossierShow() {
                                         can={can}
                                         avancing={avancing}
                                         onSubmitRevision={() => handleAvancer()}
-                                        onPreview={openPreview}
                                         onEditQuest={() => setEditQuestOpen(true)}
                                     />
                                 </TabsContent>
@@ -2648,7 +3506,7 @@ export default function DossierShow() {
                                                                 <div className="min-w-0">
                                                                     <p className="font-medium text-slate-800 leading-snug">{doc.nom}</p>
                                                                     <Badge variant="outline" className="mt-1">
-                                                                        {TYPE_DOC_LABELS[doc.categorie] ?? doc.categorie}
+                                                                        {doc.typeDocLabel ?? doc.categorie}
                                                                     </Badge>
                                                                 </div>
                                                             </div>
@@ -2666,7 +3524,7 @@ export default function DossierShow() {
                                                                     </a>
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => openPreview(doc)}
+                                                                        onClick={() => apercuCertif.basculer(`certif-${doc.id}`)}
                                                                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all"
                                                                     >
                                                                         <Eye className="h-3.5 w-3.5" />
@@ -2675,6 +3533,16 @@ export default function DossierShow() {
                                                                 </div>
                                                             )}
                                                         </div>
+
+                                                        {doc.has_file && (
+                                                            <ApercuSousLigne
+                                                                ouvert={apercuCertif.estOuvert(`certif-${doc.id}`)}
+                                                                doc={doc}
+                                                                previewUrl={doc.url_preview}
+                                                                downloadUrl={doc.url_download}
+                                                                onFermer={apercuCertif.fermer}
+                                                            />
+                                                        )}
 
                                                         {isCorrigeEnAttente && (
                                                             <div className="mt-4 pt-4 border-t border-slate-100 flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg p-3">
@@ -2823,6 +3691,11 @@ export default function DossierShow() {
                                     )}
                                 </TabsContent>
 
+                                {/* Onglet Signature */}
+                                <TabsContent value="signature">
+                                    <SignatureTab dossier={dossier} can={can} />
+                                </TabsContent>
+
                                 {/* Onglet Formalités */}
                                 <TabsContent value="formalites">
                                     <FormalitesTab
@@ -2839,33 +3712,24 @@ export default function DossierShow() {
                                         dossier={dossier}
                                         reference={reference}
                                         can={can}
-                                        onPreview={openPreview}
                                     />
                                 </TabsContent>
 
                                 {/* Onglet Clôture */}
                                 <TabsContent value="cloture">
-                                    <ClotureTab dossier={dossier} can={can} onPreview={openPreview} />
+                                    {/* Pas de onPreview : l'onglet Clôture déplie l'aperçu
+                                        sous la pièce concernée plutôt que dans le panneau
+                                        de pied de page, qui faisait perdre de vue quelle
+                                        pièce on regardait sur un long inventaire. */}
+                                    <ClotureTab dossier={dossier} can={can} />
                                 </TabsContent>
 
                                 {/* Onglet Facturation */}
                                 <TabsContent value="facturation">
-                                    <FacturationTab dossier={dossier} can={can} onPreview={openPreview} />
+                                    <FacturationTab dossier={dossier} can={can} />
                                 </TabsContent>
                             </Tabs>
                         </motion.div>
-
-                        <AnimatePresence>
-                            {previewDoc && (
-                                <DocumentInlinePreview
-                                    ref={previewRef}
-                                    doc={previewDoc.doc}
-                                    previewUrl={previewDoc.previewUrl}
-                                    downloadUrl={previewDoc.downloadUrl}
-                                    onClose={() => setPreviewDoc(null)}
-                                />
-                            )}
-                        </AnimatePresence>
 
                     </div>
                 </div>

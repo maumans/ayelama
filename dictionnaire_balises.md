@@ -26,6 +26,7 @@
 | [Courrier](#9-bloc-courrier) | `cr.` | Les 13 courriers de transmission |
 | [Facture](#10-bloc-facture) | `fac.` | Notes de frais, bordereaux |
 | [Dissolution](#dissolution) | `dissolution.` + `liquidateur.` | Acte de dissolution |
+| [Modification de statuts](#10-bis-blocs-modification-de-statuts) | `modif.` + `ag.` + `gerant_sortant.` / `gerant_entrant.` | Acte de cession, PV d'AGE, statuts mis à jour, DNSV, déclaration RCCM |
 
 ---
 
@@ -55,8 +56,8 @@
 | `${dossier.reference}` | Référence automatique du dossier (ex : `VTE-2026-0012`) | Texte | `N° DE DOSSIER`, `Réf. …………` |
 | `${date_acte_jma}` | Date de signature de l'acte (JJ/MM/AAAA) | Date | `J/M/A`, `(JOUR/MOIS/AN)`, `LE …………`, `……/……/………` |
 | `${annee_lettres}` | Année en lettres majuscules | Texte auto | `DEUX MILLE VINGT…`, `(ANNÉE EN LETTRES)` |
-| `${date_acte_lettres}` | Date complète en lettres (`LE TRENTE JUIN DEUX MILLE VINGT-SIX`) | Texte auto | `LE (DATE EN LETTRES)` |
-| `${date_acte_lettres_sans_annee}` | Jour + mois en lettres, sans l'année (`TRENTE JUIN`) — à utiliser quand l'année est déjà affichée juste au-dessus via `${annee_lettres}` (ex. « L'AN ${annee_lettres} ; LE ${date_acte_lettres_sans_annee} ; ») pour ne pas la répéter deux fois | Texte auto | `LE (DATE SANS ANNÉE)` |
+| `${date_acte_lettres}` | Jour + mois en lettres, sans l'année (`TRENTE JUIN`) — à utiliser quand l'année est déjà affichée juste au-dessus via `${annee_lettres}` | Texte auto | `LE (DATE SANS ANNÉE)`, `LE (DATE EN LETTRES)` |
+| `${date_acte_lettres_complete}` | Date complète en lettres (`LE TRENTE JUIN DEUX MILLE VINGT-SIX`) | Texte auto | `LE (DATE COMPLÈTE)` |
 
 ---
 
@@ -323,8 +324,12 @@
 
 | Balise | Description | Marqueurs |
 |--------|------------|-----------|
-| `${soc.commissaire_titulaire}` | Nom du commissaire titulaire | `COMMISSAIRE AUX COMPTES TITULAIRE`, `…………` |
-| `${soc.commissaire_suppleant}` | Nom du commissaire suppléant | `COMMISSAIRE SUPPLÉANT`, `…………` |
+| `${cac_titulaire.prenom_nom}` | Nom du cabinet ou de l'expert titulaire | `COMMISSAIRE AUX COMPTES TITULAIRE`, `…………` |
+| `${cac_titulaire.agrement}` | N° d'agrément à l'ordre | `N° D'AGRÉMENT`, `…………` |
+| `${cac_titulaire.adresse}` | Adresse complète du titulaire | `ADRESSE DU COMMISSAIRE`, `…………` |
+| `${cac_suppleant.prenom_nom}` | Nom du cabinet ou expert suppléant | `COMMISSAIRE SUPPLÉANT`, `…………` |
+| `${cac_suppleant.agrement}` | N° d'agrément du suppléant | `N° D'AGRÉMENT SUPPLÉANT` |
+| `${cac_suppleant.adresse}` | Adresse complète du suppléant | `ADRESSE DU SUPPLÉANT` |
 
 > ⚠️ **SAS** : obligatoire si >50 % du capital détenu par des sociétés.  
 > ⚠️ **SA** : capital minimum 140 000 000 GNF, libération minimale ¼ à la constitution.
@@ -576,6 +581,118 @@
 
 ---
 
+## 10 bis. Blocs MODIFICATION DE STATUTS
+
+> Ajoutés le 11/08/2026 avec la refonte du dossier de modification (`SOC-MOD`).
+> Ces balises alimentent l'**acte de cession de parts**, le **procès-verbal d'assemblée**, les
+> **statuts mis à jour**, la **DNSV** et la **déclaration de modification RCCM**.
+>
+> ⚠️ **Le bloc `soc.*` porte l'état AVANT modification** (dénomination, forme, capital, siège,
+> objet actuels), projeté depuis la fiche du registre. L'état **APRÈS** est dans les balises
+> `modif.*` ci-dessous. Les statuts mis à jour doivent porter les valeurs *après* — c'est la
+> confusion la plus facile à commettre en normalisant un modèle.
+
+### 10 bis.1 Assemblée générale (procès-verbal — tous les cas)
+
+| Balise | Description | Type | Marqueurs à remplacer |
+|--------|------------|------|-----------------------|
+| `${ag.type}` | Nature de la décision | Liste : AGE / AGO / Décision de l'associé unique | `ASSEMBLEE GENERALE …………` |
+| `${ag.date_jma}` | Date de l'assemblée | Date | `LE …/…/…`, `DATE DE L'ASSEMBLEE` |
+| `${ag.date_lettres}` | Date en toutes lettres | **Auto** | `LE … (EN TOUTES LETTRES)` |
+| `${ag.heure}` | Heure d'ouverture | Texte | `A …… HEURES` |
+| `${ag.lieu}` | Lieu de réunion | Texte | `AU SIEGE SOCIAL SIS ……` |
+| `${ag.president_seance}` | Président de séance | Texte | `PRESIDENT DE SEANCE` |
+| `${ag.secretaire_seance}` | Secrétaire de séance | Texte | `SECRETAIRE DE SEANCE` |
+| `${ag.parts_representees}` | Parts présentes ou représentées | Nombre | `…… PARTS SOCIALES REPRESENTEES` |
+| `${ag.date_effet_jma}` | Date d'effet de la modification | Date | `A COMPTER DU …/…/…` |
+| `${ag.resolutions}` | Texte des résolutions | Texte long | `PREMIERE RESOLUTION : ……` |
+
+### 10 bis.2 Cession de parts sociales
+
+| Balise | Description | Type | Marqueurs à remplacer |
+|--------|------------|------|-----------------------|
+| `${modif.valeur_parts_cedees_chiffres}` | Valeur totale des parts cédées (GNF) | Montant | `PRIX DE CESSION EN CHIFFRE` |
+| `${modif.valeur_parts_cedees_lettres}` | Idem en lettres | **Auto** | `PRIX DE CESSION EN LETTRE` |
+| `${modif.date_cession_jma}` | Date de la cession | Date | `CEDE CE JOUR …/…/…` |
+| `${modif.agrement_associes}` | Agrément des associés obtenu | Oui/Non | `AGREMENT DES ASSOCIES` |
+| `${bloc_modif_cedants}` … `${/bloc_modif_cedants}` | **Bloc répétable** — un cédant par itération | Répétable | Encadrer la clause de cession |
+| `${cedant.nom}`, `${cedant.parts_detenues}`, `${cedant.parts_cedees}`, `${cedant.prix_cession_chiffres}` | Champs d'un cédant | — | dans le bloc répétable |
+| `${bloc_modif_cessionnaires}` … `${/bloc_modif_cessionnaires}` | **Bloc répétable** — un cessionnaire par itération | Répétable | — |
+| `${cessionnaire.nom}`, `${cessionnaire.parts_acquises}`, `${cessionnaire.prix_paye_chiffres}` | Champs d'un cessionnaire | — | dans le bloc répétable |
+| `${bloc_modif_repartition_apres}` … `${/bloc_modif_repartition_apres}` | **Bloc répétable** — capital après cession | Répétable | Tableau de répartition des statuts mis à jour |
+| `${repartition.associe}`, `${repartition.parts_chiffres}`, `${repartition.pourcentage}` | Une ligne de répartition | — | dans le bloc répétable |
+
+### 10 bis.3 Transfert du siège social
+
+| Balise | Description | Type |
+|--------|------------|------|
+| `${modif.siege_nouveau_quartier}` | Nouveau quartier | Texte |
+| `${modif.siege_nouveau_commune}` | Nouvelle commune | Texte |
+| `${modif.siege_nouveau_ville}` | Nouvelle ville | Texte |
+| `${modif.siege_justificatif}` | Titre d'occupation | Liste : Bail / Titre foncier / Attestation de domiciliation |
+
+> L'ancien siège se lit dans `${soc.siege_quartier}`, `${soc.siege_commune}`, `${soc.siege_ville}`.
+
+### 10 bis.4 Augmentation de capital (alimente la DNSV)
+
+| Balise | Description | Type |
+|--------|------------|------|
+| `${modif.augmentation_montant_chiffres}` | Montant de l'augmentation (GNF) | Montant |
+| `${modif.augmentation_montant_lettres}` | Idem en lettres | **Auto** |
+| `${modif.augmentation_capital_apres_chiffres}` | Capital après augmentation | Montant (**calculé**) |
+| `${modif.augmentation_capital_apres_lettres}` | Idem en lettres | **Auto** |
+| `${modif.augmentation_modalite}` | Modalité | Liste : Apports en numéraire / en nature / Incorporation de réserves |
+| `${modif.augmentation_parts_nouvelles}` | Nombre de parts nouvelles | Nombre |
+| `${modif.augmentation_banque}` | Banque de dépôt des fonds | Texte |
+| `${modif.augmentation_date_versement_jma}` | Date du versement | Date |
+| `${bloc_modif_souscripteurs}` … `${/bloc_modif_souscripteurs}` | **Bloc répétable** — souscripteurs | Répétable |
+| `${souscripteur.nom}`, `${souscripteur.parts_souscrites}`, `${souscripteur.montant_souscrit_chiffres}` | Champs d'un souscripteur | — |
+
+### 10 bis.5 Diminution de capital
+
+| Balise | Description | Type |
+|--------|------------|------|
+| `${modif.diminution_montant_chiffres}` | Montant de la réduction (GNF) | Montant |
+| `${modif.diminution_capital_apres_chiffres}` | Capital après réduction | Montant (**calculé**) |
+| `${modif.diminution_motif}` | Motif | Liste : Résorption de pertes / Remboursement aux associés |
+| `${modif.diminution_parts_annulees}` | Parts annulées | Nombre |
+
+> ⚠️ **Aucune DNSV** dans ce cas : rien n'est souscrit ni versé. Ne pas réutiliser le gabarit
+> d'augmentation en y inversant le signe.
+
+### 10 bis.6 Changement de gérant (statutaire et non statutaire)
+
+| Balise | Description | Type |
+|--------|------------|------|
+| `${gerant_sortant.prenom_nom}` | Gérant sortant | Texte |
+| `${gerant_sortant.motif}` | Motif de la cessation | Liste : Démission / Révocation / Décès / Fin de mandat |
+| `${gerant_sortant.date_cessation_jma}` | Date de cessation | Date |
+| `${gerant_entrant.*}` | Gérant entrant — **tous les champs du bloc `pp.`** (civilité, nom, état civil, pièce d'identité, résidence) | voir §3 |
+| `${gerant_entrant.duree_mandat}` | Durée du mandat | Texte |
+| `${gerant_entrant.pouvoirs}` | Pouvoirs conférés | Texte long |
+
+> Les deux types de changement partagent ces balises : seul l'impact statutaire diffère, et il
+> est décidé par `TypeModificationStatutaire::impacteStatuts()`, pas par le modèle. Un gérant
+> **non statutaire** ne donne lieu qu'à un PV et à une déclaration RCCM — pas de statuts.
+
+### 10 bis.7 Objet social
+
+| Balise | Description | Type |
+|--------|------------|------|
+| `${modif.objet_operation}` | Nature du changement | Liste : Ajout / Retrait / Remplacement complet |
+| `${modif.objet_nouveau}` | Nouvel objet social, tel qu'il figurera aux statuts | Texte long |
+
+> L'objet actuel est dans `${soc.objet_social}`.
+
+### 10 bis.8 Commun
+
+| Balise | Description | Type |
+|--------|------------|------|
+| `${modif.types}` | Modifications décidées, séparées par ` · ` | Texte (**auto**, depuis les cases cochées) |
+| `${objet_modification}` | Précisions complémentaires | Texte long |
+
+---
+
 ## 11. Récapitulatif — Champs auto-générés (jamais saisis)
 
 Ces champs sont **calculés automatiquement** par `ActesGeneratorService` + `NombreEnLettres` :
@@ -619,8 +736,64 @@ Ces champs sont **calculés automatiquement** par `ActesGeneratorService` + `Nom
 | Bail à construction | Office · Dossier · pp (bailleur) · pp (preneur) · Bien (+ limites) · Bail |
 | Facture (toutes) | Office · Dossier · fac (assiette, lignes[], total) |
 | Courrier transmission | Office · Courrier · (Société ou Bien ou Banque selon l'objet) |
+| Acte de cession de parts | Office · Dossier · Société (état avant) · `modif.*` cession · blocs cédants/cessionnaires |
+| PV d'assemblée (modification) | Office · Dossier · Société (état avant) · `ag.*` · le ou les blocs `modif.*` des résolutions décidées |
+| Statuts mis à jour | Office · Société (état avant) · `modif.*` **état après** · répartition après cession |
+| Statuts mis à jour — **société hors registre** | ⚠️ Le gabarit n'est **pas** un modèle de l'étude : ce sont les **statuts déposés** de la société (voir ci-dessous) |
+| DNSV augmentation de capital | Office · Société · `modif.augmentation_*` · bloc souscripteurs |
+| Déclaration modification RCCM | Office · Société · `ag.date_jma` · `modif.types` · le changement concerné |
 
 ---
+
+## 11 bis. Procès-verbal d'assemblée — balises attendues
+
+> Ajouté le 11/08/2026. Le gabarit `pv_modification` reste à fournir par l'étude ; son entrée existe
+> déjà dans *Modèles d'actes* (inactive). Voici ce qu'il peut porter.
+
+Le procès-verbal est produit dans **toutes** les modifications de statuts, quelle que soit la
+résolution décidée.
+
+| Balise | Contenu |
+|---|---|
+| `${ag.type}` | AGE / AGO / Décision de l'associé unique |
+| `${ag.date}` · `${ag.heure}` · `${ag.lieu}` | Tenue de l'assemblée |
+| `${ag.president_seance}` · `${ag.secretaire_seance}` | Bureau de séance |
+| `${ag.parts_representees}` | Parts présentes ou représentées (quorum) |
+| `${ag.date_effet}` | Date d'effet de la modification, souvent ≠ date d'AG |
+| `${ag.resolutions}` | Complément libre saisi par le clerc |
+| `${modif.*}` | Le détail de la résolution — voir §10 bis selon le type décidé |
+| `${soc.*}` | État **avant** modification, projeté depuis la fiche du registre |
+
+Les balises d'office (`${office.*}`) et de dossier (`${dossier.*}`) sont disponibles comme partout
+ailleurs. Un champ sans valeur n'est pas bloquant : le passage reste vide et l'historique du dossier
+en garde la trace.
+
+## 12 bis. Gabarit hérité — société non constituée par l'étude
+
+> Ajouté le 11/08/2026.
+
+Quand la société modifiée **n'a pas été constituée par l'étude**, son dossier constitutif est versé
+au registre (statuts en vigueur, RCCM…). Les **statuts déposés** servent alors de gabarit au document
+« Statuts mis à jour », **à la place** du modèle de l'étude.
+
+Conséquences pour la normalisation :
+
+- **Ne normalisez pas** les statuts d'un confrère. Ils ne portent évidemment pas nos `${...}`, et
+  c'est très bien : le document produit est une **copie fidèle** des statuts d'origine, à reprendre
+  article par article. C'est bien supérieur à un gabarit Ayelema dont la numérotation d'articles ne
+  correspondrait à rien. Le journal du dossier signale ce cas (« aucune balise détectée »).
+- Si vous **choisissez** d'y insérer des balises avant dépôt, elles sont substituées normalement —
+  toutes celles des §1 à 10 bis sont disponibles.
+- **Seul un `.docx` peut servir de gabarit** : PhpWord dézippe l'OOXML. Un PDF reste une pièce
+  parfaitement valable au dossier, mais on retombe alors sur le modèle de l'étude. La carte
+  « Dossier constitutif » l'annonce avant la génération.
+
+> **Le cas symétrique, pour une société que l'étude A constituée** (ajouté le 11/08/2026) : les
+> statuts mis à jour repartent des **statuts en vigueur** de la société, cherchés dans cet ordre —
+> pièce déposée au registre, puis statuts mis à jour de la dernière modification **devenue effective**
+> (Expédition ou Clôture), puis statuts du dossier de constitution. Là encore, aucun gabarit à
+> normaliser : c'est le texte réel de cette société qui sert de base, et l'historique du dossier
+> indique lequel a été retenu.
 
 ## 13. Procédure de normalisation d'un modèle
 
@@ -639,4 +812,6 @@ Ces champs sont **calculés automatiquement** par `ActesGeneratorService` + `Nom
 
 ---
 
-*Dernière mise à jour : 01/07/2026 — Ajout blocs répétables (`associes`, `gerants`, `administrateurs`, `actionnaires`, `membres`), préfixes `acq.*`, `loc.*`, champs SA (`capital_libere`, `nombre_actions`, PCA/DG), dissolution/liquidateur. Total blocs : 15.*
+*Mise à jour du 01/07/2026 — Ajout blocs répétables (`associes`, `gerants`, `administrateurs`, `actionnaires`, `membres`), préfixes `acq.*`, `loc.*`, champs SA (`capital_libere`, `nombre_actions`, PCA/DG), dissolution/liquidateur.*
+
+*Dernière mise à jour : 11/08/2026 — Ajout des blocs de **modification de statuts** (`modif.*`, `ag.*`, `gerant_sortant.*`, `gerant_entrant.*`) et de leurs cinq modèles, plus le **gabarit hérité** (§12 bis) pour les sociétés que l'étude n'a pas constituées. Total blocs : 19.*

@@ -28,7 +28,6 @@ class FormaliteController extends Controller
                       ->orWhere('objet', 'like', "%{$s}%"))
                    ->orWhere('organisme', 'like', "%{$s}%")))
             ->when($request->statut,      fn ($q, $s) => $q->where('statut', $s))
-            ->when(!$request->statut,     fn ($q)     => $q->where('statut', '!=', 'cloture'))
             ->when($request->organisme,   fn ($q, $s) => $q->where('organisme', $s))
             ->when($request->urgentes === '1', fn ($q) => $q->urgentes())
             ->when($request->sort === 'montant',   fn ($q) => $q->orderByDesc('montant_calcule')->orderBy('ordre'))
@@ -48,13 +47,13 @@ class FormaliteController extends Controller
         $baseStats = Formalite::whereHas('dossier', fn ($d) => $d->visiblePar($user));
 
         $stats = [
-            'total'       => (clone $baseStats)->where('statut', '!=', 'cloture')->count(),
+            'total'       => (clone $baseStats)->count(),
             'aDeposer'    => (clone $baseStats)->where('statut', 'a_deposer')->count(),
             'enCours'     => (clone $baseStats)->whereIn('statut', ['depose', 'en_attente'])->count(),
             'retourRecu'  => (clone $baseStats)->where('statut', 'retour_recu')->count(),
             'urgentes'    => (clone $baseStats)->urgentes()->count(),
-            'montantTotal' => (float) (clone $baseStats)->where('statut', '!=', 'cloture')->sum('montant_calcule'),
-            'parOrganisme' => (clone $baseStats)->where('statut', '!=', 'cloture')
+            'montantTotal' => (float) (clone $baseStats)->sum('montant_calcule'),
+            'parOrganisme' => (clone $baseStats)
                 ->selectRaw('organisme, count(*) as total')
                 ->groupBy('organisme')
                 ->pluck('total', 'organisme'),
@@ -73,7 +72,6 @@ class FormaliteController extends Controller
                     StatutFormalite::EnAttente   => 'En attente retour',
                     StatutFormalite::RetourRecu  => 'Retour reçu',
                     StatutFormalite::Rejete      => 'Rejeté — à corriger',
-                    StatutFormalite::Cloture     => 'Clôturé',
                 },
             ]),
             'filters' => [
@@ -180,7 +178,7 @@ class FormaliteController extends Controller
     }
 
     /**
-     * Flux guidé "Enregistrer un dépôt" (maquette 2) : capture la date de dépôt,
+     * Flux guidé "Marquer le dépôt" (maquette 2) : capture la date de dépôt,
      * le montant réellement payé et le n° de récépissé, puis recalcule la date de
      * retour prévue à partir de la date réelle de dépôt (et non plus depuis la
      * création du dossier, comme le faisait la génération initiale). Toutes les
@@ -192,17 +190,13 @@ class FormaliteController extends Controller
 
         abort_if($formalite->estBloquee(), 422, 'Cette démarche est bloquée par une dépendance non résolue.');
 
-        $piecesManquantes = $formalite->pieces()->where('est_fourni', false)->exists();
-        if ($piecesManquantes) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'pieces' => ['Toutes les pièces requises doivent être marquées fournies avant de confirmer le dépôt.'],
-            ]);
-        }
+        // Les pièces justificatives sont désormais téléversées lors du retour, 
+        // on ne bloque plus le dépôt si elles sont manquantes.
 
         $data = $request->validate([
             'date_depot'       => ['nullable', 'date'],
             'montant_paye'     => ['nullable', 'numeric', 'min:0'],
-            'numero_recepisse' => ['required', 'string', 'max:100'],
+            'numero_recepisse' => ['nullable', 'string', 'max:100'],
         ]);
 
         $dateDepot = $data['date_depot'] ?? now()->toDateString();
@@ -211,15 +205,16 @@ class FormaliteController extends Controller
             'statut'           => 'depose',
             'depose_at'        => $dateDepot,
             'montant_paye'     => $data['montant_paye'] ?? null,
-            'numero_recepisse' => $data['numero_recepisse'],
+            'numero_recepisse' => $data['numero_recepisse'] ?? null,
             'echeance_at'      => $formalite->delai_heures
                 ? \Carbon\Carbon::parse($dateDepot)->addHours($formalite->delai_heures)
                 : $formalite->echeance_at,
         ]);
 
+        $msgRecepisse = !empty($data['numero_recepisse']) ? " (récépissé {$data['numero_recepisse']})" : "";
         JournalActivite::enregistrer(
             $formalite->dossier,
-            "Dépôt enregistré : {$formalite->labelAffiche()} (récépissé {$data['numero_recepisse']})",
+            "Dépôt enregistré : {$formalite->labelAffiche()}{$msgRecepisse}",
             'formalite'
         );
 
@@ -237,21 +232,24 @@ class FormaliteController extends Controller
         $this->authorize('gererFormalites', $formalite->dossier);
 
         $data = $request->validate([
-            'resultat'                => ['required', 'string', 'in:recu,rejete'],
             'date_retour'             => ['required', 'date'],
-            'reference_document_recu' => ['required_if:resultat,recu', 'nullable', 'string', 'max:200'],
         ]);
+
+            $piecesManquantes = $formalite->pieces()->where('est_fourni', false)->exists();
+            if ($piecesManquantes) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'pieces' => ['Toutes les pièces requises doivent être marquées fournies avant d\'enregistrer le retour.'],
+                ]);
+            }
 
         $formalite->update([
-            'statut'                  => $data['resultat'] === 'recu' ? 'retour_recu' : 'rejete',
+            'statut'                  => 'retour_recu',
             'retour_at'               => $data['date_retour'],
-            'reference_document_recu' => $data['reference_document_recu'] ?? null,
         ]);
 
-        $verdict = $data['resultat'] === 'recu' ? 'positif' : 'rejeté';
         JournalActivite::enregistrer(
             $formalite->dossier,
-            "Retour {$verdict} enregistré : {$formalite->labelAffiche()}",
+            "Retour positif enregistré : {$formalite->labelAffiche()}",
             'formalite'
         );
 
@@ -272,7 +270,7 @@ class FormaliteController extends Controller
         $autres = Formalite::with('dossier')
             ->where('organisme', $formalite->organisme)
             ->where('id', '!=', $formalite->id)
-            ->whereNotIn('statut', ['retour_recu', 'cloture'])
+            ->nonTerminees()
             ->whereNotNull('echeance_at')
             ->where('echeance_at', '<', now())
             ->whereHas('dossier', fn ($d) => $d->visiblePar($user))
@@ -320,9 +318,9 @@ class FormaliteController extends Controller
         $this->authorize('gererFormalites', $formalite->dossier);
 
         abort_if(
-            $formalite->statut?->value === 'cloture',
+            $formalite->estTerminee(),
             403,
-            'Une formalité clôturée ne peut pas être supprimée.'
+            'Une formalité terminée ne peut pas être supprimée.'
         );
 
         $label   = $formalite->labelAffiche();

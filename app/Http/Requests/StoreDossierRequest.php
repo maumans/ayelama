@@ -19,6 +19,10 @@ class StoreDossierRequest extends FormRequest
     {
         return [
             'type_acte_id'  => ['required', 'integer', 'exists:types_actes,id'],
+            // Société du registre sur laquelle porte le dossier — renseignée pour une
+            // modification ou une dissolution (fiche choisie), créée après coup pour une
+            // constitution (voir DossierController::creerDossier).
+            'societe_id'    => ['nullable', 'integer', 'exists:societes,id'],
             'objet'         => ['required', 'string', 'min:10', 'max:500'],
             'valeur'        => ['nullable', 'numeric', 'min:0'],
             'echeance'      => ['nullable', 'date', 'after:today'],
@@ -28,6 +32,9 @@ class StoreDossierRequest extends FormRequest
             'notaire_id'    => ['required', 'integer', 'exists:users,id', new UtilisateurPossedeRole(RoleUtilisateur::Notaire)],
             'formaliste_id' => ['nullable', 'integer', 'exists:users,id', new UtilisateurPossedeRole(RoleUtilisateur::Formaliste)],
             'donnees'       => ['nullable', 'array'],
+            // Brouillon dont ce dossier est l'aboutissement : ses pièces déjà
+            // téléversées sont reprises, puis le brouillon est supprimé.
+            'brouillon_id'  => ['nullable', 'integer', 'exists:dossier_brouillons,id'],
             ...self::partiesRules(),
         ];
     }
@@ -55,11 +62,20 @@ class StoreDossierRequest extends FormRequest
             'parties'              => ['nullable', 'array'],
             'parties.*.nom'        => ['required_with:parties', 'string', 'max:200'],
             'parties.*.role'       => ['required_with:parties', 'string', 'max:100'],
+            'parties.*.partie_id'  => ['nullable', 'integer'],
+            'parties.*.type_personne' => ['nullable', 'in:physique,morale'],
             'parties.*.client_id'  => ['nullable', 'integer', 'exists:clients,id'],
             'parties.*.cni'        => ['nullable', 'string', 'max:50'],
             'parties.*.telephone'  => ['nullable', 'string', 'max:20'],
             'parties.*.adresse'    => ['nullable', 'string', 'max:500'],
             'parties.*.email'      => ['nullable', 'email', 'max:200'],
+            'parties.*.pieces'     => ['nullable', 'array'],
+            'parties.*.pieces.*'   => ['file', 'max:20480', 'mimes:pdf,jpg,jpeg,png,doc,docx'],
+            // Pièces déjà téléversées dans un brouillon : transmises par catégorie
+            // sous forme de clés vers l'état du brouillon, pas de fichiers.
+            // { categorie: "brouillons/12/xyz.pdf" }
+            'parties.*.pieces_brouillon'   => ['nullable', 'array'],
+            'parties.*.pieces_brouillon.*' => ['string', 'max:255'],
         ];
     }
 }

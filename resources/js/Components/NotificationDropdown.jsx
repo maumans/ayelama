@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { router } from '@inertiajs/react';
 import axios from 'axios';
-import { Bell, Check, ClipboardCheck, Building2, Clock, Inbox, FolderCheck, FileSignature, Bell as BellFallback } from 'lucide-react';
+import { Bell, Check, ClipboardCheck, Building2, Clock, Inbox, FolderCheck, FileSignature, Undo2, ClipboardList, UserPlus, BadgeCheck, Bell as BellFallback } from 'lucide-react';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -18,8 +18,11 @@ const TYPE_META = {
     echeance: { icon: Clock,          label: 'Échéance',  bg: 'bg-warning-bg',  text: 'text-warning-text' },
     demande: { icon: Inbox,           label: 'Demande',   bg: 'bg-success-bg',  text: 'text-success-text' },
     demande_convertie: { icon: FolderCheck, label: 'Dossier créé', bg: 'bg-slate-100', text: 'text-ink' },
-    signature_client: { icon: FileSignature, label: 'Signature client', bg: 'bg-purple-50', text: 'text-purple-700' },
-    signature_notaire: { icon: FileSignature, label: 'Signature notaire', bg: 'bg-violet-50', text: 'text-violet-700' },
+    signature: { icon: FileSignature, label: 'Signature en attente', bg: 'bg-purple-50', text: 'text-purple-700' },
+    renvoi: { icon: Undo2, label: 'Renvoyé en correction', bg: 'bg-danger-bg', text: 'text-danger-text' },
+    formalites_a_faire: { icon: ClipboardList, label: 'Formalités à engager', bg: 'bg-info-bg', text: 'text-info-text' },
+    assignation: { icon: UserPlus, label: 'Dossier assigné', bg: 'bg-seal-light', text: 'text-seal' },
+    certification_validee: { icon: BadgeCheck, label: 'Certification validée', bg: 'bg-success-bg', text: 'text-success-text' },
 };
 const DEFAULT_TYPE_META = { icon: BellFallback, label: null, bg: 'bg-slate-100', text: 'text-slate-500' };
 

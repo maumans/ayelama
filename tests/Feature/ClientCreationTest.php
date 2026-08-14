@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\RoleUtilisateur;
 use App\Models\Client;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -13,7 +14,10 @@ class ClientCreationTest extends TestCase
 
     public function test_creating_a_client_physique_returns_fields_needed_for_display(): void
     {
+        // Rôle explicite : gérer le répertoire clients est réservé aux rôles qui
+        // ouvrent des dossiers (ClientPolicy) — un compte sans rôle reçoit un 403.
         $user = User::factory()->create();
+        $user->syncRoles([RoleUtilisateur::Clerc]);
 
         $response = $this->actingAs($user)->postJson('/clients', [
             'type'        => 'physique',
@@ -31,7 +35,10 @@ class ClientCreationTest extends TestCase
 
     public function test_creating_a_client_morale_returns_fields_needed_for_display(): void
     {
+        // Rôle explicite : gérer le répertoire clients est réservé aux rôles qui
+        // ouvrent des dossiers (ClientPolicy) — un compte sans rôle reçoit un 403.
         $user = User::factory()->create();
+        $user->syncRoles([RoleUtilisateur::Clerc]);
 
         $response = $this->actingAs($user)->postJson('/clients', [
             'type'         => 'morale',
@@ -46,7 +53,10 @@ class ClientCreationTest extends TestCase
 
     public function test_autocomplete_returns_type_field_needed_by_the_frontend_display_helper(): void
     {
+        // Rôle explicite : gérer le répertoire clients est réservé aux rôles qui
+        // ouvrent des dossiers (ClientPolicy) — un compte sans rôle reçoit un 403.
         $user = User::factory()->create();
+        $user->syncRoles([RoleUtilisateur::Clerc]);
 
         Client::create([
             'type'       => 'physique',

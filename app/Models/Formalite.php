@@ -55,20 +55,29 @@ class Formalite extends Model
         return $this->morphMany(DocumentFichier::class, 'documentable')->orderBy('id');
     }
 
+    /**
+     * La démarche est-elle achevée ? Délègue à StatutFormalite::estTerminee(), seul
+     * endroit où l'état terminal est défini — voir cet enum pour l'historique de la
+     * suppression du statut `Cloture`.
+     */
+    public function estTerminee(): bool
+    {
+        return (bool) $this->statut?->estTerminee();
+    }
+
     public function estBloquee(): bool
     {
         if (!$this->relationLoaded('dependDe')) {
             $this->load('dependDe');
         }
 
-        return $this->dependDe !== null
-            && !in_array($this->dependDe->statut?->value, ['retour_recu', 'cloture']);
+        return $this->dependDe !== null && !$this->dependDe->estTerminee();
     }
 
     public function estUrgente(): bool
     {
         if (!$this->echeance_at) return false;
-        if (in_array($this->statut?->value, ['retour_recu', 'cloture'])) return false;
+        if ($this->estTerminee()) return false;
         $dateStr = $this->echeance_at->toDateString();
         $today   = now()->toDateString();
         if ($dateStr < $today) return false;
@@ -80,7 +89,7 @@ class Formalite extends Model
     {
         return $this->echeance_at
             && $this->echeance_at->toDateString() < now()->toDateString()
-            && !in_array($this->statut?->value, ['retour_recu', 'cloture']);
+            && !$this->estTerminee();
     }
 
     public function heuresRestantes(): ?int
@@ -133,7 +142,15 @@ class Formalite extends Model
     {
         return $query->whereNotNull('echeance_at')
             ->where('echeance_at', '<=', now()->addHours(8))
-            ->whereNotIn('statut', ['retour_recu', 'cloture']);
+            ->whereNotIn('statut', StatutFormalite::valeursTerminees());
+    }
+
+    /**
+     * Démarches non achevées — celles qui bloquent le passage à l'expédition.
+     */
+    public function scopeNonTerminees($query)
+    {
+        return $query->whereNotIn('statut', StatutFormalite::valeursTerminees());
     }
 
     /**

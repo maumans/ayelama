@@ -201,7 +201,15 @@ export default function FacturationIndex() {
                                                     <div className="flex items-center gap-4 mt-2 text-xs">
                                                         <span className="text-slate-500">Facturé : <strong className="font-ref text-slate-700">{fmt(f.total_chiffres)} GNF</strong></span>
                                                         <span className="text-slate-500">Encaissé : <strong className="font-ref text-success">{fmt(f.totalPaye)} GNF</strong></span>
-                                                        <span className="text-slate-500">Solde : <strong className={cn('font-ref', f.soldeRestant > 0 ? 'text-warning-text' : 'text-success')}>{fmt(f.soldeRestant)} GNF</strong></span>
+                                                        {/* Un solde négatif est une anomalie de données antérieures au
+                                                            plafonnement des paiements — signalé en rouge, jamais en vert. */}
+                                                        <span className="text-slate-500">Solde : <strong className={cn('font-ref',
+                                                            f.soldeRestant < 0 ? 'text-danger' : f.soldeRestant > 0 ? 'text-warning-text' : 'text-success')}>{fmt(f.soldeRestant)} GNF</strong></span>
+                                                        {f.estTropPercue && (
+                                                            <span className="inline-flex items-center gap-1 text-danger-text font-medium">
+                                                                <AlertTriangle className="h-3 w-3" /> Trop-perçu
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2 shrink-0 self-center">

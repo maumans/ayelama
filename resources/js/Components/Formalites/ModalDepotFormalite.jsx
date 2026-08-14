@@ -9,7 +9,6 @@ import { DateField } from '@/components/ui/date-field';
 import { NumberField } from '@/components/ui/number-field';
 import { isoDateToFR, frDateToISO } from '@/lib/dates';
 import { notifyValidationError } from '@/lib/toast';
-import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 
 const fmt = (n) => n ? Number(n).toLocaleString('fr-FR') : '0';
 
@@ -28,7 +27,6 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
     const [dateDepot, setDateDepot] = useState(todayISO());
     const [montantPaye, setMontantPaye] = useState('');
     const [numeroRecepisse, setNumeroRecepisse] = useState('');
-    const [previewPieceId, setPreviewPieceId] = useState(null);
 
     useEffect(() => {
         if (open) {
@@ -45,9 +43,7 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
 
     if (!formalite) return null;
 
-    const pieces = formalite.pieces ?? [];
-    const piecesManquantes = pieces.filter(p => !p.est_fourni).length;
-    const peutConfirmer = piecesManquantes === 0;
+    const peutConfirmer = true;
 
     const submit = (e) => {
         e.preventDefault();
@@ -66,39 +62,15 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-2xl">
                 <DialogHeader>
-                    <DialogTitle>Enregistrer un dépôt — {formalite.libelle}</DialogTitle>
+                    <DialogTitle>Marquer le dépôt — {formalite.libelle}</DialogTitle>
                 </DialogHeader>
 
                 <form onSubmit={submit} className="space-y-4 pt-1">
-                    {pieces.length > 0 && (
-                        <div className="rounded-lg border border-slate-200">
-                            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
-                                <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Pièces requises</span>
-                                {formalite.bareme_id && (
-                                    <span className="inline-flex items-center gap-1 text-[10px] bg-seal-light text-seal px-2 py-0.5 rounded-full">
-                                        <Zap className="h-3 w-3" /> Auto depuis template {formalite.dossier?.typeActe} × {formalite.organismeLabel}
-                                    </span>
-                                )}
-                            </div>
-                            <div className="px-2 py-1 divide-y divide-slate-50">
-                                {pieces.map(p => (
-                                    <PieceGedRow
-                                        key={p.id}
-                                        piece={p}
-                                        peutGerer
-                                        isPreviewOpen={previewPieceId === p.id}
-                                        onTogglePreview={(piece) => setPreviewPieceId(id => id === piece.id ? null : piece.id)}
-                                    />
-                                ))}
-                            </div>
-                            {piecesManquantes > 0 && (
-                                <div className="flex items-center gap-2 px-3 py-2 border-t border-amber-100 bg-amber-50 text-xs text-amber-800">
-                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                                    {piecesManquantes} pièce{piecesManquantes > 1 ? 's' : ''} manquante{piecesManquantes > 1 ? 's' : ''} — à téléverser avant de confirmer le dépôt
-                                </div>
-                            )}
-                        </div>
-                    )}
+                    {/* Les pièces justificatives ne sont PAS listées ici : elles sont
+                        attendues à l'enregistrement du **retour** de l'organisme, pas au
+                        dépôt (voir ModalRetourFormalite, « Pièces requises pour le retour »).
+                        Les afficher aux deux moments laissait croire qu'il fallait les
+                        téléverser dès le dépôt. */}
 
                     <div className="flex items-center gap-2 bg-warning-bg border border-amber-200 rounded-lg px-3 py-2">
                         <Banknote className="h-4 w-4 text-warning-text shrink-0" />
@@ -123,12 +95,11 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
                     </div>
 
                     <div className="space-y-1.5">
-                        <Label>N° Récépissé <span className="text-danger">*</span></Label>
+                        <Label>N° Récépissé</Label>
                         <Input
                             value={numeroRecepisse}
                             onChange={e => setNumeroRecepisse(e.target.value)}
                             placeholder="Ex: APIP-2026-05-XXXX"
-                            required
                         />
                     </div>
 
@@ -146,8 +117,6 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
                         <Button
                             type="submit"
                             variant="seal"
-                            disabled={!peutConfirmer}
-                            title={!peutConfirmer ? 'Téléversez toutes les pièces requises avant de confirmer' : ''}
                         >
                             Confirmer le dépôt
                         </Button>

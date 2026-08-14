@@ -12,6 +12,7 @@ use App\Notifications\DemandeConvertieNotification;
 use App\Services\ActesGeneratorService;
 use App\Services\FacturationService;
 use App\Services\FormaliteGenerationService;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
@@ -138,7 +139,8 @@ class DemandeController extends Controller
         ActesGeneratorService $generatorService,
         FacturationService $facturationService,
         FormaliteGenerationService $formaliteGenerationService,
-        DossierController $dossierController
+        DossierController $dossierController,
+        NotificationService $notifications
     ) {
         $this->authorize('update', $demande);
 
@@ -176,7 +178,12 @@ class DemandeController extends Controller
             'dossier_id'     => $dossier->id,
         ]);
 
-        $demande->creePar?->notify(new DemandeConvertieNotification($demande, $dossier));
+        // Via le service : l'appel direct à notify() n'était pas protégé, une panne
+        // SMTP renvoyait un 500 alors que le dossier venait d'être créé avec succès.
+        $notifications->envoyer(
+            array_filter([$demande->creePar]),
+            new DemandeConvertieNotification($demande, $dossier),
+        );
 
         return redirect()->route('dossiers.show', $dossier->reference)
             ->with('success', "Dossier {$dossier->reference} créé à partir de la demande.");

@@ -1007,7 +1007,6 @@ export default function ParametresIndex({
     const actifTypes  = stats.typesActifs        ?? 0;
     const baremes     = stats.baremes            ?? 0;
     const typesAvecB  = stats.typesAvecBaremes   ?? 0;
-    const obligatoiresCloture = stats.obligatoiresCloture ?? 0;
 
     const pctBaremes  = totalTypes > 0 ? Math.round((typesAvecB / totalTypes) * 100) : 0;
     const pctTypes    = totalTypes > 0 ? Math.round((actifTypes / totalTypes) * 100) : 0;
@@ -1044,7 +1043,6 @@ export default function ParametresIndex({
                         { label: 'Types actifs',         value: `${actifTypes}/${totalTypes}`, sub: "d'actes",     cls: 'text-seal' },
                         { label: 'Barèmes configurés',   value: baremes,                       sub: 'au total',    cls: baremes === 0 ? 'text-red-500' : 'text-green-600' },
                         { label: 'Types sans barème',    value: totalTypes - typesAvecB,       sub: 'à couvrir',   cls: (totalTypes - typesAvecB) > 0 ? 'text-amber-600' : 'text-green-600' },
-                        { label: 'Docs obligatoires',    value: obligatoiresCloture,           sub: 'à la clôture', cls: 'text-ink' },
                     ].map(({ label, value, sub, cls }) => (
                         <div key={label} className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm">
                             <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wide">{label}</div>
@@ -1103,14 +1101,10 @@ export default function ParametresIndex({
                             Barèmes & Taux
                             <ExternalLink className="h-3 w-3 opacity-50" />
                         </button>
-                        <button
-                            onClick={() => router.visit('/parametres/cloture')}
-                            className="flex items-center gap-2 px-5 py-3.5 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
-                        >
-                            <Lock className="h-4 w-4" />
-                            Clôture
-                            <ExternalLink className="h-3 w-3 opacity-50" />
-                        </button>
+                        {/* L'onglet « Clôture » a été retiré le 2026-08-04 : l'inventaire de
+                            clôture est dérivé du workflow, il n'y a plus rien à configurer
+                            par type d'acte. Le contrôle se fait dans l'onglet Clôture du
+                            dossier lui-même. */}
                     </div>
 
                     {/* Tab content */}

@@ -4,22 +4,15 @@ namespace App\Notifications;
 
 use App\Models\Demande;
 use App\Models\Dossier;
+use App\Notifications\Concerns\CanauxNotification;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
 class DemandeConvertieNotification extends Notification
 {
+    use CanauxNotification;
+
     public function __construct(public Demande $demande, public Dossier $dossier) {}
-
-    public function via(object $notifiable): array
-    {
-        $channels = ['database', 'broadcast'];
-        if ($notifiable->notifications_email) {
-            $channels[] = 'mail';
-        }
-
-        return $channels;
-    }
 
     public function toMail(object $notifiable): MailMessage
     {

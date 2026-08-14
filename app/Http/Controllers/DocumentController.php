@@ -12,6 +12,24 @@ use Illuminate\Support\Facades\Storage;
 
 class DocumentController extends Controller
 {
+    /**
+     * Refuse les actions de ce contrôleur sur une **pièce de registre** (statuts, RCCM… rattachés à
+     * une Societe et non à un dossier).
+     *
+     * Ces actions sont toutes conçues pour un document de dossier : elles autorisent sur
+     * `genererDocuments`, journalisent sur le dossier, ou touchent au circuit de signature — rien
+     * de tout cela n'a de sens pour une pièce que l'étude n'a pas produite et qui sert à plusieurs
+     * dossiers. Un message explicite plutôt qu'un `authorize(..., null)` illisible.
+     */
+    private function refuserSiPieceDeRegistre(DocumentFichier $document): void
+    {
+        abort_if(
+            $document->estPieceDeRegistre(),
+            403,
+            'Cette pièce appartient au dossier constitutif de la société : elle se gère depuis le registre, pas depuis le dossier.',
+        );
+    }
+
     public function store(Request $request, Dossier $dossier)
     {
         $this->authorize('genererDocuments', $dossier);
@@ -38,6 +56,7 @@ class DocumentController extends Controller
 
     public function update(Request $request, DocumentFichier $document)
     {
+        $this->refuserSiPieceDeRegistre($document);
         $this->authorize('genererDocuments', $document->documentable);
         abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
 
@@ -63,6 +82,7 @@ class DocumentController extends Controller
 
     public function regenerer(DocumentFichier $document, \App\Services\ActesGeneratorService $generatorService)
     {
+        $this->refuserSiPieceDeRegistre($document);
         $dossier = $document->documentable;
         $this->authorize('genererDocuments', $dossier);
         abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
@@ -85,6 +105,7 @@ class DocumentController extends Controller
 
     public function destroy(DocumentFichier $document)
     {
+        $this->refuserSiPieceDeRegistre($document);
         $this->authorize('genererDocuments', $document->dossierGouvernant());
         abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
 
@@ -99,7 +120,7 @@ class DocumentController extends Controller
 
     public function download(DocumentFichier $document)
     {
-        $this->authorize('view', $document->dossierGouvernant());
+        $this->authorize('view', $document->sujetAutorisation());
 
         $chemin = $document->versionActuelle?->chemin_fichier;
         if (!$chemin || !Storage::disk('public')->exists($chemin)) {
@@ -114,7 +135,7 @@ class DocumentController extends Controller
 
     public function preview(DocumentFichier $document)
     {
-        $this->authorize('view', $document->dossierGouvernant());
+        $this->authorize('view', $document->sujetAutorisation());
 
         $chemin = $document->versionActuelle?->chemin_fichier;
         if (!$chemin || !Storage::disk('public')->exists($chemin)) {
@@ -133,7 +154,7 @@ class DocumentController extends Controller
 
     public function versions(DocumentFichier $document)
     {
-        $this->authorize('view', $document->dossierGouvernant());
+        $this->authorize('view', $document->sujetAutorisation());
 
         return response()->json([
             'versions' => $document->versions()
@@ -157,7 +178,7 @@ class DocumentController extends Controller
 
     public function telechargerVersion(DocumentVersion $version)
     {
-        $this->authorize('view', $version->documentFichier->dossierGouvernant());
+        $this->authorize('view', $version->documentFichier->sujetAutorisation());
 
         if (!$version->chemin_fichier || !Storage::disk('public')->exists($version->chemin_fichier)) {
             abort(404, 'Fichier introuvable.');
@@ -177,6 +198,7 @@ class DocumentController extends Controller
      */
     public function televerserSigne(Request $request, DocumentFichier $document)
     {
+        $this->refuserSiPieceDeRegistre($document);
         $dossier = $document->documentable;
         $this->authorize('cloturerDocuments', $dossier);
         abort_if($document->est_signe_cachete, 403, 'Document déjà signé/cacheté — verrouillé, non modifiable.');
@@ -205,6 +227,7 @@ class DocumentController extends Controller
     public function restaurerVersion(DocumentVersion $version)
     {
         $document = $version->documentFichier;
+        $this->refuserSiPieceDeRegistre($document);
         $this->authorize('genererDocuments', $document->dossierGouvernant());
         abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
 

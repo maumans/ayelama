@@ -9,6 +9,43 @@ function adresseComposite(client) {
     return [client.quartier, client.commune, client.demeurant_ville].filter(Boolean).join(', ');
 }
 
+export { adresseComposite };
+
+// Suffixes de champ dont la valeur provient de la fiche client. Quand un rôle est
+// rattaché à une fiche, ces champs sont masqués dans le formulaire : la fiche est
+// la source de vérité, les réafficher en saisie libre recréerait la double vérité
+// que cette refonte supprime.
+//
+// Miroir de ClientProjectionService::SUFFIXES_* (PHP) — les deux doivent évoluer
+// ensemble ; ClientProjectionTest verrouille la correspondance côté serveur.
+const SUFFIXES_IDENTITE = new Set([
+    'civilite', 'prenom_nom', 'nom', 'ne_a', 'date_naissance', 'nationalite',
+    // Règle 4 du CR juillet 2026 : nom de famille et prénoms séparés, pour pouvoir mettre
+    // le nom en capitales dans les actes. `prenom_nom` reste projeté (accessor côté PHP)
+    // car les 63 modèles Word non normalisés l'utilisent encore.
+    'nom_famille', 'prenoms', 'identite_notariale',
+    'situation_matrimoniale', 'regime_matrimonial',
+    'piece_type', 'piece_numero', 'cni', 'piece_delivree_le', 'piece_delivree_a', 'piece_expire_le',
+    'denomination', 'forme', 'rccm', 'representant_legal', 'representant_nom', 'representant_qualite',
+    'quartier', 'commune', 'demeurant_ville', 'ville',
+    'siege_quartier', 'siege_commune', 'siege_ville', 'siege',
+    'pays', 'telephone', 'email', 'adresse', 'domicile', 'type_personne',
+]);
+
+/**
+ * Ce champ est-il une donnée d'identité (portée par la fiche client) ou une donnée
+ * propre à l'acte (qui doit rester saisissable même quand un client est lié) ?
+ *
+ * Restent saisissables : parts_chiffres, actions_chiffres, apport_chiffres,
+ * fonction (au conseil d'administration), qualite (du liquidateur dans cet acte),
+ * et tous les bq.* de crédit — la même personne peut détenir 100 parts dans une
+ * société et 5 dans une autre.
+ */
+export function estChampIdentite(fieldId) {
+    const suffixe = fieldId.includes('.') ? fieldId.split('.').slice(1).join('.') : fieldId;
+    return SUFFIXES_IDENTITE.has(suffixe);
+}
+
 // Remplit les champs d'un bloc scalaire préfixé (ex. prefix='pp' → pp.civilite, pp.prenom_nom…)
 // à partir d'un client. Ne renseigne que les champs qui existent réellement dans ce bloc
 // (fieldIds) et pour lesquels le client a une valeur — pas d'écrasement avec du vide.
@@ -26,6 +63,12 @@ export function mapClientToPrefixedFields(client, prefix, fieldIds) {
         set('civilite', client.civilite);
         set('prenom_nom', client.prenom_nom);
         set('nom', client.prenom_nom);
+        // Règle 4 : nom de famille en capitales, prénoms à part. Le serveur projette les
+        // mêmes suffixes (ClientProjectionService) — ClientProjectionTest verrouille
+        // l'équivalence entre les deux.
+        set('nom_famille', (client.nom_famille ?? '').toUpperCase());
+        set('prenoms', client.prenoms);
+        set('identite_notariale', [(client.nom_famille ?? '').toUpperCase(), client.prenoms ?? ''].join(' ').trim());
         set('ne_a', client.ne_a);
         set('date_naissance', client.date_naissance);
         set('nationalite', client.nationalite);
@@ -40,9 +83,16 @@ export function mapClientToPrefixedFields(client, prefix, fieldIds) {
         set('civilite', 'Société');
         set('prenom_nom', client.denomination);
         set('nom', client.denomination);
+        // Une personne morale n'a pas de nom de famille : la dénomination en tient lieu,
+        // pour que ces suffixes ne restent pas en saisie libre si un schéma les contient.
+        set('nom_famille', (client.denomination ?? '').toUpperCase());
+        set('prenoms', '');
+        set('identite_notariale', client.denomination);
         set('denomination', client.denomination);
         set('forme', client.forme);
         set('representant_nom', client.representant_legal);
+        set('representant_legal', client.representant_legal);
+        set('representant_qualite', client.representant_qualite);
         set('nationalite', client.pays);
         set('rccm', client.rccm);
     }
@@ -50,6 +100,7 @@ export function mapClientToPrefixedFields(client, prefix, fieldIds) {
     set('quartier', client.quartier);
     set('commune', client.commune);
     set('demeurant_ville', client.demeurant_ville);
+    set('ville', client.demeurant_ville);
     set('siege_quartier', client.quartier);
     set('siege_commune', client.commune);
     set('siege_ville', client.demeurant_ville);
@@ -84,6 +135,18 @@ export function mapClientToRepeatableItem(client, fieldIds) {
     set('cni', client.type === 'physique' ? client.piece_numero : client.rccm);
     set('piece_numero', client.type === 'physique' ? client.piece_numero : client.rccm);
     set('piece_type', client.piece_type);
+    set('forme', client.forme);
+    set('rccm', client.rccm);
+    set('representant_legal', client.representant_legal);
+    set('representant_qualite', client.representant_qualite);
+    set('situation_matrimoniale', client.situation_matrimoniale);
+    set('regime_matrimonial', client.regime_matrimonial);
+    set('quartier', client.quartier);
+    set('commune', client.commune);
+    set('demeurant_ville', client.demeurant_ville);
+    set('pays', client.pays);
+    set('telephone', client.telephone);
+    set('email', client.email);
     set('piece_delivree_le', client.piece_delivree_le);
     set('piece_delivree_a', client.piece_delivree_a);
     set('piece_expire_le', client.piece_expire_le);
@@ -167,6 +230,10 @@ export function buildClientDraftFromDonnees(roleValues, roleFields) {
         piece_delivree_le: get('piece_delivree_le') || '',
         piece_delivree_a: get('piece_delivree_a') || '',
         piece_expire_le: get('piece_expire_le') || '',
+        forme: isMorale ? (get('forme') || '') : '',
+        rccm: isMorale ? (get('rccm') || '') : '',
+        representant_legal: isMorale ? (get('representant_legal') || get('representant_nom') || '') : '',
+        representant_qualite: isMorale ? (get('representant_qualite') || '') : '',
         quartier: quartier || '',
         commune: commune || '',
         demeurant_ville: demeurantVille || '',

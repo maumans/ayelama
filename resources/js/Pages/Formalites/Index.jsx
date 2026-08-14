@@ -36,7 +36,7 @@ const ORGANISMES_ONGLETS = ['apip', 'impots', 'conservation_fonciere', 'cnss', '
 function formatDelai(f) {
     if (f.joursRetardOuAvance == null) return { text: '—', cls: 'text-slate-400' };
     const j = f.joursRetardOuAvance;
-    const termine = f.statut === 'retour_recu' || f.statut === 'cloture';
+    const termine = f.statut === 'retour_recu';
 
     if (termine) {
         return j <= 0
@@ -62,14 +62,6 @@ function FormaliteCard({ formalite, showDossier = true }) {
 
     const patch = (data) =>
         router.patch(`/formalites/${formalite.id}`, data, { preserveScroll: true, onError: notifyValidationError });
-
-    const handleCloture = () => setConfirmState({
-        title: 'Clôturer cette formalité ?',
-        description: 'La formalité sera marquée comme clôturée.',
-        confirmLabel: 'Clôturer',
-        variant: 'default',
-        onConfirm: () => patch({ statut: 'cloture' }),
-    });
     const peutGerer = !!formalite.peutGerer;
     const peutDeposer = formalite.statut === 'a_deposer' || formalite.statut === 'rejete';
 
@@ -77,7 +69,6 @@ function FormaliteCard({ formalite, showDossier = true }) {
 
     const isUrgente  = formalite.estUrgente;
     const isDepassee = formalite.estDepassee;
-    const isCloture  = formalite.statut === 'cloture';
 
     const borderClass = isDepassee
         ? 'border-l-danger'
@@ -102,7 +93,7 @@ function FormaliteCard({ formalite, showDossier = true }) {
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
-            className={`bg-white rounded-lg border border-slate-200 border-l-4 shadow-sm ${borderClass} ${isCloture ? 'opacity-55' : ''}`}
+            className={`bg-white rounded-lg border border-slate-200 border-l-4 shadow-sm ${borderClass}`}
         >
             {/* row 1 — organisme + badge */}
             <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-1">
@@ -162,8 +153,9 @@ function FormaliteCard({ formalite, showDossier = true }) {
                 )}
             </div>
 
-            {/* row 3 — pièces */}
-            {pieces.length > 0 && (
+            {/* row 3 — pièces : attendues au RETOUR de l'organisme, pas au dépôt. Masquées
+                tant que la formalité n'a pas été déposée (voir ModalRetourFormalite). */}
+            {pieces.length > 0 && formalite.statut !== 'a_deposer' && (
                 <div className="px-4 py-1.5">
                     <button
                         onClick={() => setShowPieces(v => !v)}
@@ -187,7 +179,7 @@ function FormaliteCard({ formalite, showDossier = true }) {
                                 className="overflow-hidden mt-1.5 divide-y divide-slate-50"
                             >
                                 {pieces.map(p => (
-                                    <PieceGedRow key={p.id} piece={p} peutGerer={peutGerer} onToggle={handleToggle} />
+                                    <PieceGedRow key={p.id} piece={p} peutGerer={peutGerer} />
                                 ))}
                             </motion.div>
                         )}
@@ -199,7 +191,7 @@ function FormaliteCard({ formalite, showDossier = true }) {
             <div className="flex items-center gap-2 px-4 pb-3 pt-2 border-t border-slate-100 mt-1">
                 {peutGerer && peutDeposer && !formalite.estBloquee && (
                     <Button size="sm" variant="seal" onClick={() => setDepotOpen(true)} className="h-7 text-xs gap-1">
-                        <Upload className="h-3.5 w-3.5" /> {formalite.statut === 'rejete' ? 'Redéposer' : 'Préparer dépôt'}
+                        <Upload className="h-3.5 w-3.5" /> {formalite.statut === 'rejete' ? 'Redéposer' : 'Marquer le dépôt'}
                     </Button>
                 )}
                 {peutGerer && (formalite.statut === 'depose' || formalite.statut === 'en_attente') && (
@@ -211,19 +203,6 @@ function FormaliteCard({ formalite, showDossier = true }) {
                     >
                         <MailCheck className="h-3.5 w-3.5" /> Enregistrer un retour
                     </Button>
-                )}
-                {peutGerer && formalite.statut === 'retour_recu' && (
-                    <Button
-                        size="sm" variant="outline" onClick={handleCloture}
-                        className="h-7 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50"
-                    >
-                        <CheckCheck className="h-3.5 w-3.5" /> Clôturer
-                    </Button>
-                )}
-                {isCloture && (
-                    <span className="flex items-center gap-1 text-xs text-slate-400">
-                        <Check className="h-3.5 w-3.5" /> Clôturée
-                    </span>
                 )}
                 <div className="flex-1" />
                 {showDossier && formalite.dossier?.reference && (
@@ -258,22 +237,13 @@ function FormaliteTableRow({ formalite }) {
     const peutGerer = !!formalite.peutGerer;
     const peutDeposer = formalite.statut === 'a_deposer' || formalite.statut === 'rejete';
     const isDepassee = formalite.estDepassee;
-    const isCloture = formalite.statut === 'cloture';
     const delai = formatDelai(formalite);
 
     const patch = (data) =>
         router.patch(`/formalites/${formalite.id}`, data, { preserveScroll: true, onError: notifyValidationError });
 
-    const handleCloture = () => setConfirmState({
-        title: 'Clôturer cette formalité ?',
-        description: 'La formalité sera marquée comme clôturée.',
-        confirmLabel: 'Clôturer',
-        variant: 'default',
-        onConfirm: () => patch({ statut: 'cloture' }),
-    });
-
     return (
-        <tr className={isCloture ? 'opacity-50' : ''}>
+        <tr>
             <ConfirmDialog
                 open={!!confirmState}
                 onClose={() => setConfirmState(null)}
@@ -314,15 +284,11 @@ function FormaliteTableRow({ formalite }) {
                     <span className="text-xs text-slate-400 flex items-center gap-1"><Lock className="h-3 w-3" /> Attend {formalite.dependDeLabel}</span>
                 ) : peutGerer && peutDeposer ? (
                     <Button size="sm" variant="seal" className="h-7 text-xs" onClick={() => setDepotOpen(true)}>
-                        {formalite.statut === 'rejete' ? 'Redéposer' : 'Préparer dépôt'}
+                        {formalite.statut === 'rejete' ? 'Redéposer' : 'Marquer le dépôt'}
                     </Button>
                 ) : peutGerer && (formalite.statut === 'depose' || formalite.statut === 'en_attente') ? (
                     <Button size="sm" variant={isDepassee ? 'destructive' : 'success'} className="h-7 text-xs" onClick={() => setRetourOpen(true)}>
                         Retour
-                    </Button>
-                ) : peutGerer && formalite.statut === 'retour_recu' ? (
-                    <Button size="sm" variant="outline" className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-50" onClick={handleCloture}>
-                        Clôturer
                     </Button>
                 ) : (
                     <button

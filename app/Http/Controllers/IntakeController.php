@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\RoleUtilisateur;
 use App\Models\Demande;
-use App\Models\User;
 use App\Notifications\NouvelleDemandeNotification;
 use App\Services\MistralOcrService;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -53,7 +54,7 @@ class IntakeController extends Controller
         return response()->json(['donnees' => $resultat]);
     }
 
-    public function store(Request $request, string $token)
+    public function store(Request $request, string $token, NotificationService $notifications)
     {
         $demande = Demande::where('token', $token)->firstOrFail();
         if (!$demande->estUtilisable()) {
@@ -89,16 +90,12 @@ class IntakeController extends Controller
             'soumise_at'  => now(),
         ]);
 
-        $destinataires = User::where('actif', true)
-            ->where(fn ($q) => $q->withRole('notaire')->orWhere('id', $demande->cree_par_id))
-            ->get();
-        foreach ($destinataires as $user) {
-            try {
-                $user->notify(new NouvelleDemandeNotification($demande));
-            } catch (\Throwable $e) {
-                report($e);
-            }
-        }
+        // Une demande entrante n'est rattachée à aucun dossier : le pool des
+        // notaires est le destinataire naturel, plus l'auteur du lien d'intake.
+        $notifications->envoyer(
+            $notifications->pool(RoleUtilisateur::Notaire)->merge(array_filter([$demande->creePar])),
+            new NouvelleDemandeNotification($demande),
+        );
 
         return Inertia::render('Intake/Show', [
             'etat'    => 'soumise',

@@ -13,13 +13,8 @@ import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { STATUT_META } from '@/data/revisionStatuts';
 
-const TYPE_DOC_LABELS = {
-    acte_principal: 'Acte principal',
-    annexe:         'Annexe',
-    procedure:      'Procédure',
-    lettre:         'Lettre',
-    recepisse:      'Récépissé',
-};
+// Libellés servis par le serveur (`typeDocLabel`) — voir HasTypeDocumentLabel. Seules les
+// couleurs restent ici : c'est de la présentation, pas du vocabulaire métier.
 
 const TYPE_DOC_COLORS = {
     acte_principal: 'bg-seal/10 text-seal border-seal/20',
@@ -92,7 +87,9 @@ export default function Revision() {
     // été cliqué séparément).
     const handleValider = () => {
         setValidating(true);
-        router.put(`/dossiers/${dossier.reference}/revision`, { points: etats }, {
+        // `prelude` : évite le message « Grille sauvegardée », qui s'afficherait sinon
+        // même quand la validation qui suit échoue.
+        router.put(`/dossiers/${dossier.reference}/revision`, { points: etats, prelude: true }, {
             onSuccess: () => {
                 router.post(`/dossiers/${dossier.reference}/revision/valider`, {}, {
                     onFinish: () => setValidating(false),
@@ -104,7 +101,7 @@ export default function Revision() {
 
     const handleRenvoyer = () => {
         setRenvoyant(true);
-        router.put(`/dossiers/${dossier.reference}/revision`, { points: etats }, {
+        router.put(`/dossiers/${dossier.reference}/revision`, { points: etats, prelude: true }, {
             onSuccess: () => {
                 router.post(`/dossiers/${dossier.reference}/revision/renvoyer`, { motif: motifRenvoyer }, {
                     onFinish: () => { setRenvoyant(false); setShowRenvoyerDialog(false); },
@@ -284,9 +281,9 @@ export default function Revision() {
                                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                         <span className={cn(
                                                             'inline-flex items-center text-xs px-2 py-0.5 rounded-full border',
-                                                            TYPE_DOC_COLORS[doc.type_document] ?? 'bg-slate-100 text-slate-500 border-slate-200'
+                                                            TYPE_DOC_COLORS[doc.categorie] ?? 'bg-slate-100 text-slate-500 border-slate-200'
                                                         )}>
-                                                            {TYPE_DOC_LABELS[doc.type_document] ?? doc.type_document}
+                                                            {doc.typeDocLabel ?? doc.categorie}
                                                         </span>
                                                     </div>
                                                 </div>

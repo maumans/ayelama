@@ -20,7 +20,13 @@ class TypeActeSeeder extends Seeder
             ['categorie' => CategorieActe::Societe, 'code' => 'SOC-SNC',   'label' => 'Constitution SNC',               'prefixe_reference' => 'SOC', 'delai_jours' => 20, 'description' => 'Acte de constitution de société en nom collectif'],
             ['categorie' => CategorieActe::Societe, 'code' => 'SOC-GIE',   'label' => 'Constitution GIE',               'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => "Acte de constitution de groupement d'intérêt économique"],
             ['categorie' => CategorieActe::Societe, 'code' => 'SOC-DIS',   'label' => 'Dissolution de société',         'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => 'Acte de dissolution et liquidation de société'],
-            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-MOD',   'label' => 'Modification de statuts',        'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => "Modification des statuts d'une société existante (capital, gérant, siège, objet…)", 'fiche_modification_obligatoire' => true],
+            // « Modification de société » et non « de statuts » : parmi les sept résolutions,
+            // le **changement de gérant non statutaire** ne touche pas les statuts — seul le RCCM
+            // enregistre le changement (règle 8 du CR de juillet 2026, `TypeModificationStatutaire::impacteStatuts()`).
+            // Le libellé promettait donc quelque chose de faux, et pouvait faire hésiter à ouvrir ce
+            // dossier pour un changement qui ne relève pas des statuts. Le code `SOC-MOD`, lui, est
+            // déjà générique et ne change pas.
+            ['categorie' => CategorieActe::Societe, 'code' => 'SOC-MOD',   'label' => 'Modification de société',        'prefixe_reference' => 'SOC', 'delai_jours' => 30, 'description' => "Modification d'une société existante — statuts et/ou RCCM (capital, gérance, siège, objet, cession de parts)", 'fiche_modification_obligatoire' => true],
 
             // Vente
             ['categorie' => CategorieActe::Vente, 'code' => 'VTE-IMM',   'label' => 'Vente immobilière (avec TF)',     'prefixe_reference' => 'VTE', 'delai_jours' => 21, 'description' => 'Acte authentique de vente immobilière avec titre foncier'],

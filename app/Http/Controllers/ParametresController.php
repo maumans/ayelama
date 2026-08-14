@@ -5,14 +5,18 @@ namespace App\Http\Controllers;
 use App\Enums\CategorieActe;
 use App\Enums\RoleUtilisateur;
 use App\Models\Bareme;
+use App\Models\DocumentAttendu;
 use App\Models\ModeleActe;
 use App\Models\ModeleCourrier;
 use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
 use App\Models\UserRole;
+use App\Support\VariantesTypeActe;
+use Database\Seeders\ReglesGestionDocumentsSeeder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -85,7 +89,6 @@ class ParametresController extends Controller
                 'baremes'            => Bareme::count(),
                 'baremesActifs'      => Bareme::where('actif', true)->count(),
                 'typesAvecBaremes'   => TypeActe::has('baremes')->count(),
-                'obligatoiresCloture' => ModeleActe::where('obligatoire_cloture', true)->count(),
             ],
             'parRole'           => $parRole,
             'parCategorie'      => $parCategorie,
@@ -178,6 +181,8 @@ class ParametresController extends Controller
 
     public function typesActes()
     {
+        $modeles = ModeleActe::with('rattachements')->get();
+
         return Inertia::render('Parametres/TypesActes', [
             'typesActes' => TypeActe::orderBy('categorie')->orderBy('label')->get()->map(fn ($t) => [
                 'id'             => $t->id,
@@ -188,8 +193,152 @@ class ParametresController extends Controller
                 'delai_jours'    => $t->delai_jours,
                 'actif'          => $t->actif,
                 'description'    => $t->description,
+                // La carte du processus : ce que la procédure attend, et ce qui peut le produire.
+                'processus'      => $this->processus($t, $modeles),
             ]),
+            'typesDocument' => ModeleActe::typesDocumentOptions(),
         ]);
+    }
+
+    /**
+     * Couverture du processus d'un type d'acte : ses variantes, leurs documents attendus, et le
+     * gabarit qui remplit chacun — ou son absence.
+     *
+     * C'est ce que l'étude n'avait nulle part : jusqu'ici, un gabarit manquant se découvrait en
+     * générant un dossier, et le message d'erreur ne disait pas lequel. Le compteur d'incomplets
+     * donne l'état de la configuration **avant** d'ouvrir un dossier.
+     *
+     * @param  \Illuminate\Support\Collection<int, ModeleActe> $modeles
+     */
+    private function processus(TypeActe $typeActe, $modeles): array
+    {
+        $variantes = VariantesTypeActe::options($typeActe->code);
+
+        // Un type d'acte sans variante n'a pas de liste imposée : ses actes sont ceux de ses
+        // gabarits actifs. On ne lui invente pas de procédure — même raisonnement que l'abandon des
+        // « documents obligatoires configurés » pour la clôture.
+        if ($variantes === []) {
+            return [
+                'seDecline'  => false,
+                'variantes'  => [],
+                'incomplets' => 0,
+                'gabarits'   => $modeles->where('est_actif', true)
+                    ->filter(fn (ModeleActe $m) => $m->applicablePour($typeActe))
+                    ->map(fn (ModeleActe $m) => ['id' => $m->id, 'nom' => $m->nom, 'roles' => $m->rolesRemplis()])
+                    ->values(),
+            ];
+        }
+
+        $lignes     = [];
+        $incomplets = 0;
+
+        foreach ($variantes as $variante) {
+            $attendus = DocumentAttendu::pourProcedure($typeActe->id, $variante['valeur'])->get();
+
+            // Aucune configuration : on montre la référence légale, pour que l'écran soit lisible
+            // avant même que le seeder ait tourné.
+            $reference = DocumentAttendu::reference($typeActe->code, $variante['valeur']) ?? [];
+            $slugs     = $attendus->isNotEmpty()
+                ? $attendus->pluck('type_document')->all()
+                : array_keys($reference);
+
+            $documents = [];
+            foreach ($slugs as $slug) {
+                $gabarit = $modeles->where('est_actif', true)->first(
+                    fn (ModeleActe $m) => $m->remplitRole($slug)
+                        && $m->applicablePour($typeActe, $variante['valeur']),
+                );
+
+                // Les statuts se produisent aussi depuis ceux de la société, sans aucun gabarit —
+                // ne pas les compter comme manquants serait mentir, les compter aussi.
+                $heriteDeLaSociete = $slug === 'statuts_maj';
+
+                $documents[] = [
+                    'slug'    => $slug,
+                    'label'   => ModeleActe::TYPES_DOCUMENT[$slug] ?? ($reference[$slug] ?? $slug),
+                    'gabarit' => $gabarit ? ['id' => $gabarit->id, 'nom' => $gabarit->nom] : null,
+                    'source'  => $gabarit
+                        ? 'modèle « ' . $gabarit->nom . ' »'
+                        : ($heriteDeLaSociete ? 'statuts en vigueur de la société' : null),
+                ];
+
+                if (!$gabarit && !$heriteDeLaSociete) {
+                    $incomplets++;
+                }
+            }
+
+            $lignes[] = [
+                ...$variante,
+                'documents' => $documents,
+                'complet'   => collect($documents)->every(fn (array $d) => $d['gabarit'] || $d['source']),
+                // Écart à la règle écrite : une configuration modifiée doit se voir, puisqu'elle
+                // décide du contenu d'actes authentiques.
+                'diverge'   => DocumentAttendu::divergeDeLaReference($typeActe->code, $variante['valeur'], $slugs),
+                'reference' => array_keys($reference),
+            ];
+        }
+
+        return [
+            'seDecline'  => true,
+            'variantes'  => $lignes,
+            'incomplets' => $incomplets,
+            'gabarits'   => [],
+        ];
+    }
+
+    /** Ajoute ou retire un document attendu d'une procédure. */
+    public function updateDocumentsAttendus(Request $request, TypeActe $typeActe)
+    {
+        $data = $request->validate([
+            'variante'        => ['nullable', 'string', Rule::in(VariantesTypeActe::valeurs($typeActe->code))],
+            'type_documents'  => ['present', 'array'],
+            'type_documents.*' => ['string', Rule::in(array_keys(ModeleActe::TYPES_DOCUMENT))],
+        ]);
+
+        $variante = $data['variante'] ?? null;
+        $avant    = DocumentAttendu::pourProcedure($typeActe->id, $variante)->pluck('type_document')->all();
+
+        DocumentAttendu::where('type_acte_id', $typeActe->id)->where('variante', $variante)->delete();
+
+        $ordre = 0;
+        foreach ($data['type_documents'] as $slug) {
+            DocumentAttendu::create([
+                'type_acte_id'  => $typeActe->id,
+                'variante'      => $variante,
+                'type_document' => $slug,
+                'obligatoire'   => true,
+                'ordre'         => $ordre++,
+            ]);
+        }
+
+        // Une règle qui décide du contenu d'actes authentiques ne change pas en silence.
+        Log::info('Documents attendus modifiés', [
+            'type_acte' => $typeActe->code,
+            'variante'  => $variante,
+            'avant'     => $avant,
+            'apres'     => $data['type_documents'],
+            'par'       => auth()->id(),
+        ]);
+
+        return back()->with('success', 'Documents attendus mis à jour.');
+    }
+
+    /** Restaure la liste écrite au CR de juillet 2026 pour une procédure. */
+    public function reinitialiserDocumentsAttendus(Request $request, TypeActe $typeActe)
+    {
+        $data = $request->validate([
+            'variante' => ['nullable', 'string', Rule::in(VariantesTypeActe::valeurs($typeActe->code))],
+        ]);
+
+        ReglesGestionDocumentsSeeder::reinitialiser($typeActe, $data['variante'] ?? null);
+
+        Log::info('Documents attendus réinitialisés à la référence', [
+            'type_acte' => $typeActe->code,
+            'variante'  => $data['variante'] ?? null,
+            'par'       => auth()->id(),
+        ]);
+
+        return back()->with('success', 'Liste restaurée à la référence légale.');
     }
 
     public function updateTypeActe(Request $request, TypeActe $typeActe)
@@ -230,100 +379,6 @@ class ParametresController extends Controller
             'delai_heures'        => $b->delai_heures,
             'pieces_requises'     => $b->pieces_requises ?? [],
         ];
-    }
-
-    /**
-     * Vue d'ensemble « Clôture » : quels documents (modèles d'actes) sont obligatoires
-     * à la clôture, par type d'acte — la case existe déjà sur ModeleActe (session
-     * précédente) mais n'était visible qu'un modèle à la fois dans son modal d'édition.
-     */
-    public function cloture(Request $request)
-    {
-        $typesActes = TypeActe::with(['modeles' => fn ($q) => $q->orderBy('nom')])
-            ->when($request->categorie, fn ($q, $cat) => $q->where('categorie', $cat))
-            ->orderBy('categorie')
-            ->orderBy('label')
-            ->get()
-            ->map(fn ($t) => [
-                'id'             => $t->id,
-                'label'          => $t->label,
-                'categorie'      => $t->categorie?->value,
-                'categorieLabel' => $t->categorie?->label(),
-                'modeles'        => $t->modeles->map(fn ($m) => [
-                    'id'                  => $m->id,
-                    'nom'                 => $m->nom,
-                    'type_document'       => $m->type_document,
-                    'typeDocLabel'        => $m->typeDocumentLabel(),
-                    'est_actif'           => $m->est_actif,
-                    'obligatoire_cloture' => $m->obligatoire_cloture,
-                ])->values(),
-            ]);
-
-        $modelesCourriers = ModeleCourrier::with('typesActes')
-            ->orderBy('nom')
-            ->get()
-            ->map(fn (ModeleCourrier $m) => [
-                'id'                  => $m->id,
-                'nom'                 => $m->nom,
-                'typeDocLabel'        => $m->typeDocumentLabel(),
-                'est_actif'           => $m->est_actif,
-                'applicable_tous'     => $m->applicable_tous,
-                'typesActesLabels'    => $m->typesActes->pluck('label'),
-                'obligatoire_cloture' => $m->obligatoire_cloture,
-            ]);
-
-        return Inertia::render('Parametres/Cloture', [
-            'typesActes' => $typesActes,
-            'modelesCourriers' => $modelesCourriers,
-            'categories' => collect(CategorieActe::cases())->map(fn ($c) => [
-                'value' => $c->value,
-                'label' => $c->label(),
-            ]),
-            'filters' => $request->only(['categorie']),
-            'stats'   => [
-                'totalModeles'        => ModeleActe::count(),
-                'obligatoires'        => ModeleActe::where('obligatoire_cloture', true)->count(),
-                'obligatoiresCourriers' => ModeleCourrier::where('obligatoire_cloture', true)->count(),
-            ],
-        ]);
-    }
-
-    /**
-     * Bascule obligatoire_cloture pour tous les modèles d'un type d'acte ou d'une
-     * catégorie en une seule requête — répond au besoin exprimé de configurer ça
-     * "par type d'acte ou par catégorie", pas seulement modèle par modèle.
-     */
-    public function bulkObligatoireCloture(Request $request)
-    {
-        $data = $request->validate([
-            'obligatoire_cloture' => ['required', 'boolean'],
-            'type_acte_id'        => ['nullable', 'exists:types_actes,id'],
-            'categorie'           => ['nullable', 'string'],
-        ]);
-
-        if (empty($data['type_acte_id']) && empty($data['categorie'])) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'type_acte_id' => ["Précisez un type d'acte ou une catégorie."],
-            ]);
-        }
-
-        $query = ModeleActe::query();
-        if (!empty($data['type_acte_id'])) {
-            $query->where('type_acte_id', $data['type_acte_id']);
-        }
-        if (!empty($data['categorie'])) {
-            $query->whereHas('typeActe', fn ($q) => $q->where('categorie', $data['categorie']));
-        }
-
-        // Boucle plutôt qu'un update() en masse : chaque modèle doit répercuter le
-        // changement sur ses documents déjà générés (voir ModeleActe::synchroniserDocumentsRequis()).
-        $modeles = $query->get();
-        foreach ($modeles as $modele) {
-            $modele->update(['obligatoire_cloture' => $data['obligatoire_cloture']]);
-            $modele->synchroniserDocumentsRequis();
-        }
-
-        return back()->with('success', "{$modeles->count()} modèle(s) mis à jour.");
     }
 
     public function baremes(Request $request)

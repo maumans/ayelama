@@ -6,6 +6,7 @@ use App\Enums\CategorieActe;
 use App\Models\ModeleActe;
 use App\Models\ModeleCourrier;
 use App\Models\TypeActe;
+use App\Support\VariantesTypeActe;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -41,9 +42,9 @@ class ModeleActeController extends Controller
         return Storage::disk('local')->exists($storagePath);
     }
 
-    public function index(Request $request)
+    public function index(Request $request, \App\Services\ActesGeneratorService $generateur)
     {
-        $modeles = ModeleActe::with('typeActe')
+        $modeles = ModeleActe::with('typeActe', 'typesActes', 'rattachements')
             ->when($request->q, fn ($q, $s) => $q->where('nom', 'like', "%{$s}%")
                 ->orWhereHas('typeActe', fn ($q2) => $q2->where('label', 'like', "%{$s}%")))
             ->when($request->categorie, fn ($q, $cat) => $q->whereHas('typeActe', fn ($q2) => $q2->where('categorie', $cat)))
@@ -62,9 +63,19 @@ class ModeleActeController extends Controller
                 'fichier_existe' => $this->fichierExiste($m->chemin_fichier),
                 'version'        => $m->version,
                 'est_actif'      => $m->est_actif,
-                'obligatoire_cloture' => $m->obligatoire_cloture,
-                'type_acte_id'   => $m->type_acte_id,
-                'typeActeLabel'  => $m->typeActe?->label,
+                                'typeActeLabel'  => $m->typeActe?->label,
+                // Un modèle peut servir plusieurs types depuis le 2026-08-11 — c'est le pivot qui
+                // décide de l'applicabilité — il n'y a plus de « type d'origine » séparé.
+                'applicable_tous'  => $m->applicable_tous,
+                'type_acte_ids'    => $m->rattachements->pluck('type_acte_id')->unique()->values(),
+                'typesActesLabels' => $m->typesActes->pluck('label'),
+                // Rattachements détaillés : c'est la variante qui distingue « sert toutes les
+                // modifications » de « ne sert qu'aux cessions de parts ».
+                'rattachements'    => $m->rattachements->map(fn ($r) => [
+                    'type_acte_id' => $r->type_acte_id,
+                    'variante'     => $r->variante,
+                ])->values(),
+                'roles'            => $m->rolesRemplis(),
                 'categorie'      => $m->typeActe?->categorie?->value,
                 'categorieLabel' => $m->typeActe?->categorie?->label(),
                 'updated_at'     => $m->updated_at?->format('d/m/Y'),
@@ -101,11 +112,25 @@ class ModeleActeController extends Controller
         return Inertia::render('Modeles/Index', [
             'modeles'          => $modeles,
             'modelesCourriers' => $modelesCourriers,
-            'typesActes' => TypeActe::orderBy('label')->get(['id', 'label', 'categorie']),
+            // `variantes` accompagne chaque type : c'est ce qui permet à la modale de proposer
+            // « restreindre à certaines résolutions » sans redéclarer la nomenclature en JavaScript.
+            'typesActes' => TypeActe::orderBy('label')->get(['id', 'code', 'label', 'categorie'])
+                ->map(fn (TypeActe $t) => [
+                    ...$t->only(['id', 'code', 'label']),
+                    'categorie' => $t->categorie?->value,
+                    'variantes' => VariantesTypeActe::options($t->code),
+                    // Rôles que cette procédure attend — `null` quand elle les accepte tous
+                    // (constitutions, ventes, baux). La modale s'en sert pour distinguer les rôles
+                    // pertinents des autres : déclarer un rôle qu'aucun type rattaché n'attend est
+                    // resté sans effet et sans avertissement jusqu'au 2026-08-11.
+                    'roles_attendus' => $generateur->rolesAttendusPour($t),
+                ]),
             'categories' => collect(CategorieActe::cases())->map(fn ($c) => [
                 'value' => $c->value,
                 'label' => $c->label(),
             ]),
+            // Vocabulaire des rôles — référence unique, pour ne pas le redéclarer en JavaScript.
+            'typesDocument' => ModeleActe::typesDocumentOptions(),
             'filters' => [
                 'q'             => $request->q             ?? '',
                 'categorie'     => $request->categorie     ?? '',
@@ -126,10 +151,20 @@ class ModeleActeController extends Controller
     {
         $rules = [
             'nom'                 => ['required', 'string', 'max:200'],
-            'type_acte_id'        => ['required', 'exists:types_actes,id'],
-            'type_document'       => ['required', 'in:acte_principal,page_garde,attestation,declaration,dnsv,insertion,rccm,note_frais,bordereau,annexe,procedure,lettre,recepisse'],
+            'type_document'       => ['required', ModeleActe::reglesTypeDocument()],
             'version'             => ['required', 'string', 'max:10'],
-            'obligatoire_cloture' => ['sometimes', 'boolean'],
+            'applicable_tous'     => ['sometimes', 'boolean'],
+            // Sans `type_acte_id`, plus rien n'imposait qu'un gabarit serve à quelque chose : un
+            // modèle rattaché à aucun type ne serait généré nulle part, sans que rien ne le dise.
+            'type_acte_ids'       => ['required_without_all:applicable_tous,rattachements', 'array'],
+            'type_acte_ids.*'     => ['exists:types_actes,id'],
+            // Rattachements portant une variante — forme complète, `type_acte_ids` restant un
+            // raccourci « toutes variantes » pour les appels qui l'ignorent.
+            'rattachements'            => ['sometimes', 'array'],
+            'rattachements.*.type_acte_id' => ['required', 'exists:types_actes,id'],
+            'rattachements.*.variante'     => ['nullable', 'string', 'max:60'],
+            'roles'               => ['sometimes', 'array'],
+            'roles.*'             => ['string', ModeleActe::reglesTypeDocument()],
         ];
 
         if ($request->hasFile('fichier')) {
@@ -139,6 +174,9 @@ class ModeleActeController extends Controller
         }
 
         $data = $request->validate($rules, self::FICHIER_MESSAGES);
+        $rattachements = $this->rattachementsDemandes($data);
+        $roles         = $data['roles'] ?? [];
+        unset($data['type_acte_ids'], $data['rattachements'], $data['roles']);
 
         if ($request->hasFile('fichier')) {
             $file     = $request->file('fichier');
@@ -148,23 +186,77 @@ class ModeleActeController extends Controller
             unset($data['fichier']);
         }
 
-        ModeleActe::create(array_merge($data, [
+        $modele = ModeleActe::create(array_merge($data, [
             'est_actif'  => true,
             'updated_by' => Auth::id(),
         ]));
 
+        $this->ecrireRattachements($modele, $rattachements);
+        $modele->definirRoles($roles !== [] ? $roles : [$modele->type_document]);
+
         return back()->with('success', 'Modèle créé avec succès.');
+    }
+
+    /**
+     * Types auxquels le modèle s'applique.
+     *
+     * Repli sur le type d'origine quand le formulaire ne les envoie pas : un appel qui ne connaît
+     * pas encore le partage (ancien client, seeder, import) ne doit pas délier le modèle de son
+     * type et couper la génération d'actes.
+     *
+     * @param  array<string, mixed> $data
+     * @return array<int, int>
+     */
+    private function rattachementsDemandes(array $data, ?ModeleActe $modele = null): array
+    {
+        // Forme complète, avec variantes.
+        if (array_key_exists('rattachements', $data)) {
+            return array_map(
+                fn (array $r) => ['type_acte_id' => (int) $r['type_acte_id'], 'variante' => $r['variante'] ?? null],
+                $data['rattachements'] ?? [],
+            );
+        }
+
+        // Raccourci « toutes variantes ».
+        if (array_key_exists('type_acte_ids', $data)) {
+            return array_map(
+                fn ($id) => ['type_acte_id' => (int) $id, 'variante' => null],
+                $data['type_acte_ids'] ?? [],
+            );
+        }
+
+        // Aucun des deux : on ne devine plus rien. `type_acte_id` a disparu, et inventer un
+        // rattachement rendrait le gabarit applicable à un type que personne n'a coché.
+        return [];
+    }
+
+    /** @param array<int, array{type_acte_id: int, variante: ?string}> $rattachements */
+    private function ecrireRattachements(ModeleActe $modele, array $rattachements): void
+    {
+        $modele->rattachements()->delete();
+
+        foreach ($rattachements as $r) {
+            $modele->rattachements()->create($r);
+        }
     }
 
     public function update(Request $request, ModeleActe $modele)
     {
         $rules = [
             'nom'                 => ['sometimes', 'string', 'max:200'],
-            'type_acte_id'        => ['sometimes', 'exists:types_actes,id'],
-            'type_document'       => ['sometimes', 'in:acte_principal,page_garde,attestation,declaration,dnsv,insertion,rccm,note_frais,bordereau,annexe,procedure,lettre,recepisse'],
+            'type_document'       => ['sometimes', ModeleActe::reglesTypeDocument()],
+            'applicable_tous'     => ['sometimes', 'boolean'],
+            'type_acte_ids'       => ['sometimes', 'array'],
+            'type_acte_ids.*'     => ['exists:types_actes,id'],
+            // Rattachements portant une variante — forme complète, `type_acte_ids` restant un
+            // raccourci « toutes variantes » pour les appels qui l'ignorent.
+            'rattachements'            => ['sometimes', 'array'],
+            'rattachements.*.type_acte_id' => ['required', 'exists:types_actes,id'],
+            'rattachements.*.variante'     => ['nullable', 'string', 'max:60'],
+            'roles'               => ['sometimes', 'array'],
+            'roles.*'             => ['string', ModeleActe::reglesTypeDocument()],
             'version'             => ['sometimes', 'string', 'max:10'],
             'est_actif'           => ['sometimes', 'boolean'],
-            'obligatoire_cloture' => ['sometimes', 'boolean'],
         ];
 
         if ($request->hasFile('fichier')) {
@@ -190,10 +282,19 @@ class ModeleActeController extends Controller
             }
         }
 
+        $rattachements = $this->rattachementsDemandes($data, $modele);
+        $roles         = array_key_exists('roles', $data) ? $data['roles'] : null;
+        unset($data['type_acte_ids'], $data['rattachements'], $data['roles']);
+
         $modele->update(array_merge($data, ['updated_by' => Auth::id()]));
 
-        if (array_key_exists('obligatoire_cloture', $data)) {
-            $modele->synchroniserDocumentsRequis();
+        // Les rattachements sont la seule source de vérité de l'applicabilité ; l'ancien
+        // type d'origine et suit le premier rattachement, pour que l'affichage et les seeders
+        // continuent de fonctionner.
+        $this->ecrireRattachements($modele, $rattachements);
+
+        if ($roles !== null) {
+            $modele->definirRoles($roles !== [] ? $roles : [$modele->type_document]);
         }
 
         return back()->with('success', 'Modèle mis à jour.');
@@ -201,15 +302,24 @@ class ModeleActeController extends Controller
 
     public function dupliquer(ModeleActe $modele)
     {
-        ModeleActe::create([
+        $copie = ModeleActe::create([
             'nom'            => 'Copie de ' . $modele->nom,
-            'type_acte_id'   => $modele->type_acte_id,
             'type_document'  => $modele->type_document,
             'chemin_fichier' => $modele->chemin_fichier,
             'version'        => '1.0',
             'est_actif'      => false,
             'updated_by'     => Auth::id(),
+            'applicable_tous' => $modele->applicable_tous,
         ]);
+
+        // Rattachements et rôles recopiés : l'applicabilité ne vit plus dans une colonne du modèle.
+        // Sans cette reprise, la copie ne serait générée nulle part — un « duplicata » qui ne
+        // duplique pas ce qui compte.
+        foreach ($modele->rattachements as $r) {
+            $copie->rattachements()->create(['type_acte_id' => $r->type_acte_id, 'variante' => $r->variante]);
+        }
+
+        $copie->definirRoles($modele->rolesRemplis());
 
         return back()->with('success', 'Modèle dupliqué — pensez à le renommer.');
     }

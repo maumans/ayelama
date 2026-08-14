@@ -1,14 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
+import React, { useState, useEffect, useRef } from 'react';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { DateField } from '@/components/ui/date-field';
 import { NumberField } from '@/components/ui/number-field';
 import { PhoneField } from '@/components/ui/phone-field';
 import { ClientPicker } from '@/Components/ui/client-picker';
+import { ClientRoleSection } from '@/Components/ui/client-role-section';
+import { ChoixMultiple } from '@/Components/ui/choix-multiple';
+import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
-import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName } from '@/lib/clientFields';
+import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
+import { ChoixSociete } from '@/Components/Societes/ChoixSociete';
+import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estChampIdentite } from '@/lib/clientFields';
+import { mapSocieteToQuestionnaire, estChampSociete, ficheRenseigneChamp, societeDisplayName } from '@/lib/societeFields';
 import { groupFieldsBySection, buildPartiesPayload } from '@/lib/partiesPayload';
-import { notifyValidationError } from '@/lib/toast';
+import { construireFormDataBrouillon, libelleBrouillon, compterPieces } from '@/lib/brouillonDossier';
+import { allerAuBlocant, ancreSection, blocantsEtape, clesEnDefaut, compterParSection, OBJET_LONGUEUR_MIN } from '@/lib/blocantsEtape';
+import { BadgeSection, BlocantsPanel, CompteurBlocants } from '@/Components/Dossiers/BlocantsPanel';
+import { notifyValidationError, toast } from '@/lib/toast';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import axios from 'axios';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -16,8 +27,9 @@ import {
     FileText, HeartHandshake, ScrollText, HandHeart, ChevronLeft, ChevronRight, Check,
     Users, ArrowRight, AlertCircle, PlusCircle, Edit2, Archive, Zap,
     UserCog, ClipboardCheck, Key, Landmark, Banknote, StickyNote, Trash2,
-    CheckCircle2, Pencil, UserCircle2,
+    CheckCircle2, Pencil, UserCircle2, X, Save, FileClock, Paperclip
 } from 'lucide-react';
+import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -183,13 +195,124 @@ function getSectionMeta(name) {
     return SECTION_ICON_RULES.find(r => r.test.test(name)) ?? { icon: FileText, iconColor: 'text-slate-500', iconBg: 'bg-slate-100' };
 }
 
-function GroupHeader({ icon: Icon, iconColor, iconBg, children }) {
+function GroupHeader({ icon: Icon, iconColor, iconBg, children, badge = null }) {
     return (
         <div className="flex items-center gap-2 mb-3">
             <span className={cn('flex h-6 w-6 items-center justify-center rounded-md shrink-0', iconBg)}>
                 <Icon className={cn('h-3.5 w-3.5', iconColor)} />
             </span>
             <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wider">{children}</h4>
+            {badge}
+        </div>
+    );
+}
+
+/**
+ * Conséquences des modifications cochées : impact statutaire, actes qui seront produits,
+ * droits d'enregistrement.
+ *
+ * Répond au reproche que le formulaire « s'arrêtait au formulaire » : les règles 8 à 11 du CR
+ * de juillet 2026 étaient calculées côté serveur (TypeModificationStatutaire) mais ne
+ * s'affichaient nulle part — on ne découvrait les documents et les coûts qu'après création.
+ * Toutes les données viennent de l'enum via la prop `typesModification` : rien n'est
+ * redéclaré en JavaScript.
+ */
+function ConsequencesModification({ typesModification, selection, valeurPartsCedees }) {
+    const choisis = (typesModification ?? []).filter(t => selection.includes(t.label));
+
+    if (choisis.length === 0) {
+        return (
+            <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-500">
+                Cochez au moins une modification : elle détermine les actes à produire, les formalités
+                à engager et les droits d'enregistrement à percevoir.
+            </div>
+        );
+    }
+
+    // Sélection contradictoire (seulement héritée d'un dossier ou d'un brouillon antérieur au
+    // garde-fou : les cases s'excluent désormais à la saisie). Annoncer des actes et des coûts
+    // pour une combinaison que le serveur refusera serait trompeur — on s'arrête là.
+    const conflit = choisis.find(t => (t.incompatibles ?? []).some(v => choisis.some(c => c.valeur === v)));
+    if (conflit) {
+        return (
+            <div className="rounded-md border border-red-200 bg-danger-bg p-3 text-xs text-danger-text">
+                Deux modifications incompatibles sont sélectionnées : ni les actes ni les droits ne
+                peuvent être déterminés tant que le conflit persiste. Décochez l'une des deux
+                ci-dessus.
+            </div>
+        );
+    }
+
+    // Union des documents — un seul procès-verbal quel que soit le nombre de résolutions.
+    const documents = {};
+    choisis.forEach(t => Object.assign(documents, t.documentsRequis));
+
+    const droits = [];
+    if (Object.keys(documents).includes('statuts_maj')) droits.push(['Enregistrement des statuts mis à jour', 500_000]);
+    if (Object.keys(documents).includes('pv_modification')) droits.push(['Enregistrement du procès-verbal', 100_000]);
+    if (choisis.some(t => t.exigeDnsv)) droits.push(['Enregistrement DNSV', 100_000]);
+    if (choisis.some(t => t.impacteRccm)) droits.push(['Tribunal de Commerce (RCCM)', 180_000]);
+
+    const parts = Number(valeurPartsCedees) || 0;
+    const cession = choisis.some(t => t.exigeValeurParts);
+    if (cession) droits.push(['Droit de cession — 2 % des parts cédées', parts > 0 ? Math.round(parts * 0.02) : null]);
+
+    const total = droits.every(([, m]) => m !== null)
+        ? droits.reduce((s, [, m]) => s + m, 0)
+        : null;
+
+    const statuts = choisis.filter(t => t.impacteStatuts).length;
+
+    return (
+        <div className="space-y-3 rounded-md border border-seal/30 bg-seal-light/50 p-3">
+            <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Impact</p>
+                <p className="mt-0.5 text-xs text-slate-700">
+                    {statuts > 0
+                        ? 'Statuts à mettre à jour et enregistrement au RCCM.'
+                        : 'RCCM seulement — les statuts ne sont pas modifiés.'}
+                </p>
+            </div>
+
+            <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Actes qui seront produits
+                </p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                    {Object.entries(documents).map(([slug, label]) => (
+                        <span key={slug} className="rounded-full border border-seal/30 bg-white px-2.5 py-0.5 text-xs text-slate-700">
+                            {label}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Droits d'enregistrement estimés
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                    {droits.map(([label, montant]) => (
+                        <li key={label} className="flex items-baseline justify-between gap-3 text-xs text-slate-600">
+                            <span>{label}</span>
+                            <span className="font-ref shrink-0 text-slate-700">
+                                {montant === null
+                                    ? 'valeur des parts à renseigner'
+                                    : `${montant.toLocaleString('fr-FR')} GNF`}
+                            </span>
+                        </li>
+                    ))}
+                    {total !== null && (
+                        <li className="mt-1 flex items-baseline justify-between gap-3 border-t border-seal/20 pt-1 text-xs font-medium text-slate-800">
+                            <span>Total</span>
+                            <span className="font-ref shrink-0">{total.toLocaleString('fr-FR')} GNF</span>
+                        </li>
+                    )}
+                </ul>
+                <p className="mt-1 text-[11px] text-slate-400">
+                    Hors honoraires de l'office — la note de frais complète est générée avec le dossier.
+                </p>
+            </div>
         </div>
     );
 }
@@ -244,7 +367,7 @@ function RecapPersonne({ person, role, color = 'bg-ink' }) {
 }
 
 export default function DossierCreate() {
-    const { typesActes, notaires, reviseurs, formalistes, defauts } = usePage().props;
+    const { typesActes, notaires, reviseurs, formalistes, defauts, brouillons: brouillonsInitiaux, reglesParTypeActe, typesModification } = usePage().props;
 
     const [step, setStep] = useState(0);
     const [categorie, setCategorie] = useState(null);
@@ -253,12 +376,38 @@ export default function DossierCreate() {
     const [formValues, setFormValues] = useState({});
     const [clientLinks, setClientLinks] = useState({}); // { [clientRole]: clientObject }
     const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
+    // { client, group } — édition en place d'une fiche déjà rattachée à un rôle.
+    const [editingClient, setEditingClient] = useState(null);
+    // Rôles saisis en texte libre plutôt que via une fiche client (tiers ponctuel
+    // qu'on ne verse pas au répertoire) — { [clientRole]: true }.
+    const [saisieLibreRoles, setSaisieLibreRoles] = useState({});
     // Clients ajoutés en haut du formulaire (personnes physiques/morales créées ou choisies
     // dans le répertoire pour ce dossier). Certains reçoivent une qualité libre directement
     // (témoin, accompagnateur…), d'autres restent disponibles pour être réutilisés comme
     // gérant/associé/etc. via les sélecteurs de client des sections ci-dessous.
     const [dossierClients, setDossierClients] = useState([]); // [{ client, role }]
     const [creatingClientForDossierIndex, setCreatingClientForDossierIndex] = useState(null);
+    // Société du registre sur laquelle porte le dossier (modification, dissolution) : sa fiche
+    // préremplit les champs `soc.*` et devient `dossiers.societe_id`. Distincte de
+    // `clientLinks` — une société n'est pas une partie à l'acte, c'est son objet.
+    const [societeLink, setSocieteLink] = useState(null);
+    /**
+     * Société du registre, ou société hors registre saisie à la main.
+     *
+     * Posé en premier plutôt que déduit : le clerc sait dès le départ s'il traite une société que
+     * l'étude a constituée ou celle d'un confrère. L'ancienne modale rendait ce choix implicite —
+     * il fallait chercher, ne rien trouver, puis penser à l'ouvrir.
+     */
+    const [modeSociete, setModeSociete] = useState('registre');
+
+    /**
+     * Actes que cette procédure produira — calculés par le serveur.
+     *
+     * `null` tant que la réponse n'est pas là. Le calcul reste côté PHP : la résolution
+     * rôle × variante × « applicable à tous » est la règle métier, et la réécrire ici garantirait
+     * que l'annonce et la production divergent — c'est précisément le défaut corrigé.
+     */
+    const [actesPrevus, setActesPrevus] = useState(null);
     const [objet, setObjet] = useState('');
     const [urgent, setUrgent] = useState(false);
     const [notes, setNotes] = useState('');
@@ -269,6 +418,54 @@ export default function DossierCreate() {
     const [formalisteId, setFormalisteId] = useState(defauts?.formaliste_id ? String(defauts.formaliste_id) : '');
     const [submitting, setSubmitting] = useState(false);
     const [errors, setErrors] = useState({});
+    // Une tentative d'avancement a-t-elle eu lieu sur cette étape ? Tant que non, aucun champ n'est
+    // marqué en rouge : un formulaire vierge intégralement rouge est agressif et n'informe pas.
+    const [validationTentee, setValidationTentee] = useState(false);
+    const [blocantsOuverts, setBlocantsOuverts] = useState(false);
+    
+    // Ajout état pour les pièces justificatives "staged" (upload direct à la création)
+    const [stagedPieces, setStagedPieces] = useState({});
+    const [previewKey, setPreviewKey] = useState(null);
+
+    // ── Brouillon ────────────────────────────────────────────────────────────
+    // Pièces déjà téléversées au brouillon : { groupe: { cle: {chemin, nom} } }.
+    // Distinctes de stagedPieces (des File de la session courante) — voir
+    // resources/js/lib/brouillonDossier.js.
+    const [piecesBrouillon, setPiecesBrouillon] = useState({});
+    const [brouillonId, setBrouillonId] = useState(null);
+    const [brouillons, setBrouillons] = useState(brouillonsInitiaux ?? []);
+    const [enregistrementBrouillon, setEnregistrementBrouillon] = useState(false);
+    const [brouillonEnregistreA, setBrouillonEnregistreA] = useState(null);
+    const [brouillonASupprimer, setBrouillonASupprimer] = useState(null);
+
+    const handleStagedPieceChange = (groupName, key, file) => {
+        setStagedPieces(prev => ({
+            ...prev,
+            [groupName]: {
+                ...(prev[groupName] || {}),
+                [key]: file,
+            }
+        }));
+        // Un nouveau fichier remplace la pièce héritée du brouillon : la garder
+        // ferait resurgir l'ancienne au prochain enregistrement.
+        if (file) retirerPieceBrouillon(groupName, key);
+    };
+
+    /**
+     * Retire une pièce héritée du brouillon. Le fichier n'est réellement supprimé du
+     * disque qu'au prochain enregistrement : le serveur nettoie tout fichier que
+     * l'état reçu ne mentionne plus (voir DossierBrouillonController::rangerPieces).
+     */
+    const retirerPieceBrouillon = (groupName, key) => {
+        setPiecesBrouillon(prev => {
+            if (!prev[groupName]?.[key]) return prev;
+            const groupe = { ...prev[groupName] };
+            delete groupe[key];
+            const next = { ...prev, [groupName]: groupe };
+            if (Object.keys(groupe).length === 0) delete next[groupName];
+            return next;
+        });
+    };
 
     // Remonte en haut du contenu défilable à chaque changement d'étape (ou de sous-groupe/type
     // d'acte à l'étape 2) — sans ça, le scroll reste où l'utilisateur l'a laissé sur l'étape
@@ -277,6 +474,120 @@ export default function DossierCreate() {
         const scrollable = document.querySelector('main');
         if (scrollable) scrollable.scrollTop = 0;
     }, [step, sousGroupe, typeActe?.id]);
+
+    // ── Calcul automatique Capital ↔ Parts ↔ Valeur nominale ─────────────────
+    // Relation : Capital = Nombre de parts × Valeur nominale d'une part.
+    // Dès que 2 des 3 valeurs sont renseignées, la 3ème est déduite.
+    // Le champ des parts est 'soc.nombre_parts' pour les SARL/SARLU et
+    // 'soc.nombre_actions' pour les SA/SAS/SASU.
+    const lastEditedCapitalField = useRef(null);
+
+    // Wrapper pour setFormValues qui traque le dernier champ Capital/Parts/VN modifié.
+    const capitalTriadFields = ['soc.capital_chiffres', 'soc.nombre_parts', 'soc.nombre_actions', 'soc.valeur_nominale_chiffres'];
+
+    // Intercepter les modifications via un setter enrichi : quand l'utilisateur
+    // change l'un des 3 champs, on note lequel pour ne pas le recalculer.
+    const setFormValuesTracked = (updater) => {
+        setFormValues(prev => {
+            const next = typeof updater === 'function' ? updater(prev) : updater;
+            // Détecter quel champ de la triade a changé.
+            for (const fid of capitalTriadFields) {
+                if (next[fid] !== prev[fid]) {
+                    lastEditedCapitalField.current = fid;
+                    break;
+                }
+            }
+            return next;
+        });
+    };
+
+    useEffect(() => {
+        const edited = lastEditedCapitalField.current;
+        if (!edited) return;
+
+        // Détermine quel champ 'parts' est pertinent selon le type d'acte.
+        const partsField = formValues['soc.nombre_actions'] !== undefined
+            ? 'soc.nombre_actions'
+            : 'soc.nombre_parts';
+
+        const capital = parseFloat(formValues['soc.capital_chiffres']) || 0;
+        const parts = parseFloat(formValues[partsField]) || 0;
+        const valeurNominale = parseFloat(formValues['soc.valeur_nominale_chiffres']) || 0;
+
+        // Si le champ édité ne fait pas partie de la triade active, ne rien faire.
+        const activeTriad = ['soc.capital_chiffres', partsField, 'soc.valeur_nominale_chiffres'];
+        if (!activeTriad.includes(edited)) return;
+
+        // Calculer le 3ème champ quand les 2 autres sont non nuls.
+        if (edited === 'soc.capital_chiffres') {
+            // L'utilisateur a modifié le capital : recalculer soit VN soit parts.
+            if (parts > 0 && capital > 0) {
+                const computed = Math.round(capital / parts);
+                if (computed !== valeurNominale) {
+                    setFormValues(prev => ({ ...prev, 'soc.valeur_nominale_chiffres': String(computed) }));
+                }
+            }
+        } else if (edited === partsField) {
+            // L'utilisateur a modifié le nombre de parts : recalculer VN.
+            if (capital > 0 && parts > 0) {
+                const computed = Math.round(capital / parts);
+                if (computed !== valeurNominale) {
+                    setFormValues(prev => ({ ...prev, 'soc.valeur_nominale_chiffres': String(computed) }));
+                }
+            }
+        } else if (edited === 'soc.valeur_nominale_chiffres') {
+            // L'utilisateur a modifié la valeur nominale : recalculer le capital.
+            if (parts > 0 && valeurNominale > 0) {
+                const computed = Math.round(parts * valeurNominale);
+                if (computed !== capital) {
+                    setFormValues(prev => ({ ...prev, 'soc.capital_chiffres': String(computed) }));
+                }
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        formValues['soc.capital_chiffres'],
+        formValues['soc.nombre_parts'],
+        formValues['soc.nombre_actions'],
+        formValues['soc.valeur_nominale_chiffres'],
+    ]);
+
+    // ── Capital après modification (augmentation / diminution) ───────────────
+    // Le capital « après » n'est jamais saisi : il se déduit du capital actuel de la société
+    // et du montant de l'opération. Le laisser en saisie libre laisserait passer une
+    // incohérence entre les statuts mis à jour, le PV et la DNSV — trois documents qui
+    // doivent porter le même chiffre.
+    useEffect(() => {
+        const capital = parseFloat(formValues['soc.capital_chiffres']) || 0;
+        if (capital <= 0) return;
+
+        const majAttendue = (champMontant, champApres, signe) => {
+            const montant = parseFloat(formValues[champMontant]) || 0;
+            if (montant <= 0) return null;
+            return String(Math.round(capital + signe * montant));
+        };
+
+        const augmentation = majAttendue('modif.augmentation_montant', 'modif.augmentation_capital_apres', 1);
+        const diminution   = majAttendue('modif.diminution_montant', 'modif.diminution_capital_apres', -1);
+
+        setFormValues(prev => {
+            const next = { ...prev };
+            let change = false;
+            if (augmentation !== null && next['modif.augmentation_capital_apres'] !== augmentation) {
+                next['modif.augmentation_capital_apres'] = augmentation;
+                change = true;
+            }
+            if (diminution !== null && next['modif.diminution_capital_apres'] !== diminution) {
+                next['modif.diminution_capital_apres'] = diminution;
+                change = true;
+            }
+            return change ? next : prev;
+        });
+    }, [
+        formValues['soc.capital_chiffres'],
+        formValues['modif.augmentation_montant'],
+        formValues['modif.diminution_montant'],
+    ]);
 
     // `typeActe` est directement la ligne TypeActe de la base (id, code, label,
     // description, modeles) — plus besoin de chercher son id serveur, il l'a déjà.
@@ -294,6 +605,9 @@ export default function DossierCreate() {
     const questionnaire = typeActe ? getQuestionnaire(typeActe) : [];
     // Champs filtrés selon les valeurs actuelles (showIf)
     const visibleFields = getVisibleFields(questionnaire, formValues);
+    // Modifications statutaires mutuellement exclusives — dérivé de l'enum côté serveur, la règle
+    // n'est jamais redéclarée ici (voir TypeModificationStatutaire::incompatiblesAvec).
+    const exclusionsModification = tableExclusionsModification(typesModification);
     const categorieSelected = categories.find(c => c.id === categorie?.id);
     const typeSelected = typeActe;
 
@@ -303,6 +617,11 @@ export default function DossierCreate() {
         const q = (key && QUESTIONNAIRES[key]) || [];
         setFormValues(initRepeatableFields(q));
         setClientLinks({});
+        setSaisieLibreRoles({});
+        // Changer de type d'acte remet à zéro le questionnaire : garder la société
+        // rattachée laisserait `societe_id` pointer sur une fiche dont plus aucun champ
+        // `soc.*` n'est projeté.
+        setSocieteLink(null);
     };
 
     const selectTypeById = (id) => {
@@ -322,6 +641,116 @@ export default function DossierCreate() {
         if (filtered.length === 1) selectType(filtered[0]);
     };
 
+    // ── Société du registre ──────────────────────────────────────────────────
+
+    /**
+     * Rattache une société et projette sa fiche dans les champs `soc.*`.
+     *
+     * La liste de l'autocomplétion ne porte pas les personnes du dossier de constitution
+     * (inutile de les charger pour quinze résultats) : on rappelle la fiche complète pour
+     * pouvoir proposer les associés et gérants connus. L'échec de ce second appel ne doit pas
+     * annuler le rattachement — la société reste choisie, seule la commodité est perdue.
+     */
+    const applySociete = async (societe) => {
+        setSocieteLink(societe);
+        setFormValues(prev => ({ ...prev, ...mapSocieteToQuestionnaire(societe) }));
+
+        if (!societe?.id) return;
+        try {
+            const { data } = await axios.get(`/societes/${societe.id}`);
+            setSocieteLink(data);
+            setFormValues(prev => ({ ...prev, ...mapSocieteToQuestionnaire(data) }));
+        } catch {
+            /* fiche de base déjà rattachée — on n'interrompt pas la saisie */
+        }
+    };
+
+    // Variantes décidées, sous leur forme technique : `modif.types` stocke les libellés affichés
+    // (convention de tous les `select` du projet), le serveur accepte les deux.
+    const variantesChoisies = Array.isArray(formValues['modif.types']) ? formValues['modif.types'] : [];
+
+    useEffect(() => {
+        const typeId = typeSelected?.id;
+
+        if (!typeId || step !== 2) {
+            return;
+        }
+
+        const controleur = new AbortController();
+        setActesPrevus(null);
+
+        axios
+            .get(`/types-actes/${typeId}/actes-prevus`, {
+                params: { variantes: variantesChoisies },
+                signal: controleur.signal,
+            })
+            .then(({ data }) => setActesPrevus(data.actes ?? []))
+            // Annulation d'une requête devancée par une autre : ce n'est pas une erreur.
+            .catch((err) => { if (!axios.isCancel(err)) setActesPrevus([]); });
+
+        return () => controleur.abort();
+    }, [typeSelected?.id, step, JSON.stringify(variantesChoisies)]);
+
+    const unlinkSociete = () => setSocieteLink(null);
+
+    /**
+     * Recharge la fiche rattachée depuis le serveur — après un dépôt de pièce constitutive, pour
+     * que la checklist reflète l'état réel sans recharger la page (une visite Inertia perdrait
+     * toute la saisie de l'assistant).
+     */
+    const rafraichirSociete = async () => {
+        if (!societeLink?.id) return;
+        try {
+            const { data } = await axios.get(`/societes/${societeLink.id}`);
+            setSocieteLink(data);
+        } catch {
+            /* la checklist reste sur son état précédent — le dépôt, lui, a bien eu lieu */
+        }
+    };
+
+    /**
+     * Verse une personne connue de la société aux « clients du dossier », d'où elle est
+     * réutilisable comme cédant, gérant sortant, souscripteur… Ne l'affecte à aucun rôle
+     * d'office : un associé d'origine peut avoir déjà cédé toutes ses parts, c'est au clerc
+     * de dire à quel titre il intervient.
+     */
+    const importerPersonneConnue = (personne) => {
+        if (!personne?.client) {
+            toast.error(`${personne?.nom ?? 'Cette personne'} n'a pas de fiche client — créez-la depuis la section concernée.`);
+            return;
+        }
+        addClientToPool(personne.client);
+        toast.success(`${clientDisplayName(personne.client)} ajouté aux clients du dossier.`);
+    };
+
+    /**
+     * Champs `soc.*` à afficher quand une fiche du registre est rattachée.
+     *
+     * Masqués **seulement s'ils sont renseignés dans la fiche** : ils restent alors dans
+     * `formValues` — c'est la projection attendue par les balises `${soc.*}` des modèles Word — et
+     * les réafficher en saisie libre recréerait deux vérités concurrentes pour la même donnée.
+     *
+     * Un champ que la fiche **ne renseigne pas** reste saisissable. La première version masquait
+     * tout `soc.*` sans distinction, si bien qu'une société au registre sans numéro RCCM rendait ce
+     * champ **obligatoire et impossible à remplir** : le seul recours affiché était de détacher la
+     * société, donc de perdre tout le préremplissage. La saisie complète alors la fiche au registre.
+     */
+    const champsSocieteAffichables = (group) => {
+        if (!group.societePicker) return group.fields;
+
+        // Mode « registre » sans fiche encore choisie : le sélecteur **est** la saisie. Afficher les
+        // champs vides sous lui inviterait à une double saisie dont l'une serait perdue.
+        if (!societeLink) {
+            return modeSociete === 'hors_registre' ? group.fields : [];
+        }
+
+        return group.fields.filter(f => !ficheRenseigneChamp(societeLink, f.id));
+    };
+
+    /** Ce champ complètera-t-il la fiche du registre plutôt que de la refléter ? */
+    const completeLaFicheSociete = (fieldId) =>
+        !!societeLink && estChampSociete(fieldId) && !ficheRenseigneChamp(societeLink, fieldId);
+
     const applyClientToSection = (group, client) => {
         const prefix = group.fields[0].id.split('.')[0];
         const fieldIds = group.fields.map(f => f.id);
@@ -336,6 +765,53 @@ export default function DossierCreate() {
             delete next[role];
             return next;
         });
+    };
+
+    const toggleSaisieLibre = (role, actif) => {
+        setSaisieLibreRoles(prev => ({ ...prev, [role]: actif }));
+        // Passer en saisie libre implique de renoncer à la fiche : garder le lien
+        // laisserait deux vérités concurrentes pour le même rôle.
+        if (actif) unlinkClientFromSection(role);
+    };
+
+    /**
+     * Champs à afficher pour une section. Dès qu'un client est rattaché, les champs
+     * d'identité disparaissent — ils sont portés par la fiche, réaffichés dans la
+     * carte de synthèse, et reprojetés côté serveur (ClientProjectionService).
+     * Ne restent que les données propres à l'acte (nombre de parts, fonction…) et
+     * les cases de contrôle (« le gérant est une personne différente »).
+     */
+    const champsAffichables = (group) => {
+        // Une section « société » masque les champs portés par la fiche du registre — même
+        // principe, appliqué à la personne morale objet du dossier plutôt qu'à une partie.
+        if (group.societePicker) return champsSocieteAffichables(group);
+
+        if (!group.clientRole || !clientLinks[group.clientRole]) return group.fields;
+        return group.fields.filter(f =>
+            f.type === 'repeatable'
+            || f.type === 'checkbox'
+            || f.type === 'checkbox_required'
+            || f.type === 'checkbox_group'
+            || !estChampIdentite(f.id)
+        );
+    };
+
+    /**
+     * Champs d'identité obligatoires que la fiche rattachée ne renseigne pas.
+     *
+     * Sans ça, le parcours se bloquait en silence : le champ est masqué (porté par la fiche) mais
+     * reste obligatoire, donc « Suivant » restait inactif sans qu'aucun champ visible ne soit en
+     * défaut. On les remonte pour inviter à compléter la fiche — et non à saisir la valeur à côté,
+     * ce qui recréerait la double vérité que cette refonte supprime.
+     *
+     * Cet avertissement **dans la section** complète la liste globale des blocants, qui signale le
+     * même cas via `estMasque` et renvoie vers cette carte ; ici on nomme les champs sur place.
+     */
+    const champsIdentiteManquants = (group) => {
+        if (!group.clientRole || !clientLinks[group.clientRole]) return [];
+        return group.fields
+            .filter(f => f.required && estChampIdentite(f.id) && !formValues[f.id])
+            .map(f => f.label);
     };
 
     // "Clients du dossier" : ajoutés en haut du formulaire, avant de savoir précisément
@@ -360,22 +836,176 @@ export default function DossierCreate() {
             : [...prev, { client, role: '' }]);
     };
 
-    const canNext = () => {
-        if (step === 0) return !!categorie;
-        if (step === 1) {
-            if (!typeActe) return false;
-            const required = visibleFields.filter(q => q.required && q.type !== 'repeatable');
-            const scalarOk = required.every(q => formValues[q.id]);
-            const repeatableOk = visibleFields
-                .filter(q => q.type === 'repeatable')
-                .every(q => (formValues[q.id]?.length ?? 0) >= (q.min ?? 1));
-            return scalarOk && repeatableOk && objet.trim().length >= 10 && !!notaireId;
+    // ── Brouillon : enregistrer, reprendre, abandonner ───────────────────────
+
+    const enregistrerBrouillon = async () => {
+        setEnregistrementBrouillon(true);
+        try {
+            const form = construireFormDataBrouillon({
+                etat: {
+                    step, categorie, sousGroupe, typeActe, formValues, clientLinks,
+                    dossierClients, saisieLibreRoles, objet, urgent, notes,
+                    notaireId, reviseurId, formalisteId, piecesBrouillon,
+                    // Sans elle, reprendre un brouillon de modification perdait la société
+                    // choisie : les champs `soc.*` restaient remplis mais `societe_id` était
+                    // vide, donc le dossier naissait sans lien au registre.
+                    societeLink,
+                },
+                stagedPieces,
+                brouillonId,
+                typeActeId: typeActe?.id,
+                libelle: libelleBrouillon({ objet, typeActeLabel: typeActe?.label }),
+            });
+
+            const { data } = await axios.post('/dossiers/brouillons', form);
+
+            setBrouillonId(data.id);
+            // Le serveur renvoie l'emplacement des fichiers qu'il vient de ranger :
+            // les File locaux deviennent inutiles, on bascule sur les références.
+            setPiecesBrouillon(data.etat?.piecesBrouillon ?? {});
+            setStagedPieces({});
+            setBrouillonEnregistreA(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
+            setBrouillons(prev => [data, ...prev.filter(b => b.id !== data.id)]);
+            toast.success('Brouillon enregistré.');
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Le brouillon n'a pas pu être enregistré.");
+        } finally {
+            setEnregistrementBrouillon(false);
         }
-        return false;
     };
 
-    const next = () => { if (canNext() && step < 2) setStep(s => s + 1); };
-    const prev = () => { if (step > 0) setStep(s => s - 1); };
+    const reprendreBrouillon = (brouillon) => {
+        const e = brouillon.etat ?? {};
+        // Le type d'acte est retrouvé par id dans les types actifs : s'il a été
+        // désactivé depuis, on laisse l'utilisateur le resélectionner plutôt que de
+        // restaurer un type qui n'est plus proposable.
+        const type = Object.values(typesActes ?? {})
+            .flat()
+            .find(t => String(t.id) === String(e.typeActeId)) ?? null;
+
+        setCategorie(e.categorie ?? null);
+        setSousGroupe(e.sousGroupe ?? null);
+        setTypeActe(type);
+        setFormValues(e.formValues ?? {});
+        setClientLinks(e.clientLinks ?? {});
+        setDossierClients(e.dossierClients ?? []);
+        setSaisieLibreRoles(e.saisieLibreRoles ?? {});
+        setSocieteLink(e.societeLink ?? null);
+        setObjet(e.objet ?? '');
+        setUrgent(!!e.urgent);
+        setNotes(e.notes ?? '');
+        setNotaireId(e.notaireId ?? '');
+        setReviseurId(e.reviseurId ?? '');
+        setFormalisteId(e.formalisteId ?? '');
+        setPiecesBrouillon(e.piecesBrouillon ?? {});
+        setStagedPieces({});
+        setBrouillonId(brouillon.id);
+        setErrors({});
+        // Ne pas revenir à l'étape enregistrée si le type d'acte a disparu : sans
+        // type, l'étape 2 n'a aucun questionnaire à afficher.
+        setStep(type ? (e.step ?? 1) : 0);
+        toast.success('Brouillon repris.');
+    };
+
+    const supprimerBrouillon = async (id) => {
+        try {
+            await axios.delete(`/dossiers/brouillons/${id}`);
+            setBrouillons(prev => prev.filter(b => b.id !== id));
+            if (brouillonId === id) {
+                setBrouillonId(null);
+                setPiecesBrouillon({});
+            }
+            toast.success('Brouillon supprimé.');
+        } catch {
+            toast.error("Le brouillon n'a pas pu être supprimé.");
+        } finally {
+            setBrouillonASupprimer(null);
+        }
+    };
+
+    // Auto-reprise si un id de brouillon est passé dans l'URL
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const params = new URLSearchParams(window.location.search);
+        const autoResumeId = params.get('brouillon');
+        if (autoResumeId && brouillons.length > 0 && !brouillonId) {
+            const b = brouillons.find(x => String(x.id) === autoResumeId);
+            if (b) {
+                reprendreBrouillon(b);
+                // Nettoyer l'URL sans recharger la page
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+        }
+    }, [brouillons, brouillonId]);
+
+    /**
+     * Bouton d'enregistrement du brouillon, rendu à trois endroits : en tête de
+     * l'assistant, dans la barre de navigation (rendue collante pour rester
+     * accessible pendant le défilement d'un questionnaire long) et dans le
+     * récapitulatif. Factorisé plutôt que triplé pour que l'état de chargement et
+     * la condition d'affichage restent uniques.
+     */
+    const BoutonBrouillon = ({ size = 'sm', className, label = 'Enregistrer le brouillon' }) => {
+        if (!typeActe) return null;
+
+        return (
+            <Button
+                type="button"
+                variant="outline"
+                size={size}
+                className={className}
+                onClick={enregistrerBrouillon}
+                disabled={enregistrementBrouillon}
+            >
+                <Save className="h-3.5 w-3.5" />
+                {enregistrementBrouillon ? 'Enregistrement…' : label}
+            </Button>
+        );
+    };
+
+    // Ce qui manque pour avancer — une **liste**, plus un booléen : le bouton grisé sans explication
+    // était impossible à diagnostiquer sur un questionnaire de trente champs. Voir blocantsEtape.js.
+    const blocants = blocantsEtape({
+        step, categorie, typeActe, visibleFields, formValues, objet, notaireId,
+        // `champsAffichables` retire les champs portés par une fiche liée : ils restent
+        // obligatoires mais ne sont plus à l'écran. Le dire, plutôt que de renvoyer vers un
+        // champ qui n'existe pas dans le DOM.
+        estMasque: (field, groupe) => !champsAffichables(groupe).some(f => f.id === field.id),
+    });
+    const blocantsParChamp = clesEnDefaut(blocants);
+    const blocantsParNomSection = compterParSection(blocants);
+
+    /**
+     * Tenter d'avancer.
+     *
+     * Le bouton n'est jamais grisé : cliquer avec des manques ne bloque pas silencieusement, ça
+     * affiche les champs fautifs en rouge, déroule la liste et emmène au premier. C'est le bouton qui
+     * guide, au lieu d'être une porte fermée sans écriteau.
+     */
+    const next = () => {
+        if (blocants.length > 0) {
+            setValidationTentee(true);
+            setBlocantsOuverts(true);
+            allerAuBlocant(blocants[0].ancre);
+            return;
+        }
+
+        if (step < 2) {
+            setStep(s => s + 1);
+            // Repartir vierge sur la nouvelle étape : ses champs n'ont pas encore été soumis, les
+            // afficher d'emblée en rouge serait une accusation sans faute.
+            setValidationTentee(false);
+            setBlocantsOuverts(false);
+        }
+    };
+
+    const prev = () => {
+        if (step > 0) {
+            setStep(s => s - 1);
+            setValidationTentee(false);
+            setBlocantsOuverts(false);
+        }
+    };
 
     const handleSubmit = () => {
         const typeActeId = findTypeActeId();
@@ -386,18 +1016,36 @@ export default function DossierCreate() {
         const autresPartiesPayload = dossierClients
             .filter(p => p.client && p.role.trim())
             .map(p => ({ ...buildPartieFields(p.client, {}, ''), role: p.role.trim(), client_id: p.client.id }));
+
+        // Purgé des champs des blocs décochés : une valeur laissée par une modification finalement
+        // abandonnée serait projetée dans les actes et, pour `modif.valeur_parts_cedees`, servirait
+        // d'assiette à la facture (voir purgerChampsInvisibles). Sert aussi à construire les
+        // `parties` — sans quoi une cession décochée créerait encore ses cédants et cessionnaires.
+        // Le brouillon, lui, conserve tout volontairement.
+        const donneesSoumises = purgerChampsInvisibles(questionnaire, formValues);
+
         setSubmitting(true);
         router.post('/dossiers', {
             type_acte_id: typeActeId,
+            // Société du registre sur laquelle porte le dossier — la fiche reste la source de
+            // vérité, `donnees.soc.*` n'en est que la projection destinée aux modèles Word.
+            societe_id: societeLink?.id || undefined,
             objet: objet,
             urgent: urgent,
             notes: notes || undefined,
             notaire_id: notaireId,
             reviseur_id: reviseurId || undefined,
             formaliste_id: formalisteId || undefined,
-            donnees: formValues,
-            parties: [...buildPartiesPayload(questionnaire, formValues, clientLinks), ...autresPartiesPayload],
+            donnees: donneesSoumises,
+            // Le brouillon détient les pièces déjà téléversées : le serveur les
+            // rattache aux parties puis le supprime (voir DossierController).
+            brouillon_id: brouillonId || undefined,
+            parties: [
+                ...buildPartiesPayload(questionnaire, donneesSoumises, clientLinks, stagedPieces, piecesBrouillon),
+                ...autresPartiesPayload,
+            ],
         }, {
+            forceFormData: true,
             onError: (errs) => { setErrors(errs); setSubmitting(false); notifyValidationError(errs); },
             onFinish: () => setSubmitting(false),
         });
@@ -413,10 +1061,71 @@ export default function DossierCreate() {
             <div className="p-6 max-w-[800px] mx-auto space-y-6">
 
                 {/* En-tête */}
-                <div>
-                    <h1 className="font-serif text-display text-ink">Nouveau dossier</h1>
-                    <p className="text-slate-500 text-sm mt-1">Suivez les étapes pour créer un nouveau dossier d'acte</p>
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <h1 className="font-serif text-display text-ink">Nouveau dossier</h1>
+                        <p className="text-slate-500 text-sm mt-1">Suivez les étapes pour créer un nouveau dossier d'acte</p>
+                    </div>
+                    {/* Enregistrement du brouillon : proposé dès qu'un type d'acte est
+                        choisi — avant, il n'y a rien à reprendre qu'un clic ne referait. */}
+                    {typeActe && (
+                        <div className="shrink-0 text-right">
+                            <BoutonBrouillon className="h-8 gap-1.5" />
+                            {brouillonEnregistreA && (
+                                <p className="mt-1 text-[11px] text-slate-400">
+                                    Brouillon enregistré à {brouillonEnregistreA}
+                                </p>
+                            )}
+                        </div>
+                    )}
                 </div>
+
+                {/* Reprise d'une saisie inachevée — proposée seulement avant d'avoir
+                    commencé à remplir, pour ne jamais écraser une saisie en cours. */}
+                {brouillons.length > 0 && !brouillonId && !typeActe && (
+                    <div className="rounded-lg border border-seal/30 bg-seal-light/60 p-4">
+                        <div className="flex items-center gap-2">
+                            <FileClock className="h-4 w-4 text-seal-hover" />
+                            <h2 className="text-sm font-semibold text-ink">
+                                {brouillons.length === 1
+                                    ? 'Vous avez un dossier en cours de saisie'
+                                    : `Vous avez ${brouillons.length} dossiers en cours de saisie`}
+                            </h2>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                            {brouillons.map(b => (
+                                <div key={b.id} className="flex items-center gap-3 rounded-md border border-seal/20 bg-white px-3 py-2">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium text-slate-800">
+                                            {b.libelle || b.typeActeLabel || 'Dossier sans objet'}
+                                        </p>
+                                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
+                                            {b.typeActeLabel && <span>{b.typeActeLabel}</span>}
+                                            <span>Modifié le {b.modifie_le}</span>
+                                            {b.nbPieces > 0 && (
+                                                <span className="inline-flex items-center gap-1 text-slate-500">
+                                                    <Paperclip className="h-3 w-3" />
+                                                    {b.nbPieces} pièce{b.nbPieces > 1 ? 's' : ''} conservée{b.nbPieces > 1 ? 's' : ''}
+                                                </span>
+                                            )}
+                                        </p>
+                                    </div>
+                                    <Button variant="seal" size="sm" className="h-7 shrink-0 gap-1" onClick={() => reprendreBrouillon(b)}>
+                                        <ArrowRight className="h-3 w-3" /> Reprendre
+                                    </Button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBrouillonASupprimer(b)}
+                                        title="Supprimer ce brouillon"
+                                        className="shrink-0 rounded p-1 text-slate-300 transition-colors hover:text-danger"
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Stepper wizard */}
                 <div className="flex items-center gap-2">
@@ -544,13 +1253,42 @@ export default function DossierCreate() {
                                                 {typeActe.description && (
                                                     <p className="text-xs text-slate-500">{typeActe.description}</p>
                                                 )}
-                                                {typeActe.modeles.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {typeActe.modeles.map(m => (
-                                                            <span key={m} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{m}</span>
-                                                        ))}
-                                                    </div>
-                                                )}
+                                                {/* Règles légales de la forme choisie (CR juillet 2026) :
+                                                    affichées ici pour guider la saisie, plutôt que de se
+                                                    découvrir au moment où l'avancement est refusé. */}
+                                                {reglesParTypeActe?.[typeActe.code] && (() => {
+                                                    const r = reglesParTypeActe[typeActe.code];
+                                                    return (
+                                                        <div className="rounded-md border border-slate-200 bg-slate-50/70 p-2.5 space-y-1">
+                                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                                                Règles légales — {r.valeur}
+                                                            </p>
+                                                            <p className="text-xs text-slate-600">{r.natureLabel} · {r.responsabilite}</p>
+                                                            <ul className="space-y-0.5 text-xs text-slate-500">
+                                                                <li>
+                                                                    Capital minimum :{' '}
+                                                                    <span className="font-medium text-slate-700">
+                                                                        {r.capitalMinimum
+                                                                            ? `${r.capitalMinimum.toLocaleString('fr-FR')} GNF`
+                                                                            : 'aucun'}
+                                                                    </span>
+                                                                </li>
+                                                                <li>
+                                                                    Associé unique :{' '}
+                                                                    <span className="font-medium text-slate-700">
+                                                                        {r.admetAssocieUnique ? 'admis (un seul associé)' : 'non admis'}
+                                                                    </span>
+                                                                </li>
+                                                                {r.exigeCommissaire && (
+                                                                    <li className="text-warning-text">Commissaire aux comptes obligatoire</li>
+                                                                )}
+                                                                {r.exigeMajoriteAssocies && (
+                                                                    <li className="text-warning-text">Associés majeurs obligatoires</li>
+                                                                )}
+                                                            </ul>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
                                     </div>
@@ -617,11 +1355,27 @@ export default function DossierCreate() {
                                                     <textarea
                                                         id="objet"
                                                         rows={2}
-                                                        placeholder="Description synthétique du dossier (min. 10 caractères)…"
+                                                        placeholder={`Description synthétique du dossier (min. ${OBJET_LONGUEUR_MIN} caractères)…`}
                                                         value={objet}
                                                         onChange={e => setObjet(e.target.value)}
-                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                        className={cn(
+                                                            'w-full scroll-mt-24 resize-none rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal',
+                                                            validationTentee && blocantsParChamp.has('objet')
+                                                                ? 'border-danger'
+                                                                : 'border-slate-200',
+                                                        )}
                                                     />
+                                                    {/* Compteur vivant : le placeholder qui énonçait la règle disparaissait à la
+                                                        première frappe, si bien que « 10 caractères minimum » devenait invisible
+                                                        au moment précis où elle commençait à compter. */}
+                                                    {objet.trim().length < OBJET_LONGUEUR_MIN && (
+                                                        <p className={cn(
+                                                            'text-xs',
+                                                            validationTentee && blocantsParChamp.has('objet') ? 'text-danger' : 'text-slate-400',
+                                                        )}>
+                                                            {OBJET_LONGUEUR_MIN} caractères minimum — {objet.trim().length} saisi{objet.trim().length > 1 ? 's' : ''}
+                                                        </p>
+                                                    )}
                                                     {errors.objet && <p className="text-xs text-danger">{errors.objet}</p>}
                                                 </div>
                                                 <label htmlFor="urgent" className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
@@ -649,7 +1403,12 @@ export default function DossierCreate() {
                                                         id="notaire_id"
                                                         value={notaireId}
                                                         onChange={e => setNotaireId(e.target.value)}
-                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                        className={cn(
+                                                            'w-full scroll-mt-24 rounded-lg border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal',
+                                                            validationTentee && blocantsParChamp.has('notaire_id')
+                                                                ? 'border-danger'
+                                                                : 'border-slate-200',
+                                                        )}
                                                     >
                                                         <option value="">Choisir un notaire…</option>
                                                         {(notaires ?? []).map(n => (
@@ -718,9 +1477,30 @@ export default function DossierCreate() {
                                                 const meta = getSectionMeta(group.name);
                                                 const Icon = meta.icon;
                                                 return (
-                                                    <div key={gi} className="rounded-lg border border-slate-200 bg-white p-4">
+                                                    <div
+                                                        key={gi}
+                                                        // Cible de défilement pour un champ masqué par une fiche liée, qu'on
+                                                        // ne peut pas viser directement (voir ancreSection).
+                                                        id={ancreSection(group.name) ?? undefined}
+                                                        className="rounded-lg border border-slate-200 bg-white p-4 scroll-mt-24"
+                                                    >
                                                         {group.name && (
-                                                            <GroupHeader icon={Icon} iconColor={meta.iconColor} iconBg={meta.iconBg}>
+                                                            <GroupHeader
+                                                                icon={Icon}
+                                                                iconColor={meta.iconColor}
+                                                                iconBg={meta.iconBg}
+                                                                // Repérer d'un coup d'œil où ça coince : un questionnaire de
+                                                                // modification compte jusqu'à dix sections, toutes dépliées.
+                                                                badge={(
+                                                                    <BadgeSection
+                                                                        nb={blocantsParNomSection[group.name] ?? 0}
+                                                                        // Une coche verte n'a de sens que si la section portait
+                                                                        // quelque chose d'obligatoire : sur une section entièrement
+                                                                        // facultative, elle ne dirait rien.
+                                                                        complete={group.fields.some(f => f.required || f.type === 'repeatable')}
+                                                                    />
+                                                                )}
+                                                            >
                                                                 {group.name}
                                                             </GroupHeader>
                                                         )}
@@ -730,29 +1510,28 @@ export default function DossierCreate() {
                                                             champs, masqués tant qu'elle n'est pas cochée, sont filtrés de visibleFields
                                                             en amont ; proposer un client à lier n'a de sens qu'une fois la section
                                                             dépliée. */}
-                                                        {group.clientRole && group.fields.length > 1 && (
-                                                            <div className="mb-3">
-                                                                <ClientPicker
-                                                                    placeholder={`Rechercher un client existant (${group.name})…`}
-                                                                    linked={clientLinks[group.clientRole] ?? null}
-                                                                    onSelect={(client) => applyClientToSection(group, client)}
-                                                                    onUnlink={() => unlinkClientFromSection(group.clientRole)}
-                                                                    onCreateNew={() => setCreatingClientForGroup(group)}
-                                                                    poolClients={poolClients}
-                                                                />
-                                                            </div>
-                                                        )}
-
+                                                        {(() => {
+                                                        const estSectionClient = group.clientRole && group.fields.length > 1;
+                                                        const grille = (
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
-                                                            {group.fields.map(field => {
+                                                            {champsAffichables(group).map(field => {
                                                                 const isCheckbox = field.type === 'checkbox' || field.type === 'checkbox_required';
-                                                                const isFullWidth = isCheckbox || field.type === 'textarea' || field.type === 'repeatable';
+                                                                const isFullWidth = isCheckbox || field.type === 'textarea' || field.type === 'repeatable' || field.type === 'checkbox_group';
+                                                                // En rouge seulement après une tentative d'avancement, et le rouge
+                                                                // s'efface dès la saisie (le champ quitte alors la liste des blocants).
+                                                                const enDefaut = validationTentee && blocantsParChamp.has(field.id);
+                                                                const motif = enDefaut
+                                                                    ? blocants.find(b => b.cle === field.id)?.raison
+                                                                    : null;
                                                                 return (
                                                                     <div
                                                                         key={field.id}
                                                                         className={cn(
                                                                             isFullWidth && 'sm:col-span-2',
-                                                                            field.showIf && 'pl-3 border-l-2 border-seal/30'
+                                                                            field.showIf && 'pl-3 border-l-2 border-seal/30',
+                                                                            // Cible les contrôles descendants plutôt que d'ajouter une
+                                                                            // prop à chacun des dix types de champ rendus ici.
+                                                                            enDefaut && '[&_input]:border-danger [&_textarea]:border-danger [&_select]:border-danger [&_input]:ring-1 [&_input]:ring-danger/20'
                                                                         )}
                                                                     >
                                                                         {isCheckbox ? (
@@ -789,13 +1568,25 @@ export default function DossierCreate() {
                                                                                         {field.note}
                                                                                     </p>
                                                                                 )}
-                                                                                {field.type === 'repeatable' ? (
+                                                                                {field.type === 'checkbox_group' ? (
+                                                                                    <ChoixMultiple
+                                                                                        field={field}
+                                                                                        valeurs={formValues[field.id] ?? []}
+                                                                                        onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                                                                                        exclusions={exclusionsModification}
+                                                                                    />
+                                                                                ) : field.type === 'repeatable' ? (
                                                                                     <RepeatableGroup
                                                                                         fieldDef={field}
                                                                                         value={formValues[field.id] ?? []}
                                                                                         onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
                                                                                         poolClients={poolClients}
                                                                                         onClientCreated={addClientToPool}
+                                                                                        piecesRequises={usePage().props.piecesRequises}
+                                                                                        stagedPieces={stagedPieces[field.id] || {}}
+                                                                                        onStagedPieceChange={(key, file) => handleStagedPieceChange(field.id, key, file)}
+                                                                                        piecesBrouillon={piecesBrouillon[field.id] || {}}
+                                                                                        onRetirerPieceBrouillon={(key) => retirerPieceBrouillon(field.id, key)}
                                                                                     />
                                                                                 ) : field.type === 'textarea' ? (
                                                                                     <textarea
@@ -830,8 +1621,23 @@ export default function DossierCreate() {
                                                                                         decimals={field.decimals ?? 0}
                                                                                         placeholder={field.placeholder}
                                                                                         value={formValues[field.id] || ''}
-                                                                                        onValueChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
-                                                                                        className={cn(field.mono && 'font-ref')}
+                                                                                        onValueChange={val => setFormValuesTracked(prev => ({ ...prev, [field.id]: val }))}
+                                                                                        className={cn(field.mono && 'font-ref', field.readonly && 'bg-slate-50 text-slate-500 cursor-not-allowed')}
+                                                                                        disabled={!!field.readonly}
+                                                                                    />
+                                                                                ) : field.type === 'year' ? (
+                                                                                    <Input
+                                                                                        id={field.id}
+                                                                                        type="text"
+                                                                                        inputMode="numeric"
+                                                                                        maxLength={4}
+                                                                                        placeholder={field.placeholder}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onChange={e => {
+                                                                                            const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                                                                            setFormValues(prev => ({ ...prev, [field.id]: v }));
+                                                                                        }}
+                                                                                        className="font-ref"
                                                                                     />
                                                                                 ) : field.type === 'tel' ? (
                                                                                     <PhoneField
@@ -852,10 +1658,141 @@ export default function DossierCreate() {
                                                                                 )}
                                                                             </div>
                                                                         )}
+
+                                                                        {motif && (
+                                                                            <p className="mt-1 flex items-center gap-1 text-xs text-danger">
+                                                                                <AlertCircle className="h-3 w-3 shrink-0" />
+                                                                                {motif}
+                                                                            </p>
+                                                                        )}
+
+                                                                        {/* Champ visible malgré la fiche rattachée : elle ne le
+                                                                            renseigne pas. Le dire évite de laisser croire à une
+                                                                            double saisie — et annonce l'enrichissement du registre. */}
+                                                                        {completeLaFicheSociete(field.id) && (
+                                                                            <p className="mt-1 flex items-center gap-1 text-xs text-slate-400">
+                                                                                <Building2 className="h-3 w-3 shrink-0" />
+                                                                                Absent de la fiche du registre — votre saisie la complétera
+                                                                            </p>
+                                                                        )}
                                                                     </div>
                                                                 );
                                                             })}
                                                         </div>
+                                                        );
+
+                                                        // Section « société concernée » : la fiche du
+                                                        // registre est la source, la saisie manuelle le
+                                                        // recours. Les champs `soc.*` sont retirés de
+                                                        // `grille` dès qu'une société est rattachée.
+                                                        if (group.societePicker) {
+                                                            return (
+                                                                <ChoixSociete
+                                                                    mode={modeSociete}
+                                                                    onModeChange={setModeSociete}
+                                                                    societeLink={societeLink}
+                                                                    onSelect={applySociete}
+                                                                    onUnlink={unlinkSociete}
+                                                                    onImporterPersonnes={importerPersonneConnue}
+                                                                >
+                                                                    {/* Dossier constitutif : la fiche société existe déjà en base
+                                                                        dès qu'elle est rattachée, donc le dépôt est direct — aucun
+                                                                        mécanisme de brouillon nécessaire, et les fichiers
+                                                                        appartiennent à la société, qui persiste même si ce dossier
+                                                                        est abandonné. */}
+                                                                    {societeLink && (
+                                                                        <PiecesConstitutivesCard
+                                                                            societe={societeLink}
+                                                                            compact
+                                                                            onRafraichir={rafraichirSociete}
+                                                                        />
+                                                                    )}
+                                                                    {/* Les champs `soc.*` ne s'affichent qu'en saisie hors registre,
+                                                                        ou pour ceux que la fiche rattachée ne renseigne pas. */}
+                                                                    {champsAffichables(group).length > 0 && grille}
+                                                                </ChoixSociete>
+                                                            );
+                                                        }
+
+                                                        if (!estSectionClient) return grille;
+
+                                                        // La section ne saisit plus l'identité : elle désigne une fiche
+                                                        // client, qui reste la source de vérité. Les champs d'identité
+                                                        // sont retirés de `grille` par champsAffichables() dès qu'un
+                                                        // client est lié — seules les données propres à l'acte restent.
+                                                        return (
+                                                            <ClientRoleSection
+                                                                roleLabel={group.name}
+                                                                linked={clientLinks[group.clientRole] ?? null}
+                                                                onSelect={(client) => applyClientToSection(group, client)}
+                                                                onUnlink={() => unlinkClientFromSection(group.clientRole)}
+                                                                onCreateNew={() => setCreatingClientForGroup(group)}
+                                                                onEditClient={(client) => setEditingClient({ client, group })}
+                                                                poolClients={poolClients}
+                                                                champsManquants={champsIdentiteManquants(group)}
+                                                                saisieLibre={!!saisieLibreRoles[group.clientRole]}
+                                                                onToggleSaisieLibre={(v) => toggleSaisieLibre(group.clientRole, v)}
+                                                            >
+                                                                {grille}
+                                                            </ClientRoleSection>
+                                                        );
+                                                        })()}
+
+                                                        {/* Conséquences d'un champ à choix multiple qui les déclare
+                                                            (`consequences`) : ce que la sélection va produire, avant de
+                                                            valider — et non après création. */}
+                                                        {group.fields.filter(f => f.consequences === 'modification').map(f => (
+                                                            <div key={`csq-${f.id}`} className="mt-3">
+                                                                <ConsequencesModification
+                                                                    typesModification={typesModification}
+                                                                    selection={formValues[f.id] ?? []}
+                                                                    valeurPartsCedees={formValues['modif.valeur_parts_cedees']}
+                                                                />
+                                                            </div>
+                                                        ))}
+
+                                                        {/* Pièces justificatives pour les rôles simples (non-répétables) */}
+                                                        {(() => {
+                                                            if (!group.clientRole) return null;
+                                                            // On vérifie s'il y a un repeatable group dans cette section, si oui on skip car c'est RepeatableGroup qui s'en charge.
+                                                            if (group.fields.some(f => f.type === 'repeatable')) return null;
+
+                                                            let categorieRole = '';
+                                                            if (group.clientRole === 'associe_unique') {
+                                                                categorieRole = 'associe_physique'; // Par défaut, on ne gère pas encore PP_ASSOCIE_UNIQUE avec type_personne variable ici. Mais pour l'instant ça suffit.
+                                                            } else if (group.clientRole === 'bailleur' || group.clientRole === 'locataire' || group.clientRole === 'vendeur' || group.clientRole === 'acheteur' || group.clientRole === 'liquidateur' || group.clientRole === 'creancier' || group.clientRole === 'debiteur') {
+                                                                categorieRole = group.clientRole; // On l'utilise tel quel si des pièces sont définies dans Partie.php
+                                                            }
+                                                            
+                                                            const piecesRequisesSection = usePage().props.piecesRequises[categorieRole] ?? {};
+                                                            const piecesKeys = Object.keys(piecesRequisesSection);
+                                                            
+                                                            if (piecesKeys.length === 0) return null;
+
+                                                            return (
+                                                                <div className="mt-4 pt-4 border-t border-slate-100 divide-y divide-slate-50/80">
+                                                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 px-1">
+                                                                        Pièces justificatives requises
+                                                                    </p>
+                                                                    {piecesKeys.map(cat => {
+                                                                        const key = cat;
+                                                                        const previewId = `${group.clientRole}:${key}`;
+                                                                        return (
+                                                                            <PieceStagedRow
+                                                                                key={key}
+                                                                                piece={{ label: piecesRequisesSection[key] }}
+                                                                                file={stagedPieces[group.clientRole]?.[key]}
+                                                                                fichierBrouillon={piecesBrouillon[group.clientRole]?.[key]}
+                                                                                onFileSelected={(f) => handleStagedPieceChange(group.clientRole, key, f)}
+                                                                                onRetirerBrouillon={() => retirerPieceBrouillon(group.clientRole, key)}
+                                                                                isPreviewOpen={previewKey === previewId}
+                                                                                onTogglePreview={() => setPreviewKey(k => k === previewId ? null : previewId)}
+                                                                            />
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 );
                                             })}
@@ -883,6 +1820,10 @@ export default function DossierCreate() {
                                         const v = formValues[f.id];
                                         if (f.type === 'repeatable') return (v?.length ?? 0) > 0;
                                         if (f.type === 'checkbox') return !!v;
+                                        // Un tableau vide est truthy : sans ce cas, un choix
+                                        // multiple sans case cochée s'afficherait au récapitulatif
+                                        // avec une valeur vide.
+                                        if (Array.isArray(v)) return v.length > 0;
                                         return !!v || v === false;
                                     }),
                                 }))
@@ -951,6 +1892,48 @@ export default function DossierCreate() {
                                     </div>
                                 </RecapCard>
 
+                                {/* Société concernée — affichée avant les sections du questionnaire :
+                                    c'est l'objet du dossier, et le récapitulatif doit permettre de
+                                    vérifier qu'on part bien de la bonne fiche. */}
+                                {societeLink && (
+                                    <RecapCard icon={Building2} iconColor="text-blue-600" iconBg="bg-blue-50" title="Société concernée" onEdit={() => setStep(1)}>
+                                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                                            <RecapField label="Dénomination" value={societeDisplayName(societeLink)} />
+                                            <RecapField label="Forme juridique" value={societeLink.forme || '—'} />
+                                            <RecapField label="RCCM" value={societeLink.rccm_numero || '—'} mono />
+                                            <RecapField
+                                                label="Capital avant modification"
+                                                value={societeLink.capital_chiffres
+                                                    ? `${Math.round(Number(societeLink.capital_chiffres)).toLocaleString('fr-FR')} GNF`
+                                                    : '—'}
+                                                mono
+                                            />
+                                            <RecapField
+                                                label="Siège avant modification"
+                                                value={[societeLink.siege_quartier, societeLink.siege_commune, societeLink.siege_ville].filter(Boolean).join(', ') || '—'}
+                                            />
+                                            <RecapField
+                                                label="Fiche du registre"
+                                                value={societeLink.dossier_origine?.reference
+                                                    ? `Constituée par ${societeLink.dossier_origine.reference}`
+                                                    : 'Ajoutée manuellement'}
+                                            />
+                                        </div>
+                                    </RecapCard>
+                                )}
+
+                                {/* Conséquences des modifications décidées — actes à produire et
+                                    droits d'enregistrement, revus une dernière fois avant création. */}
+                                {(formValues['modif.types']?.length ?? 0) > 0 && (
+                                    <RecapCard icon={Edit2} iconColor="text-amber-600" iconBg="bg-amber-50" title="Ce que la modification va produire" onEdit={() => setStep(1)}>
+                                        <ConsequencesModification
+                                            typesModification={typesModification}
+                                            selection={formValues['modif.types']}
+                                            valeurPartsCedees={formValues['modif.valeur_parts_cedees']}
+                                        />
+                                    </RecapCard>
+                                )}
+
                                 {/* Sections du questionnaire */}
                                 {sections.map((group, gi) => {
                                     const meta = getSectionMeta(group.name);
@@ -975,7 +1958,13 @@ export default function DossierCreate() {
                                                                     key={field.id}
                                                                     label={field.label}
                                                                     mono={field.mono}
-                                                                    value={typeof value === 'boolean' ? (value ? 'Oui' : 'Non') : value}
+                                                                    value={
+                                                                        typeof value === 'boolean' ? (value ? 'Oui' : 'Non')
+                                                                        // Choix multiple : sans séparateur explicite, React
+                                                                        // concatènerait les libellés bout à bout.
+                                                                        : Array.isArray(value) ? value.join(' · ')
+                                                                        : value
+                                                                    }
                                                                 />
                                                             );
                                                         })}
@@ -1012,18 +2001,65 @@ export default function DossierCreate() {
                                     </RecapCard>
                                 )}
 
-                                {/* Actes à produire */}
+                                {/* Actes à produire — calculés par le serveur pour ce type d'acte ET
+                                    les variantes décidées. Cette carte listait auparavant tous les
+                                    modèles du type d'acte : elle annonçait donc des actes qui ne
+                                    seraient pas produits, et taisait les gabarits manquants. */}
                                 <RecapCard icon={ClipboardCheck} iconColor="text-seal" iconBg="bg-seal-light" title="Actes à produire">
-                                    {(typeSelected?.modeles?.length ?? 0) === 0 ? (
-                                        <p className="text-xs text-slate-400">Aucun modèle actif configuré pour ce type d'acte.</p>
+                                    {actesPrevus === null ? (
+                                        <p className="text-xs text-slate-400">Calcul en cours…</p>
+                                    ) : actesPrevus.length === 0 ? (
+                                        <p className="text-xs text-slate-400">
+                                            Aucun acte ne sera produit pour cette procédure.
+                                        </p>
                                     ) : (
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {typeSelected.modeles.map((nom, i) => (
-                                                <span key={i} className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">{nom}</span>
+                                        <div className="space-y-1">
+                                            {actesPrevus.map((a, i) => (
+                                                <div key={i} className="flex items-start gap-1.5 text-xs">
+                                                    {a.a_gabarit
+                                                        ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+                                                        : <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-warning-text" />}
+                                                    <span className={a.a_gabarit ? 'text-slate-600' : 'text-warning-text'}>
+                                                        {a.nom}
+                                                        {!a.a_gabarit && (
+                                                            <span className="text-slate-400"> — aucun gabarit configuré</span>
+                                                        )}
+                                                    </span>
+                                                </div>
                                             ))}
+                                            {actesPrevus.some(a => !a.a_gabarit) && (
+                                                <p className="pt-1 text-xs text-slate-400">
+                                                    Les documents sans gabarit ne seront pas produits.{' '}
+                                                    <a href="/parametres/types-actes" target="_blank" rel="noreferrer" className="text-seal-hover underline">
+                                                        Configurer les modèles
+                                                    </a>
+                                                </p>
+                                            )}
                                         </div>
                                     )}
                                 </RecapCard>
+
+                                {/* Dernière sortie avant création : le récapitulatif est
+                                    l'endroit où l'on constate qu'une information manque
+                                    encore — il faut pouvoir mettre de côté sans perdre
+                                    la saisie ni créer un dossier incomplet. */}
+                                <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium text-slate-700">Pas encore prêt à créer le dossier ?</p>
+                                        <p className="mt-0.5 text-xs text-slate-500">
+                                            Enregistrez un brouillon : la saisie et les pièces déjà téléversées
+                                            sont conservées, et aucune référence de dossier n'est attribuée.
+                                        </p>
+                                    </div>
+                                    <div className="shrink-0 sm:text-right">
+                                        <BoutonBrouillon className="gap-1.5" label="Enregistrer et reprendre plus tard" />
+                                        {brouillonEnregistreA && (
+                                            <p className="mt-1 text-[11px] text-slate-400">
+                                                Enregistré à {brouillonEnregistreA}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                             );
                         })()}
@@ -1031,24 +2067,57 @@ export default function DossierCreate() {
                     </motion.div>
                 </AnimatePresence>
 
-                {/* Navigation */}
-                <div className="flex items-center justify-between pt-2">
-                    <Button variant="outline" onClick={prev} disabled={step === 0} size="lg">
-                        <ChevronLeft className="h-4 w-4" />
-                        Précédent
-                    </Button>
+                {/* Navigation — collante en bas du conteneur défilant (<main> dans
+                    AppLayout) : sur un questionnaire long, le bouton d'enregistrement
+                    du brouillon disparaissait dès qu'on faisait défiler la page. */}
+                <div className="sticky bottom-0 -mx-6 border-t border-slate-200 bg-app-bg/95 px-6 py-3 backdrop-blur">
+                    {/* Ce qui manque, au-dessus de la barre : déroulé sur clic du compteur, ou
+                        automatiquement quand on tente d'avancer sans avoir tout complété. */}
+                    <BlocantsPanel
+                        blocants={blocants}
+                        ouvert={blocantsOuverts}
+                        onFermer={() => setBlocantsOuverts(false)}
+                    />
 
-                    {step < 2 ? (
-                        <Button size="lg" onClick={next} disabled={!canNext()}>
-                            Suivant
-                            <ChevronRight className="h-4 w-4" />
+                    <div className="flex items-center justify-between gap-3">
+                        <Button variant="outline" onClick={prev} disabled={step === 0} size="lg">
+                            <ChevronLeft className="h-4 w-4" />
+                            Précédent
                         </Button>
-                    ) : (
-                        <Button variant="seal" size="lg" onClick={handleSubmit} disabled={submitting}>
-                            <Check className="h-4 w-4" />
-                            {submitting ? 'Création en cours…' : 'Créer le dossier'}
-                        </Button>
-                    )}
+
+                        <div className="flex flex-1 items-center justify-center gap-4">
+                            <BoutonBrouillon className="gap-1.5" />
+                            {step < 2 && (
+                                <CompteurBlocants
+                                    blocants={blocants}
+                                    ouvert={blocantsOuverts}
+                                    onBasculer={() => setBlocantsOuverts(o => !o)}
+                                />
+                            )}
+                        </div>
+
+                        {step < 2 ? (
+                            // Jamais `disabled` : un bouton grisé muet est précisément ce qui rendait
+                            // le blocage indéchiffrable. Cliquer avec des manques ne fait pas avancer,
+                            // mais dit lesquels et emmène au premier.
+                            <Button
+                                size="lg"
+                                onClick={next}
+                                variant={blocants.length > 0 ? 'outline' : 'default'}
+                                title={blocants.length > 0
+                                    ? `${blocants.length} élément(s) à compléter — cliquez pour voir lesquels`
+                                    : 'Passer à l\'étape suivante'}
+                            >
+                                Suivant
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        ) : (
+                            <Button variant="seal" size="lg" onClick={handleSubmit} disabled={submitting}>
+                                <Check className="h-4 w-4" />
+                                {submitting ? 'Création en cours…' : 'Créer le dossier'}
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
             </div>
@@ -1069,6 +2138,39 @@ export default function DossierCreate() {
                 onCreated={(client) => {
                     setDossierClientClient(creatingClientForDossierIndex, client);
                     setCreatingClientForDossierIndex(null);
+                }}
+            />
+
+            <ConfirmDialog
+                open={brouillonASupprimer !== null}
+                onClose={() => setBrouillonASupprimer(null)}
+                title="Supprimer ce brouillon ?"
+                description={brouillonASupprimer
+                    ? `« ${brouillonASupprimer.libelle || brouillonASupprimer.typeActeLabel || 'Dossier sans objet'} » sera définitivement supprimé`
+                      + (brouillonASupprimer.nbPieces > 0
+                          ? `, ainsi que ${brouillonASupprimer.nbPieces} pièce(s) justificative(s) déjà téléversée(s).`
+                          : '.')
+                    : ''}
+                confirmLabel="Supprimer"
+                onConfirm={() => supprimerBrouillon(brouillonASupprimer.id)}
+            />
+
+            {/* Correction en place d'une fiche déjà rattachée à un rôle — « si on veut
+                le modifier, on le modifie de suite », sans quitter l'assistant. */}
+            <ModalNouveauClient
+                open={editingClient !== null}
+                client={editingClient?.client ?? null}
+                onClose={() => setEditingClient(null)}
+                onCreated={(client) => {
+                    // Réapplique la fiche corrigée partout où elle est référencée :
+                    // le pool du dossier et tous les rôles qui la désignent.
+                    setClientLinks(prev => Object.fromEntries(
+                        Object.entries(prev).map(([role, c]) => [role, c?.id === client.id ? client : c])
+                    ));
+                    setDossierClients(prev => prev.map(p =>
+                        p.client?.id === client.id ? { ...p, client } : p
+                    ));
+                    setEditingClient(null);
                 }}
             />
         </AppLayout>

@@ -4,7 +4,13 @@
 //
 // Types de champs supportés :
 //   text | textarea | number | date | checkbox | select | checkbox_required
+//   checkbox_group — choix multiple : { options:[...] }, valeur = tableau de libellés
 //   repeatable — bloc répétable : { id, type:'repeatable', label, section, min, max, fields:[...] }
+//
+// Marqueurs de section (portés par le premier champ de la section) :
+//   section        — démarre une nouvelle section (voir groupFieldsBySection)
+//   clientRole     — la section est rattachable à une fiche Client, et produit une `Partie`
+//   societePicker  — la section est rattachable à une fiche Societe du registre
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Blocs réutilisables (évite la duplication)
@@ -15,21 +21,34 @@ const SOC_BASE = [
     { id: 'soc.sigle', label: 'Sigle (facultatif)', type: 'text', placeholder: 'Ex : FD', required: false, publicIntake: true },
     { id: 'soc.capital_chiffres', label: 'Capital social (GNF)', type: 'number', placeholder: '50 000 000', required: true, mono: true, publicIntake: true },
     { id: 'soc.nombre_parts', label: 'Nombre de parts sociales', type: 'number', placeholder: '100', required: true, mono: true, publicIntake: true },
-    { id: 'soc.valeur_nominale_chiffres', label: "Valeur nominale d'une part (GNF)", type: 'number', placeholder: '500 000', required: true, mono: true, publicIntake: true },
+    { id: 'soc.valeur_nominale_chiffres', label: "Valeur nominale d'une part (GNF)", type: 'number', placeholder: '500 000', required: true, mono: true, readonly: true, publicIntake: true },
     { id: 'soc.siege_quartier', label: 'Quartier du siège social', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
     { id: 'soc.siege_commune', label: 'Commune du siège social', type: 'text', placeholder: 'Kaloum', required: true, publicIntake: true },
     { id: 'soc.siege_ville', label: 'Ville du siège social', type: 'text', placeholder: 'Conakry', required: true, publicIntake: true },
     { id: 'soc.objet_social', label: 'Objet social', type: 'textarea', placeholder: 'Commerce général, import-export…', required: true, publicIntake: true },
     { id: 'soc.duree', label: 'Durée (années)', type: 'number', placeholder: '99', required: false, publicIntake: true },
-    { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'number', placeholder: '2026', required: false, publicIntake: true },
+    { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: '2026', required: false, publicIntake: true },
     { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
     { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
+    { id: 'soc.regime_fiscal_faveur', label: 'Bénéficie d\'un régime fiscal de faveur', type: 'checkbox', required: false, publicIntake: true },
+    { id: 'soc.regime_fiscal_reference', label: 'Référence du décret/arrêté d\'agrément', type: 'text', placeholder: 'Décret n° ... du ...', required: false, showIf: { field: 'soc.regime_fiscal_faveur' }, publicIntake: true },
 ];
 
 const SOC_COMMISSAIRES = [
-    { id: 'soc.commissaire_titulaire', label: 'Commissaire aux comptes titulaire', type: 'text', placeholder: 'Nom du cabinet ou expert', required: false, section: 'Commissaires aux comptes' },
-    { id: 'soc.commissaire_suppleant', label: 'Commissaire aux comptes suppléant', type: 'text', placeholder: 'Nom du commissaire suppléant', required: false },
+    { id: 'cac_titulaire.civilite', label: 'Civilité / Type', type: 'select', options: ['M.', 'Mme', 'Cabinet'], required: false, section: 'Commissaire aux comptes titulaire', clientRole: 'commissaire_titulaire' },
+    { id: 'cac_titulaire.prenom_nom', label: 'Nom du cabinet ou expert', type: 'text', placeholder: 'Cabinet Diallo & Associés', required: false },
+    { id: 'cac_titulaire.agrement', label: "N° d'agrément", type: 'text', placeholder: 'N° 001/OECA', required: false },
+    { id: 'cac_titulaire.adresse', label: 'Adresse complète', type: 'text', placeholder: 'Quartier, Commune, Ville', required: false },
+
+    { id: 'cac_suppleant.civilite', label: 'Civilité / Type', type: 'select', options: ['M.', 'Mme', 'Cabinet'], required: false, section: 'Commissaire aux comptes suppléant', clientRole: 'commissaire_suppleant' },
+    { id: 'cac_suppleant.prenom_nom', label: 'Nom du cabinet ou expert', type: 'text', placeholder: 'Cabinet Sow & Co', required: false },
+    { id: 'cac_suppleant.agrement', label: "N° d'agrément", type: 'text', placeholder: 'N° 002/OECA', required: false },
+    { id: 'cac_suppleant.adresse', label: 'Adresse complète', type: 'text', placeholder: 'Quartier, Commune, Ville', required: false },
 ];
+
+const SOC_COMMISSAIRES_REQUIS = SOC_COMMISSAIRES.map(f => 
+    f.id.startsWith('cac_titulaire') ? { ...f, required: true } : f
+);
 
 // Associé unique (personne physique) — SARLU / SASU
 const PP_ASSOCIE_UNIQUE = [
@@ -82,17 +101,20 @@ const ASSOCIE_SCHEMA = [
     { id: 'nom', label: 'Nom et prénoms / Dénomination', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
     { id: 'type_personne', label: 'Type', type: 'select', options: ['Personne physique', 'Personne morale'], required: true },
     { id: 'parts_chiffres', label: 'Nombre de parts', type: 'number', placeholder: '100', required: true, mono: true },
-    { id: 'ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
-    { id: 'date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
-    { id: 'nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false },
-    { id: 'situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-    { id: 'regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false },
+    { id: 'forme', label: 'Forme juridique', type: 'text', placeholder: 'SARL, SA…', required: false, showIf: { field: 'type_personne', equals: 'Personne morale' } },
+    { id: 'rccm', label: 'Numéro RCCM', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: false, mono: true, showIf: { field: 'type_personne', equals: 'Personne morale' } },
+    { id: 'representant_legal', label: 'Représentant légal', type: 'text', placeholder: 'Ibrahima DIALLO', required: false, showIf: { field: 'type_personne', equals: 'Personne morale' } },
+    { id: 'ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
+    { id: 'date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
+    { id: 'nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
+    { id: 'situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
+    { id: 'regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
     { id: 'quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false },
     { id: 'pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
     { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false },
-    { id: 'cni', label: "N° pièce d'identité / RCCM", type: 'text', placeholder: 'GN00123456 / GN-CON-2020-B-XXXX', required: false, mono: true },
+    { id: 'cni', label: "N° pièce d'identité", type: 'text', placeholder: 'GN00123456', required: false, mono: true, showIf: { field: 'type_personne', equals: 'Personne physique' } },
     { id: 'piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
     { id: 'piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
     { id: 'piece_expire_le', label: 'Expire le', type: 'date', placeholder: '01/01/2030', required: false },
@@ -124,6 +146,75 @@ const ADMIN_SCHEMA = [
     { id: 'nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
     { id: 'domicile', label: 'Domicile', type: 'text', placeholder: 'Conakry, Guinée', required: false },
     { id: 'fonction', label: 'Fonction au CA', type: 'text', placeholder: 'Administrateur', required: false },
+];
+
+// Formes juridiques — miroir de App\Enums\FormeSociete (9 cas depuis le CR de juillet
+// 2026, qui a ajouté SCS et SAU). Une seule liste : les questionnaires en portaient
+// chacun leur copie de sept valeurs, et les deux formes ajoutées n'y sont jamais entrées.
+export const FORMES_SOCIETE = ['SA', 'SAU', 'SARL', 'SARLU', 'SAS', 'SASU', 'SNC', 'SCS', 'GIE'];
+
+// ─── Blocs de la modification de société ─────────────────────────────────────
+
+// Identité d'une personne dans un bloc répétable, sans donnée propre à l'acte.
+// Dérivé d'ASSOCIE_SCHEMA (mêmes mentions que celles exigées par les actes réels) privé
+// de `parts_chiffres`, qui est justement la donnée d'acte : chaque rôle apporte la sienne
+// (parts cédées, parts acquises, montant souscrit…).
+const PERSONNE_REPEATABLE = [
+    ...ASSOCIE_SCHEMA.filter(f => f.id !== 'parts_chiffres'),
+    { id: 'telephone', label: 'Téléphone', type: 'tel', placeholder: '622 XX XX XX', required: false },
+    { id: 'email', label: 'Email', type: 'email', placeholder: 'email@exemple.com', required: false },
+];
+
+// Compose le schéma d'un rôle : ses champs propres à l'acte sont insérés juste après le
+// type de personne, avant l'état civil — pour que la donnée qui distingue le rôle soit
+// lue en premier, et non noyée en fin de formulaire.
+function schemaPersonne(champsActe) {
+    const i = PERSONNE_REPEATABLE.findIndex(f => f.id === 'type_personne');
+    return [
+        ...PERSONNE_REPEATABLE.slice(0, i + 1),
+        ...champsActe,
+        ...PERSONNE_REPEATABLE.slice(i + 1),
+    ];
+}
+
+const CEDANT_SCHEMA = schemaPersonne([
+    { id: 'parts_detenues', label: 'Parts détenues avant cession', type: 'number', placeholder: '100', required: false, mono: true },
+    { id: 'parts_cedees', label: 'Parts cédées', type: 'number', placeholder: '40', required: true, mono: true },
+    { id: 'prix_cession', label: 'Prix de cession (GNF)', type: 'number', placeholder: '20 000 000', required: false, mono: true },
+]);
+
+const CESSIONNAIRE_SCHEMA = schemaPersonne([
+    { id: 'parts_acquises', label: 'Parts acquises', type: 'number', placeholder: '40', required: true, mono: true },
+    { id: 'prix_paye', label: 'Prix payé (GNF)', type: 'number', placeholder: '20 000 000', required: false, mono: true },
+]);
+
+const SOUSCRIPTEUR_SCHEMA = schemaPersonne([
+    { id: 'parts_souscrites', label: 'Parts souscrites', type: 'number', placeholder: '100', required: true, mono: true },
+    { id: 'montant_souscrit', label: 'Montant souscrit (GNF)', type: 'number', placeholder: '50 000 000', required: true, mono: true },
+]);
+
+// Le bloc « gérant » couvre les deux types de changement — statutaire et non statutaire :
+// les champs sont identiques, seul l'impact sur les statuts diffère, et c'est
+// TypeModificationStatutaire::impacteStatuts() qui le porte, pas le formulaire.
+const SHOW_IF_GERANT = {
+    field: 'modif.types',
+    includesAny: ['Changement de gérant statutaire', 'Changement de gérant non statutaire'],
+};
+
+// Gérant entrant — bloc scalaire préfixé, rattachable à une fiche client (c'est lui dont
+// les pièces d'identité sont exigées). Dérivé de GER_FIELDS pour ne pas redéclarer les
+// dix-sept mentions d'état civil et de pièce d'identité une troisième fois.
+const GERANT_ENTRANT_FIELDS = [
+    ...GER_FIELDS.map((f, i) => ({
+        ...f,
+        id: f.id.replace(/^ger\./, 'gerant_entrant.'),
+        showIf: SHOW_IF_GERANT,
+        ...(i === 0
+            ? { label: 'Civilité du gérant entrant', section: 'Gérant entrant', clientRole: 'gerant_entrant' }
+            : {}),
+    })),
+    { id: 'gerant_entrant.duree_mandat', label: 'Durée du mandat', type: 'text', placeholder: 'Indéterminée / 4 ans', required: false, showIf: SHOW_IF_GERANT },
+    { id: 'gerant_entrant.pouvoirs', label: 'Pouvoirs conférés', type: 'textarea', placeholder: 'Pouvoirs les plus étendus pour agir au nom de la société…', required: false, showIf: SHOW_IF_GERANT },
 ];
 
 // Bailleur (personne physique) — Bail
@@ -176,6 +267,7 @@ export const QUESTIONNAIRES = {
         { id: 'ger.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: false, mono: true, showIf: { field: 'ger.est_different' } },
         { id: 'ger.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false, showIf: { field: 'ger.est_different' } },
+        { id: 'ger.piece_expire_le', label: 'Expire le', type: 'date', placeholder: '01/01/2030', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.telephone', label: 'Téléphone', type: 'tel', placeholder: '622 XX XX XX', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.email', label: 'Email', type: 'email', placeholder: 'email@exemple.com', required: false, showIf: { field: 'ger.est_different' } },
         ...SOC_COMMISSAIRES,
@@ -204,13 +296,13 @@ export const QUESTIONNAIRES = {
         { id: 'soc.capital_chiffres', label: 'Capital social (GNF — min. 140 000 000)', type: 'number', placeholder: '140000000', required: true, mono: true, publicIntake: true },
         { id: 'soc.capital_libere_chiffres', label: 'Capital libéré à la constitution (min. 35 000 000)', type: 'number', placeholder: '35000000', required: true, mono: true, publicIntake: true },
         { id: 'soc.nombre_actions', label: "Nombre d'actions", type: 'number', placeholder: '14000', required: true, mono: true, publicIntake: true },
-        { id: 'soc.valeur_nominale_chiffres', label: "Valeur nominale d'une action (GNF)", type: 'number', placeholder: '10000', required: true, mono: true, publicIntake: true },
+        { id: 'soc.valeur_nominale_chiffres', label: "Valeur nominale d'une action (GNF)", type: 'number', placeholder: '10000', required: true, mono: true, readonly: true, publicIntake: true },
         { id: 'soc.siege_quartier', label: 'Quartier du siège social', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
         { id: 'soc.siege_commune', label: 'Commune du siège social', type: 'text', placeholder: 'Kaloum', required: true, publicIntake: true },
         { id: 'soc.siege_ville', label: 'Ville du siège social', type: 'text', placeholder: 'Conakry', required: true, publicIntake: true },
         { id: 'soc.objet_social', label: 'Objet social', type: 'textarea', placeholder: 'Commerce général, import-export…', required: true, publicIntake: true },
         { id: 'soc.duree', label: 'Durée (années)', type: 'number', placeholder: '99', required: false, publicIntake: true },
-        { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'number', placeholder: '2026', required: false, publicIntake: true },
+        { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: '2026', required: false, publicIntake: true },
         { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
         { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
         {
@@ -233,8 +325,7 @@ export const QUESTIONNAIRES = {
         { id: 'soc.pca_adresse', label: 'Adresse du PCA', type: 'text', placeholder: 'Quartier, Commune, Ville', required: false },
         { id: 'soc.dg_nom', label: 'Directeur Général (DG)', type: 'text', placeholder: 'Nom du DG', required: false },
         { id: 'soc.dg_civilite', label: 'Civilité DG', type: 'select', options: ['M.', 'Mme'], required: false },
-        { id: 'soc.commissaire_titulaire', label: 'Commissaire aux comptes titulaire', type: 'text', placeholder: 'Nom du cabinet', required: true, section: 'Commissaires aux comptes' },
-        { id: 'soc.commissaire_suppleant', label: 'Commissaire aux comptes suppléant', type: 'text', placeholder: 'Nom du commissaire suppléant', required: true },
+        ...SOC_COMMISSAIRES_REQUIS,
     ],
 
     // ── SAS — Multi-associés ────────────────────────────────────────────────
@@ -324,7 +415,7 @@ export const QUESTIONNAIRES = {
     // ── Dissolution ─────────────────────────────────────────────────────────
     dissolution: [
         { id: 'soc.denomination', label: 'Dénomination de la société dissoute', type: 'text', placeholder: 'Faya Distribution SARLU', required: true, section: 'Société dissoute', publicIntake: true },
-        { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: ['SARLU', 'SARL', 'SA', 'SAS', 'SASU', 'SNC', 'GIE'], required: true, publicIntake: true },
+        { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: FORMES_SOCIETE, required: true, publicIntake: true },
         { id: 'soc.rccm', label: 'Numéro RCCM', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true, publicIntake: true },
         { id: 'soc.capital_chiffres', label: 'Capital social (GNF)', type: 'number', placeholder: '50 000 000', required: true, mono: true, publicIntake: true },
         { id: 'soc.siege_quartier', label: 'Quartier du siège', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
@@ -555,27 +646,273 @@ export const QUESTIONNAIRES = {
     ],
 
     // ── Modification de société ─────────────────────────────────────────────
+    // Réécrit le 2026-08-11. La version précédente tenait en six champs, dont un
+    // texte libre pour la dénomination et un choix unique pour le type de
+    // modification : elle ne captait ni l'état de la société **avant** le
+    // changement, ni l'assemblée qui le décide, ni les personnes qui y figurent —
+    // or les statuts mis à jour et le procès-verbal exigent les trois.
+    //
+    // Trois principes :
+    //   1. la société vient du **registre** (`societePicker`), pas d'une ressaisie ;
+    //   2. l'assemblée décide **plusieurs** modifications (`modif.types`), constatées
+    //      par un seul PV ;
+    //   3. chaque type ouvre son bloc « avant → après », et rien d'autre.
     modification: [
-        { id: 'soc.denomination', label: 'Dénomination de la société', type: 'text', placeholder: 'Raison sociale exacte', required: true, section: 'Société concernée', publicIntake: true },
+
+        // ── 1. Société concernée — état AVANT modification ───────────────────
+        // Rattachée à une fiche du registre : les champs sont alors masqués et
+        // remplis par la fiche (même parti pris que pour les clients liés). Ils
+        // restent déclarés parce qu'ils sont la projection ${soc.*} attendue par
+        // les modèles Word.
+        { id: 'soc.denomination', label: 'Dénomination sociale', type: 'text', placeholder: 'Raison sociale exacte', required: true, section: 'Société concernée', societePicker: true, publicIntake: true },
+        { id: 'soc.sigle', label: 'Sigle', type: 'text', placeholder: 'Ex : FD', required: false, publicIntake: true },
+        { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: FORMES_SOCIETE, required: true, publicIntake: true },
         { id: 'soc.rccm', label: 'Numéro RCCM actuel', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true, publicIntake: true },
-        { id: 'objet_modification', label: 'Objet de la modification', type: 'textarea', placeholder: 'Décrire les changements apportés (capital, gérant…)', required: true, section: 'Modification', publicIntake: true },
-        { id: 'fiche_modification', label: 'Fiche de modification', type: 'checkbox_required', placeholder: '', required: true, note: "Obligatoire — la procédure écrite l'exige" },
+        { id: 'soc.nif', label: 'NIF', type: 'text', placeholder: '000123456', required: false, mono: true, publicIntake: true },
+        { id: 'soc.date_constitution', label: 'Date de constitution', type: 'date', placeholder: '15/03/2020', required: false, publicIntake: true },
+        { id: 'soc.capital_chiffres', label: 'Capital social actuel (GNF)', type: 'number', placeholder: '50 000 000', required: true, mono: true, publicIntake: true },
+        { id: 'soc.nombre_parts', label: 'Nombre de parts actuel', type: 'number', placeholder: '100', required: false, mono: true, publicIntake: true },
+        { id: 'soc.valeur_nominale_chiffres', label: "Valeur nominale d'une part (GNF)", type: 'number', placeholder: '500 000', required: false, mono: true, publicIntake: true },
+        { id: 'soc.siege_quartier', label: 'Quartier du siège actuel', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
+        { id: 'soc.siege_commune', label: 'Commune du siège actuel', type: 'text', placeholder: 'Kaloum', required: true, publicIntake: true },
+        { id: 'soc.siege_ville', label: 'Ville du siège actuel', type: 'text', placeholder: 'Conakry', required: true, publicIntake: true },
+        { id: 'soc.objet_social', label: 'Objet social actuel', type: 'textarea', placeholder: 'Commerce général, import-export…', required: false, publicIntake: true },
+        { id: 'soc.gerant_actuel', label: 'Gérant / dirigeant actuel', type: 'text', placeholder: 'Ibrahima DIALLO', required: false, publicIntake: true },
+        { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
+        { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
+
+        // ── 2. Modification(s) décidée(s) ────────────────────────────────────
+        // Miroir de App\Enums\TypeModificationStatutaire — les libellés doivent
+        // correspondre exactement (depuisLibelles() les reconnaît par label). Choix
+        // multiple : une même assemblée décide couramment une cession de parts, un
+        // nouveau gérant et un transfert de siège. Jamais `publicIntake` : la
+        // qualification juridique du changement n'est pas au client de la faire.
+        { id: 'modif.types', label: 'Modifications décidées', type: 'checkbox_group', required: true, section: 'Modification(s) décidée(s)',
+          // Fait afficher sous les cases l'impact, les actes produits et les droits
+          // d'enregistrement de la sélection courante (voir ConsequencesModification).
+          consequences: 'modification',
+          options: [
+            'Changement de gérant statutaire',
+            'Changement de gérant non statutaire',
+            'Transfert du siège social',
+            'Augmentation de capital',
+            'Diminution de capital',
+            'Cession de parts sociales',
+            "Modification de l'objet social",
+          ],
+          note: 'Détermine les actes à produire, les formalités à engager et les droits à percevoir.' },
+
+        // ── 3. Assemblée générale (procès-verbal) ────────────────────────────
+        // Produit dans TOUS les cas de modification. Le président et le secrétaire de
+        // séance sont de simples mentions de l'acte : ils ne fournissent aucune pièce,
+        // donc pas de `clientRole` ni de fiche client à rattacher.
+        { id: 'ag.type', label: "Nature de la décision", type: 'select', required: true, section: 'Assemblée générale',
+          options: ['Assemblée générale extraordinaire', 'Assemblée générale ordinaire', "Décision de l'associé unique"] },
+        { id: 'ag.date', label: "Date de l'assemblée", type: 'date', placeholder: '01/08/2026', required: true },
+        { id: 'ag.heure', label: 'Heure', type: 'text', placeholder: '10h00', required: false },
+        { id: 'ag.lieu', label: "Lieu de l'assemblée", type: 'text', placeholder: 'Siège social, Conakry', required: false },
+        { id: 'ag.president_seance', label: 'Président de séance', type: 'text', placeholder: 'Ibrahima DIALLO', required: false },
+        { id: 'ag.secretaire_seance', label: 'Secrétaire de séance', type: 'text', placeholder: 'Mariama SOW', required: false },
+        { id: 'ag.parts_representees', label: 'Parts présentes ou représentées', type: 'number', placeholder: '100', required: false, mono: true },
+        { id: 'ag.quorum_atteint', label: 'Quorum atteint', type: 'checkbox', required: false },
+        // Souvent différente de la date d'assemblée (effet différé, ou rétroactif au
+        // premier jour de l'exercice) : c'est elle qui figure aux statuts mis à jour.
+        { id: 'ag.date_effet', label: "Date d'effet de la modification", type: 'date', placeholder: '01/09/2026', required: false,
+          note: "Laisser vide si l'effet est immédiat à la date de l'assemblée." },
+        { id: 'ag.resolutions', label: 'Résolutions adoptées', type: 'textarea', placeholder: 'Texte des résolutions, ou complément au détail des blocs ci-dessous', required: false },
+
+        // ── 4. Cession de parts sociales ─────────────────────────────────────
+        // Actes édités : acte de cession, PV d'AGE, statuts mis à jour et RCCM.
+        {
+            id: 'modif.cedants', type: 'repeatable', label: 'Cédant(s)', section: 'Cession de parts — cédants', clientRole: 'cedant',
+            min: 1, max: 10, showIf: { field: 'modif.types', includes: 'Cession de parts sociales' },
+            fields: CEDANT_SCHEMA,
+        },
+        {
+            id: 'modif.cessionnaires', type: 'repeatable', label: 'Cessionnaire(s)', section: 'Cession de parts — cessionnaires', clientRole: 'cessionnaire',
+            min: 1, max: 10, showIf: { field: 'modif.types', includes: 'Cession de parts sociales' },
+            fields: CESSIONNAIRE_SCHEMA,
+        },
+        { id: 'modif.date_cession', label: 'Date de la cession', type: 'date', placeholder: '01/08/2026', required: false, section: 'Cession de parts — conditions',
+          showIf: { field: 'modif.types', includes: 'Cession de parts sociales' } },
+        { id: 'modif.valeur_parts_cedees', label: 'Valeur totale des parts cédées (GNF)', type: 'number', placeholder: '25 000 000', required: true, mono: true,
+          showIf: { field: 'modif.types', includes: 'Cession de parts sociales' },
+          note: 'Assiette du droit de cession de 2 % — la valeur des parts, non le capital social.' },
+        // L'agrément préalable des associés est une condition de validité de la
+        // cession à un tiers en SARL : sans lui, l'acte est attaquable.
+        { id: 'modif.agrement_associes', label: 'Agrément des associés obtenu', type: 'checkbox', required: false,
+          showIf: { field: 'modif.types', includes: 'Cession de parts sociales' },
+          note: "Obligatoire pour une cession à un tiers en SARL — mentionné au procès-verbal." },
+        // ── 5. Transfert du siège social ─────────────────────────────────────
+        // Documents établis : statuts mis à jour et procès-verbal.
+        { id: 'modif.siege_nouveau_quartier', label: 'Nouveau quartier du siège', type: 'text', placeholder: 'Almamya', required: true, section: 'Transfert du siège social',
+          showIf: { field: 'modif.types', includes: 'Transfert du siège social' } },
+        { id: 'modif.siege_nouveau_commune', label: 'Nouvelle commune', type: 'text', placeholder: 'Kaloum', required: true,
+          showIf: { field: 'modif.types', includes: 'Transfert du siège social' } },
+        { id: 'modif.siege_nouveau_ville', label: 'Nouvelle ville', type: 'text', placeholder: 'Conakry', required: true,
+          showIf: { field: 'modif.types', includes: 'Transfert du siège social' } },
+        { id: 'modif.siege_justificatif', label: "Titre d'occupation du nouveau siège", type: 'select',
+          options: ['Bail', 'Titre foncier', 'Attestation de domiciliation', 'Autre'], required: false,
+          showIf: { field: 'modif.types', includes: 'Transfert du siège social' } },
+
+        // ── 6. Augmentation de capital ───────────────────────────────────────
+        // Une DNSV est établie pour constater le montant augmenté.
+        { id: 'modif.augmentation_montant', label: "Montant de l'augmentation (GNF)", type: 'number', placeholder: '50 000 000', required: true, mono: true, section: 'Augmentation de capital',
+          showIf: { field: 'modif.types', includes: 'Augmentation de capital' } },
+        { id: 'modif.augmentation_capital_apres', label: 'Capital après augmentation (GNF)', type: 'number', placeholder: '100 000 000', required: false, mono: true, readonly: true,
+          showIf: { field: 'modif.types', includes: 'Augmentation de capital' },
+          note: 'Calculé : capital actuel + montant de l’augmentation.' },
+        { id: 'modif.augmentation_modalite', label: "Modalité de l'augmentation", type: 'select',
+          options: ['Apports en numéraire', 'Apports en nature', 'Incorporation de réserves'], required: true,
+          showIf: { field: 'modif.types', includes: 'Augmentation de capital' } },
+        { id: 'modif.augmentation_parts_nouvelles', label: 'Nombre de parts nouvelles', type: 'number', placeholder: '100', required: false, mono: true,
+          showIf: { field: 'modif.types', includes: 'Augmentation de capital' } },
+        { id: 'modif.augmentation_banque', label: 'Banque de dépôt des fonds', type: 'text', placeholder: 'Ecobank Guinée SA', required: false,
+          showIf: { field: 'modif.types', includes: 'Augmentation de capital' },
+          note: "Reporté sur la DNSV avec l'attestation de dépôt." },
+        { id: 'modif.augmentation_date_versement', label: 'Date du versement', type: 'date', placeholder: '01/08/2026', required: false,
+          showIf: { field: 'modif.types', includes: 'Augmentation de capital' } },
+        {
+            id: 'modif.souscripteurs', type: 'repeatable', label: 'Souscripteurs', section: 'Augmentation de capital — souscripteurs', clientRole: 'souscripteur',
+            min: 1, max: 20, showIf: { field: 'modif.types', includes: 'Augmentation de capital' },
+            fields: SOUSCRIPTEUR_SCHEMA,
+        },
+
+        // ── 7. Diminution de capital ─────────────────────────────────────────
+        // Aucune DNSV n'est requise : rien n'est souscrit ni versé.
+        { id: 'modif.diminution_montant', label: 'Montant de la réduction (GNF)', type: 'number', placeholder: '20 000 000', required: true, mono: true, section: 'Diminution de capital',
+          showIf: { field: 'modif.types', includes: 'Diminution de capital' } },
+        { id: 'modif.diminution_capital_apres', label: 'Capital après réduction (GNF)', type: 'number', placeholder: '30 000 000', required: false, mono: true, readonly: true,
+          showIf: { field: 'modif.types', includes: 'Diminution de capital' },
+          note: 'Calculé : capital actuel − montant de la réduction.' },
+        { id: 'modif.diminution_motif', label: 'Motif de la réduction', type: 'select',
+          options: ['Résorption de pertes', 'Remboursement aux associés'], required: true,
+          showIf: { field: 'modif.types', includes: 'Diminution de capital' } },
+        { id: 'modif.diminution_parts_annulees', label: 'Nombre de parts annulées', type: 'number', placeholder: '40', required: false, mono: true,
+          showIf: { field: 'modif.types', includes: 'Diminution de capital' } },
+
+        // ── 7 bis. Répartition du capital après ──────────────────────────────
+        // Affichée pour les **trois** opérations qui changent qui détient quoi : une cession, mais
+        // aussi une augmentation (parts nouvelles) et une diminution (parts annulées). C'est ce
+        // tableau que les statuts mis à jour reprennent — restreinte à la cession, la répartition
+        // finale d'une augmentation devait être ressaisie à la main dans le .docx généré.
+        //
+        // Placée **après** les blocs de capital, et non au milieu de la cession comme à l'origine :
+        // on ne renseigne la répartition finale qu'une fois connu de combien le capital varie.
+        {
+            id: 'modif.repartition_apres', type: 'repeatable', label: 'Répartition du capital après modification', section: 'Répartition du capital après',
+            min: 1, max: 20,
+            showIf: { field: 'modif.types', includesAny: ['Cession de parts sociales', 'Augmentation de capital', 'Diminution de capital'] },
+            fields: [
+                { id: 'associe', label: 'Associé', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
+                { id: 'parts_chiffres', label: 'Nombre de parts détenues', type: 'number', placeholder: '60', required: true, mono: true },
+                { id: 'pourcentage', label: 'Pourcentage (%)', type: 'number', placeholder: '60', required: false, mono: true, decimals: 2 },
+            ],
+        },
+
+        // ── 8. Changement de gérant ──────────────────────────────────────────
+        // Un seul bloc pour les deux types : les champs sont identiques, seul l'impact
+        // statutaire diffère — et c'est TypeModificationStatutaire qui le porte
+        // (impacteStatuts() est faux pour le gérant non statutaire).
+        //
+        // Le gérant sortant est une mention de l'acte, pas un fournisseur de pièces :
+        // sans `clientRole`, il n'ouvre pas de checklist. Le gérant entrant, si.
+        { id: 'gerant_sortant.prenom_nom', label: 'Gérant sortant', type: 'text', placeholder: 'Ibrahima DIALLO', required: true, section: 'Gérant sortant',
+          showIf: { field: 'modif.types', includesAny: ['Changement de gérant statutaire', 'Changement de gérant non statutaire'] } },
+        { id: 'gerant_sortant.motif', label: 'Motif de la cessation', type: 'select',
+          options: ['Démission', 'Révocation', 'Décès', 'Fin de mandat'], required: true,
+          showIf: { field: 'modif.types', includesAny: ['Changement de gérant statutaire', 'Changement de gérant non statutaire'] } },
+        { id: 'gerant_sortant.date_cessation', label: 'Date de cessation des fonctions', type: 'date', placeholder: '01/08/2026', required: false,
+          showIf: { field: 'modif.types', includesAny: ['Changement de gérant statutaire', 'Changement de gérant non statutaire'] } },
+
+        // Durée du mandat et pouvoirs sont dans ce même bloc : ce sont des données de
+        // l'acte, non de l'identité — elles restent donc saisissables quand une fiche
+        // client est rattachée au gérant entrant.
+        ...GERANT_ENTRANT_FIELDS,
+
+        // ── 9. Objet social ──────────────────────────────────────────────────
+        { id: 'modif.objet_operation', label: "Nature du changement d'objet", type: 'select',
+          options: ["Ajout d'activités", "Retrait d'activités", "Remplacement complet de l'objet"], required: true, section: 'Objet social',
+          showIf: { field: 'modif.types', includes: "Modification de l'objet social" } },
+        { id: 'modif.objet_nouveau', label: 'Nouvel objet social', type: 'textarea', placeholder: "Texte complet du nouvel objet social, tel qu'il figurera aux statuts", required: true,
+          showIf: { field: 'modif.types', includes: "Modification de l'objet social" },
+          note: "L'objet actuel est repris dans la section « Société concernée » ci-dessus." },
+
+        // ── 10. Précisions ───────────────────────────────────────────────────
+        // Conservé mais rétrogradé : ce champ portait à lui seul toute l'information
+        // de la modification, il n'est plus qu'un complément.
+        { id: 'objet_modification', label: 'Précisions complémentaires', type: 'textarea', placeholder: 'Éléments de contexte non couverts par les sections ci-dessus', required: false, section: 'Précisions', publicIntake: true },
     ],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 // Filtre les champs selon showIf et les valeurs actuelles du formulaire.
-// showIf: { field: 'fieldId' }           → visible si values[fieldId] est truthy
-// showIf: { field: 'fieldId', not: true } → visible si values[fieldId] est falsy
+// showIf: { field: 'fieldId' }                     → visible si values[fieldId] est truthy
+// showIf: { field: 'fieldId', not: true }           → visible si values[fieldId] est falsy
+// showIf: { field: 'fieldId', equals: 'v' }         → visible si la valeur vaut exactement 'v'
+// showIf: { field: 'fieldId', includes: 'v' }       → visible si le tableau contient 'v'
+// showIf: { field: 'fieldId', includesAny: [...] }  → visible si le tableau contient au moins
+//                                                     l'une des valeurs
+//
+// `includes` / `includesAny` servent aux champs multi-choix (type `checkbox_group`), dont la
+// valeur est un tableau de libellés : c'est ce qui rend les blocs de la modification de
+// société conditionnels au type de modification décidé, sans logique ad hoc dans le rendu.
 // ─────────────────────────────────────────────────────────────────────────────
 export function getVisibleFields(fields, values) {
     return fields.filter(field => {
         const { showIf } = field;
         if (!showIf) return true;
         const current = values[showIf.field];
+
+        if (showIf.equals !== undefined) {
+            return showIf.not ? current !== showIf.equals : current === showIf.equals;
+        }
+        if (showIf.includes !== undefined) {
+            const present = Array.isArray(current) && current.includes(showIf.includes);
+            return showIf.not ? !present : present;
+        }
+        if (showIf.includesAny !== undefined) {
+            const present = Array.isArray(current) && showIf.includesAny.some(v => current.includes(v));
+            return showIf.not ? !present : present;
+        }
+
+        // Un tableau vide est une absence de choix, pas une valeur : sans ce cas, un
+        // `checkbox_group` vidé de ses cases laisserait ses champs dépendants affichés
+        // ([] étant truthy en JavaScript).
+        if (Array.isArray(current)) {
+            return showIf.not ? current.length === 0 : current.length > 0;
+        }
         return showIf.not ? !current : !!current;
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Complément de getVisibleFields() : retire des valeurs celles des champs que
+// `showIf` masque actuellement.
+//
+// Décocher une modification n'effaçait pas ses champs. Cocher « Cession de parts »,
+// saisir 25 000 000 en valeur des parts cédées, puis décocher : la valeur restait dans
+// `donnees`, partait au serveur, et `FacturationService::deduireAssiette()` la retenait
+// **en priorité** — la facture portait donc une assiette de 25 000 000 sur un dossier
+// sans cession. Le même travers existait ailleurs sans être traité : les champs `ger.*`
+// d'une SARLU restaient soumis après avoir décoché « le gérant est une personne
+// différente de l'associé unique ».
+//
+// ⚠️ À appliquer **à la soumission uniquement**, jamais en cours de saisie ni sur un
+// brouillon : un brouillon doit conserver une saisie mise de côté, pour qu'en recochant
+// la case l'utilisateur retrouve ses valeurs.
+//
+// Les champs absents du schéma sont conservés : `donnees` peut porter des clés dérivées
+// (projection d'une fiche client ou société) qui ne correspondent à aucun champ déclaré.
+// ─────────────────────────────────────────────────────────────────────────────
+export function purgerChampsInvisibles(fields, values) {
+    const declares = new Set(fields.map(f => f.id));
+    const visibles = new Set(getVisibleFields(fields, values).map(f => f.id));
+
+    return Object.fromEntries(
+        Object.entries(values).filter(([cle]) => !declares.has(cle) || visibles.has(cle)),
+    );
 }
 
 // Lien TypeActe.code (BD) → clé QUESTIONNAIRES (frontend)

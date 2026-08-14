@@ -12,11 +12,12 @@ class Dossier extends Model
     use SoftDeletes;
 
     protected $fillable = [
-        'reference', 'type_acte_id',
+        'reference', 'type_acte_id', 'societe_id',
         'etape', 'redacteur_id', 'reviseur_id',
         'notaire_id', 'formaliste_id',
         'objet', 'valeur', 'echeance', 'urgent', 'notes',
         'etape_changed_at',
+        'date_signature_client', 'date_signature_notaire',
     ];
 
     protected function casts(): array
@@ -27,6 +28,8 @@ class Dossier extends Model
             'etape_changed_at' => 'datetime',
             'valeur'           => 'integer',
             'urgent'           => 'boolean',
+            'date_signature_client'  => 'date',
+            'date_signature_notaire' => 'date',
         ];
     }
 
@@ -59,7 +62,11 @@ class Dossier extends Model
     /**
      * Tous les utilisateurs ayant un rôle assigné sur ce dossier (rédacteur,
      * réviseur, notaire, formaliste), dédupliqués — les destinataires légitimes
-     * de toute notification relative à ce dossier.
+     * d'une notification transversale au dossier (échéance, formalité urgente).
+     *
+     * Les comptes désactivés sont exclus : ils ne doivent plus recevoir de mail
+     * même s'ils restent assignés à d'anciens dossiers. Pour une notification
+     * ciblée sur un rôle précis, passer par NotificationService::destinataires().
      */
     public function ayantsDroit(): \Illuminate\Support\Collection
     {
@@ -67,7 +74,30 @@ class Dossier extends Model
 
         return collect([$this->redacteur, $this->reviseur, $this->notaire, $this->formaliste])
             ->filter()
-            ->unique('id');
+            ->filter(fn (User $u) => $u->actif)
+            ->unique('id')
+            ->values();
+    }
+
+    /**
+     * Solde restant sur l'ensemble des factures du dossier.
+     *
+     * Prérequis de clôture depuis le 2026-08-05 : un dossier clos est un dossier soldé —
+     * c'est le moment où l'office perd son levier de recouvrement. Aucun contrôle
+     * n'existait, et un dossier avait été clôturé avec plus de 5 000 000 GNF impayés.
+     */
+    public function soldeRestant(): float
+    {
+        $this->loadMissing('factures.paiements');
+
+        return round($this->factures->sum(fn (Facture $f) => $f->soldeRestant()), 2);
+    }
+
+    public function estSolde(): bool
+    {
+        // Tolérance au centime : les montants sont saisis en GNF entiers, mais
+        // soldeRestant() passe par des flottants.
+        return $this->soldeRestant() <= 0.01;
     }
 
     public function questionnaire()
@@ -104,6 +134,10 @@ class Dossier extends Model
     private const ROLES_CLIENT_PRIORITAIRES = [
         'associe_unique', 'associe', 'gerant',
         'acheteur', 'debiteur', 'bailleur', 'liquidateur',
+        // Modification statutaire : celui qui acquiert ou entre en fonction avant celui qui
+        // sort, par cohérence avec `acheteur` avant `vendeur` ci-dessus. Sans ces rôles, un
+        // dossier de modification s'affichait sans nom de client dans la liste.
+        'cessionnaire', 'gerant_entrant', 'cedant', 'souscripteur',
         'vendeur', 'locataire', 'creancier',
         'actionnaire', 'administrateur', 'membre',
     ];
@@ -123,7 +157,70 @@ class Dossier extends Model
         return $this->hasMany(Courrier::class)->orderByDesc('created_at');
     }
 
+    /**
+     * Société sur laquelle porte ce dossier.
+     *
+     * Renseignée dans les trois procédures de la catégorie Société : la fiche est créée à
+     * l'issue d'une constitution, et **choisie dans le registre** à l'entrée d'une
+     * modification ou d'une dissolution.
+     *
+     * ⚠️ Ne pas confondre avec {@see societeConstituee()}, qui suit la relation inverse
+     * (`societes.dossier_id`) et ne vaut que pour le dossier qui a *créé* la société.
+     */
     public function societe()
+    {
+        return $this->belongsTo(Societe::class);
+    }
+
+    /**
+     * Pièce écrite qui atteste l'accord du client et conditionne la sortie de l'Initialisation.
+     *
+     * Elle **dépend du type de dossier**. Pour une constitution, l'étude imprime la fiche du
+     * dossier, la fait signer et la téléverse. Pour une **modification de statuts**, cela n'a pas
+     * de sens : ce qui engage l'opération est la **décision des associés**, que le client apporte.
+     * Le procès-verbal que l'étude rédige, lui, n'arrive qu'à l'Édition — trop tard pour garder
+     * l'Initialisation.
+     *
+     * ⚠️ La `categorie` reste `accord_client` dans les deux cas, délibérément : c'est le *créneau
+     * technique* de cette pièce. En introduire une seconde obligerait à la classer dans
+     * {@see \App\Enums\RubriqueCloture::pourDocument()} (elle tomberait sinon dans « Actes », alors
+     * qu'elle est fournie et non produite), à l'exclure de l'onglet Actes et à doubler le contrôle
+     * bloquant. C'est le **nom** du document qui porte le sens, et il est déjà propre à chaque
+     * dossier.
+     *
+     * @return array{categorie: string, nom: string, titre: string, instructions: string, imprimable: bool}
+     */
+    public function pieceAccordAttendue(): array
+    {
+        $this->loadMissing('typeActe');
+
+        if ($this->typeActe?->code === 'SOC-MOD') {
+            return [
+                'categorie'    => 'accord_client',
+                'nom'          => "Décision d'assemblée des associés",
+                'titre'        => "Décision d'assemblée des associés",
+                'instructions' => "Téléversez la décision écrite des associés qui engage cette modification — convocation, projet de résolution, ou procès-verbal remis par le client. Le dossier ne pourra pas passer en certification sans elle.",
+                'imprimable'   => false,
+            ];
+        }
+
+        return [
+            'categorie'    => 'accord_client',
+            'nom'          => 'Accord client — questionnaire signé',
+            'titre'        => 'Accord client sur le questionnaire',
+            'instructions' => "Imprimez la fiche dossier, faites-la signer par le client, puis téléversez ici le document signé. Le dossier ne pourra pas passer en certification sans cet accord.",
+            'imprimable'   => true,
+        ];
+    }
+
+    /**
+     * Société dont ce dossier est l'acte de constitution — `null` pour un dossier de
+     * modification ou de dissolution, qui porte sur une société préexistante.
+     *
+     * C'est ce lien qui permet à une fiche de retrouver les associés et gérants d'origine
+     * (voir {@see Societe::associesConnus()}).
+     */
+    public function societeConstituee()
     {
         return $this->hasOne(Societe::class);
     }
@@ -186,7 +283,10 @@ class Dossier extends Model
 
     public function revisionValidee(): bool
     {
-        return $this->revision?->statut?->value === 'valide';
+        // Comparaison sur le cas d'enum et non sur sa valeur littérale : renommer ou
+        // retirer un cas de StatutRevision casse alors la compilation au lieu de
+        // rendre cette condition silencieusement toujours fausse.
+        return $this->revision?->statut === \App\Enums\StatutRevision::Valide;
     }
 
     public function estEnRetard(): bool

@@ -3,7 +3,7 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import { motion } from 'framer-motion';
 import {
     Plus, Search, FolderOpen, Clock, AlertTriangle, ChevronRight,
-    ChevronLeft, X, TrendingUp, CheckCircle2, ArrowUpDown, Zap,
+    ChevronLeft, X, TrendingUp, CheckCircle2, ArrowUpDown, Zap, FileClock, PenLine, Trash2,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -37,7 +37,7 @@ function WorkflowDots({ etapeValue }) {
 // ── Page principale ────────────────────────────────────────────────────────
 
 export default function DossiersIndex() {
-    const { dossiers, filters, etapes, categories, stats, auth } = usePage().props;
+    const { dossiers, filters, etapes, categories, stats, auth, brouillons } = usePage().props;
     const can = auth?.user?.can ?? {};
 
     const [search, setSearch]       = useState(filters.q         ?? '');
@@ -233,6 +233,66 @@ export default function DossiersIndex() {
                         </Button>
                     )}
                 </div>
+
+                {/* ── Brouillons ────────────────────────────────────────────── */}
+                {(brouillons ?? []).length > 0 && !hasFiltres && (
+                    <div className="mb-6 space-y-2">
+                        <div className="flex items-center gap-2 mb-3 px-1 text-slate-500 font-medium text-sm">
+                            <FileClock className="h-4 w-4 text-amber-500" /> Saisies inachevées (Brouillons)
+                        </div>
+                        {brouillons.map((brouillon) => (
+                            <Card 
+                                key={`brouillon-${brouillon.id}`} 
+                                className="group hover:shadow-md transition-all cursor-pointer border-l-2 border-l-amber-400 bg-amber-50/20" 
+                                onClick={() => router.visit(`/dossiers/create?brouillon=${brouillon.id}`)}
+                            >
+                                <CardContent className="p-4">
+                                    <div className="flex items-start gap-4">
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="font-ref text-sm text-amber-600 font-semibold">Brouillon #{brouillon.id}</span>
+                                                <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                                                    <PenLine className="h-2.5 w-2.5" />
+                                                    En rédaction
+                                                </span>
+                                            </div>
+                                            <p className="text-sm font-medium text-slate-800 mt-1 truncate">
+                                                {brouillon.libelle || (brouillon.typeActeLabel ? `Nouveau dossier : ${brouillon.typeActeLabel}` : 'Nouveau dossier')}
+                                            </p>
+                                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                                {brouillon.typeActeLabel && (
+                                                    <span className="text-[10px] bg-white border border-amber-200/50 rounded-full px-2 py-0.5 text-amber-600">
+                                                        {brouillon.typeActeLabel}
+                                                    </span>
+                                                )}
+                                                <div className="flex items-center gap-2 text-xs text-slate-400">
+                                                    {brouillon.auteur_initiales && <span>Par {brouillon.auteur_initiales}</span>}
+                                                    <span className="flex items-center gap-1">
+                                                        <Clock className="h-2.5 w-2.5" />
+                                                        Modifié le {brouillon.modifie_le}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0 self-center">
+                                            <button
+                                                className="flex items-center gap-1 text-[11px] font-medium rounded-md px-2 py-1 transition-colors text-amber-600 border border-amber-200 bg-amber-50 hover:bg-amber-100"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    router.visit(`/dossiers/create?brouillon=${brouillon.id}`);
+                                                }}
+                                            >
+                                                <PenLine className="h-3 w-3" />
+                                                Reprendre
+                                            </button>
+                                            <ChevronRight className="h-4 w-4 text-amber-200 group-hover:text-amber-500 transition-colors" />
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
 
                 {/* ── Liste ─────────────────────────────────────────────────── */}
                 {dossiersData.length === 0 ? (

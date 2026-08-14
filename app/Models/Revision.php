@@ -44,10 +44,27 @@ class Revision extends Model
      * pour que la liste globale (Revisions/Index.jsx) reste identique à ce que la
      * fiche dossier calcule côté client à partir de ses documents actuels.
      */
+    /**
+     * Documents soumis à certification : les **actes**, à l'exclusion de l'accord client.
+     *
+     * L'accord signé du client sur le questionnaire est un document du dossier, mais ce
+     * n'est pas un acte à certifier — c'est une pièce justificative de l'étape
+     * Initialisation. Le compter ici rendait la certification **invalidable à jamais** :
+     * la grille n'a de point que pour les actes, donc `nombreEvalues()` ne pouvait
+     * arithmétiquement pas égaler le total. Constaté sur SOC-2026-0010 : 5 points évalués
+     * contre 6 documents comptés, d'où un « Accès refusé » à la validation.
+     */
+    public function documentsACertifier()
+    {
+        $this->loadMissing('dossier.documents');
+
+        return $this->dossier->documents->where('categorie', '!=', 'accord_client');
+    }
+
     private function pointsValides()
     {
         $this->loadMissing(['points', 'dossier.documents']);
-        $idsDocuments = $this->dossier->documents->pluck('id')->map(fn ($id) => (string) $id);
+        $idsDocuments = $this->documentsACertifier()->pluck('id')->map(fn ($id) => (string) $id);
 
         // Un point périmé (document régénéré depuis, ex. questionnaire modifié) n'est
         // plus fiable — le certificateur doit le réexaminer, donc il ne compte pas
@@ -72,9 +89,9 @@ class Revision extends Model
 
     public function tousEvalues(): bool
     {
-        $totalDocuments = $this->dossier->documents()->count();
+        $totalActes = $this->documentsACertifier()->count();
 
-        return $totalDocuments > 0 && $this->nombreEvalues() === $totalDocuments;
+        return $totalActes > 0 && $this->nombreEvalues() === $totalActes;
     }
 
     public function estValidable(): bool

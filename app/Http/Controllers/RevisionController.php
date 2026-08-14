@@ -7,6 +7,7 @@ use App\Models\Revision;
 use App\Models\RevisionPoint;
 use App\Services\DossierStepService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 
 class RevisionController extends Controller
@@ -88,7 +89,7 @@ class RevisionController extends Controller
     {
         $this->authorize('view', $dossier);
 
-        $dossier->load(['typeActe', 'redacteur', 'documents', 'revision.reviseur', 'revision.points']);
+        $dossier->load(['typeActe', 'redacteur', 'documents.versionActuelle', 'revision.reviseur', 'revision.points']);
 
         return Inertia::render('Dossiers/Revision', [
             'dossier' => [
@@ -99,15 +100,28 @@ class RevisionController extends Controller
                 'typeActe'  => $dossier->typeActe?->label,
                 'redacteur' => $dossier->redacteur?->name,
             ],
-            'documents' => $dossier->documents->map(fn ($doc) => [
-                'id'            => $doc->id,
-                'nom'           => $doc->nom,
-                'type_document' => $doc->type_document,
-                'statut'        => $doc->statut,
-                'url_download'  => route('documents.download', $doc),
-                'url_preview'   => route('documents.preview', $doc),
-                'has_file'      => (bool) $doc->chemin_fichier,
-            ]),
+            // Actes seuls : l'accord signé du client est un document du dossier mais pas un
+            // acte à certifier. Il apparaissait pourtant comme un point de la grille, alors
+            // que Revision::pointsValides() ne le comptait pas — la grille affichait donc
+            // un point de plus qu'elle n'en attendait, et la validation restait impossible.
+            'documents' => $dossier->documents
+                ->where('categorie', '!=', 'accord_client')
+                ->map(fn ($doc) => [
+                    'id'            => $doc->id,
+                    'nom'           => $doc->nom,
+                    // ⚠️ Lisait `$doc->type_document` et `$doc->chemin_fichier` — deux colonnes qui
+                    // n'existent pas sur `DocumentFichier` depuis l'unification GED du 2026-07-24 :
+                    // le type est `categorie`, et le fichier vit sur la version courante. Le type
+                    // était donc vide, et `has_file` **toujours faux** — l'aperçu et le
+                    // téléchargement disparaissaient de l'écran où le certificateur doit lire les
+                    // actes.
+                    'categorie'     => $doc->categorie,
+                    'typeDocLabel'  => $doc->typeDocumentLabel(),
+                    'statut'        => $doc->statut,
+                    'url_download'  => route('documents.download', $doc),
+                    'url_preview'   => route('documents.preview', $doc),
+                    'has_file'      => (bool) $doc->versionActuelle,
+                ])->values(),
             'revision' => $dossier->revision ? [
                 'id'           => $dossier->revision->id,
                 'statut'       => $dossier->revision->statut?->value,
@@ -141,6 +155,11 @@ class RevisionController extends Controller
         }
 
         $points = $request->validate([
+            // `prelude` : cette sauvegarde n'est qu'une étape technique avant valider ou
+            // renvoyer (voir Revision.jsx). Sans ce drapeau, « Grille de certification
+            // sauvegardée » s'affichait alors même que l'action voulue échouait ensuite —
+            // un succès trompeur à côté d'une erreur.
+            'prelude'  => ['sometimes', 'boolean'],
             'points'   => ['required', 'array'],
             'points.*' => ['required', 'array'],
             'points.*.etat'        => ['nullable', 'string', 'in:ok,a_corriger'],
@@ -160,7 +179,9 @@ class RevisionController extends Controller
 
         $revision->update(['statut' => \App\Enums\StatutRevision::EnCours]);
 
-        return back()->with('success', 'Grille de certification sauvegardée.');
+        return $request->boolean('prelude')
+            ? back()
+            : back()->with('success', 'Grille de certification sauvegardée.');
     }
 
     public function valider(Dossier $dossier)
@@ -168,6 +189,28 @@ class RevisionController extends Controller
         $revision = $dossier->revision;
         abort_unless($revision, 404);
         $this->authorize('valider', $revision);
+
+        // Préconditions d'état, séparées de l'autorisation : elles produisent un message
+        // qui nomme la cause au lieu du « Accès refusé » 403 que renvoyait la policy.
+        $aCertifier = $revision->documentsACertifier()->count();
+        if ($aCertifier === 0) {
+            throw ValidationException::withMessages([
+                'revision' => ['Aucun acte à certifier : générez les actes du dossier avant de valider.'],
+            ]);
+        }
+        if (!$revision->tousEvalues()) {
+            $restants = $aCertifier - $revision->nombreEvalues();
+            throw ValidationException::withMessages([
+                'revision' => ["Certification incomplète : {$restants} acte(s) sur {$aCertifier} n'ont pas encore été évalués."],
+            ]);
+        }
+        if ($revision->nombreNonConformes() > 0) {
+            throw ValidationException::withMessages([
+                'revision' => [
+                    $revision->nombreNonConformes() . " acte(s) sont marqués « à corriger » : renvoyez le dossier en correction, ou revoyez ces points avant de valider.",
+                ],
+            ]);
+        }
 
         $revision->valider(auth()->user());
         $this->stepService->avancer($dossier, auth()->user());
@@ -181,6 +224,12 @@ class RevisionController extends Controller
         $revision = $dossier->revision;
         abort_unless($revision, 404);
         $this->authorize('renvoyer', $revision);
+
+        if ($revision->nombreNonConformes() === 0) {
+            throw ValidationException::withMessages([
+                'revision' => ["Aucun acte n'est marqué « à corriger » : un renvoi doit indiquer ce qui doit être repris."],
+            ]);
+        }
 
         $motif = $request->validate(['motif' => ['nullable', 'string', 'max:500']])['motif'] ?? null;
         $revision->renvoyer(auth()->user(), $motif);

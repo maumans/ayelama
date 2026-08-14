@@ -17,17 +17,15 @@ import { cn } from '@/lib/utils';
 ═══════════════════════════════════════════════════════════ */
 
 const ETAPE_META = {
-    initialisation:    { label: 'Initialisation', short: 'Init.',      ordre: 0, color: 'bg-slate-400',  light: 'bg-slate-50',   text: 'text-slate-600',   border: 'border-slate-300' },
-    edition:           { label: 'Édition',        short: 'Édition',    ordre: 1, color: 'bg-blue-500',   light: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-300' },
-    revision:          { label: 'Certification',  short: 'Certif.',    ordre: 2, color: 'bg-amber-500',  light: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-300' },
-    signature_client:  { label: 'Sig. Client',    short: 'Sig.Cli.',   ordre: 3, color: 'bg-purple-500', light: 'bg-purple-50',  text: 'text-purple-700',  border: 'border-purple-300' },
-    signature_notaire: { label: 'Sig. Notaire',   short: 'Sig.Not.',   ordre: 4, color: 'bg-violet-500', light: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-300' },
-    formalites:        { label: 'Formalités',     short: 'Formalités', ordre: 5, color: 'bg-orange-500', light: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-300' },
-    expedition:        { label: 'Expédition',     short: 'Expédition', ordre: 6, color: 'bg-cyan-500',   light: 'bg-cyan-50',    text: 'text-cyan-700',    border: 'border-cyan-300' },
-    cloture:           { label: 'Clôturés',       short: 'Clôturés',   ordre: 7, color: 'bg-green-500',  light: 'bg-green-50',   text: 'text-green-700',   border: 'border-green-300' },
+    edition:           { label: 'Édition',        short: 'Édition',    ordre: 0, color: 'bg-blue-500',   light: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-300' },
+    revision:          { label: 'Certification',  short: 'Certif.',    ordre: 1, color: 'bg-amber-500',  light: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-300' },
+    signature:         { label: 'Signature',      short: 'Sig.',       ordre: 2, color: 'bg-purple-500', light: 'bg-purple-50',  text: 'text-purple-700',  border: 'border-purple-300' },
+    formalites:        { label: 'Formalités',     short: 'Formalités', ordre: 3, color: 'bg-orange-500', light: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-300' },
+    expedition:        { label: 'Expédition',     short: 'Expédition', ordre: 4, color: 'bg-cyan-500',   light: 'bg-cyan-50',    text: 'text-cyan-700',    border: 'border-cyan-300' },
+    cloture:           { label: 'Clôturés',       short: 'Clôturés',   ordre: 5, color: 'bg-green-500',  light: 'bg-green-50',   text: 'text-green-700',   border: 'border-green-300' },
 };
 
-const ETAPE_KEYS = ['initialisation', 'edition', 'revision', 'signature_client', 'signature_notaire', 'formalites', 'expedition', 'cloture'];
+const ETAPE_KEYS = ['edition', 'revision', 'signature', 'formalites', 'expedition', 'cloture'];
 
 const JOURNAL_META = {
     creation:   { icon: FolderPlus,     color: 'text-blue-500',   bg: 'bg-blue-50'   },

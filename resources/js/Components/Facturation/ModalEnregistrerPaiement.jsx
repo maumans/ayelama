@@ -31,7 +31,6 @@ export function ModalEnregistrerPaiement({ open, onClose, dossierReference, sold
     const [montant, setMontant] = useState('');
     const [moyenPaiement, setMoyenPaiement] = useState('');
     const [notes, setNotes] = useState('');
-    const [confirmationRequise, setConfirmationRequise] = useState(false);
 
     useEffect(() => {
         if (open) {
@@ -39,15 +38,21 @@ export function ModalEnregistrerPaiement({ open, onClose, dossierReference, sold
             setMontant(paiement ? String(paiement.montant) : '');
             setMoyenPaiement(paiement?.moyen_paiement ?? '');
             setNotes(paiement?.notes ?? '');
-            setConfirmationRequise(false);
         }
     }, [open, paiement]);
 
-    // Un montant très supérieur au total de la facture est presque toujours une faute de
-    // frappe (chiffre en trop) plutôt qu'une vraie provision d'avance — on ne bloque pas
-    // (payer plus que le dû reste normal), mais on demande une confirmation explicite.
+    // La somme des paiements ne peut pas dépasser le total facturé (invariant
+    // contrôlé côté serveur sous verrou — voir FactureController::assertMontantDansSolde).
+    // En modification, le paiement édité libère son propre montant.
     const montantNum = Number(montant) || 0;
-    const montantSuspect = totalFacture > 0 && montantNum > totalFacture * 2;
+    const soldeDisponible = Math.max(
+        0,
+        Number((soldeRestant + (estModification ? Number(paiement?.montant) || 0 : 0)).toFixed(2)),
+    );
+    const factureSoldee = totalFacture > 0 && soldeDisponible <= 0;
+    const montantVide = montantNum <= 0;
+    const montantExcessif = montantNum > soldeDisponible;
+    const blocage = totalFacture <= 0 || factureSoldee || montantExcessif;
 
     const enregistrer = () => {
         const payload = {
@@ -71,10 +76,7 @@ export function ModalEnregistrerPaiement({ open, onClose, dossierReference, sold
 
     const submit = (e) => {
         e.preventDefault();
-        if (montantSuspect && !confirmationRequise) {
-            setConfirmationRequise(true);
-            return;
-        }
+        if (blocage || montantVide) return;
         enregistrer();
     };
 
@@ -95,28 +97,64 @@ export function ModalEnregistrerPaiement({ open, onClose, dossierReference, sold
                             />
                         </div>
                         <div className="space-y-1.5">
-                            <Label>Montant (GNF) <span className="text-danger">*</span></Label>
+                            <div className="flex items-center justify-between">
+                                <Label>Montant (GNF) <span className="text-danger">*</span></Label>
+                                {soldeDisponible > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setMontant(String(soldeDisponible))}
+                                        className="text-[11px] text-seal hover:underline"
+                                    >
+                                        Solder ({fmtGNF(soldeDisponible)})
+                                    </button>
+                                )}
+                            </div>
                             <NumberField
                                 value={montant}
-                                onValueChange={val => { setMontant(val); setConfirmationRequise(false); }}
+                                onValueChange={setMontant}
                                 placeholder="0"
+                                aria-invalid={montantExcessif}
+                                className={montantExcessif ? 'border-danger focus-visible:ring-danger/30' : undefined}
                                 required
                             />
                         </div>
                     </div>
 
                     <p className="text-xs text-slate-500 -mt-2">
-                        {soldeRestant > 0
-                            ? <>Solde restant dû : <span className="font-medium font-ref">{fmtGNF(soldeRestant)} GNF</span></>
-                            : <>Trop-perçu actuel : <span className="font-medium font-ref text-success">{fmtGNF(Math.abs(soldeRestant))} GNF</span></>}
+                        Maximum encaissable{estModification ? ' sur ce paiement' : ''} :{' '}
+                        <span className="font-medium font-ref">{fmtGNF(soldeDisponible)} GNF</span>
+                        {soldeRestant < 0 && (
+                            <> — trop-perçu existant de <span className="font-medium font-ref text-danger">{fmtGNF(Math.abs(soldeRestant))} GNF</span></>
+                        )}
                     </p>
 
-                    {montantSuspect && (
-                        <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    {totalFacture <= 0 && (
+                        <div className="flex items-start gap-2 p-3 rounded-lg bg-danger-bg border border-danger/20 text-xs text-danger-text">
                             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                             <span>
-                                Ce montant ({fmtGNF(montantNum)} GNF) est plus du double du total de la facture
-                                ({fmtGNF(totalFacture)} GNF) — vérifiez qu'il n'y a pas d'erreur de saisie avant de confirmer.
+                                Cette facture n'a aucun montant à encaisser (total à 0 GNF). Ajoutez d'abord
+                                une ligne à la note de frais.
+                            </span>
+                        </div>
+                    )}
+
+                    {factureSoldee && (
+                        <div className="flex items-start gap-2 p-3 rounded-lg bg-success-bg border border-success/20 text-xs text-success-text">
+                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                            <span>
+                                Cette facture est entièrement soldée ({fmtGNF(totalFacture)} GNF encaissés).
+                                Aucun paiement supplémentaire ne peut être enregistré.
+                            </span>
+                        </div>
+                    )}
+
+                    {montantExcessif && !factureSoldee && totalFacture > 0 && (
+                        <div className="flex items-start gap-2 p-3 rounded-lg bg-danger-bg border border-danger/20 text-xs text-danger-text">
+                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                            <span>
+                                {fmtGNF(montantNum)} GNF dépasse le solde restant dû. Le total des paiements
+                                ne peut pas excéder le total facturé ({fmtGNF(totalFacture)} GNF) — maximum
+                                ici : {fmtGNF(soldeDisponible)} GNF.
                             </span>
                         </div>
                     )}
@@ -141,8 +179,8 @@ export function ModalEnregistrerPaiement({ open, onClose, dossierReference, sold
 
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-                        <Button type="submit" variant={confirmationRequise ? 'warning' : 'seal'}>
-                            {confirmationRequise ? 'Confirmer malgré tout' : estModification ? 'Enregistrer les modifications' : 'Enregistrer le paiement'}
+                        <Button type="submit" variant="seal" disabled={blocage || montantVide}>
+                            {estModification ? 'Enregistrer les modifications' : 'Enregistrer le paiement'}
                         </Button>
                     </DialogFooter>
                 </form>

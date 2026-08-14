@@ -50,11 +50,16 @@ class FacturationService
             $assiette = $this->deduireAssiette($dossier);
         }
 
-        // Récupérer les barèmes actifs pour ce type d'acte
+        // Récupérer les barèmes actifs pour ce type d'acte, en écartant ceux qui ne
+        // concernent pas les modifications statutaires décidées par ce dossier (voir
+        // Bareme::estApplicableA) — sans ce filtre, un transfert de siège se voyait
+        // facturer une DNSV et une constitution l'enregistrement de statuts « mis à jour ».
         $baremes = Bareme::where('type_acte_id', $dossier->type_acte_id)
             ->where('actif', true)
             ->orderBy('ordre')
-            ->get();
+            ->get()
+            ->filter(fn (Bareme $bareme) => $bareme->estApplicableA($dossier))
+            ->values();
 
         if ($baremes->isEmpty()) {
             // Pas de barème configuré : on crée une facture vide
@@ -108,6 +113,11 @@ class FacturationService
      * Simule la facturation (preview) sans rien persister.
      * Utile pour afficher un aperçu au client avant validation.
      *
+     * ⚠️ Ne connaît qu'un `type_acte_id`, donc **aucun dossier** : elle ne peut pas appliquer
+     * les barèmes conditionnés à un type de modification statutaire
+     * ({@see Bareme::estApplicableA()}) et surestimera un dossier `SOC-MOD`. Sans appelant à
+     * ce jour ; si elle en gagne un pour une modification, lui passer le Dossier.
+     *
      * @return array{lignes: array, total: float, assiette: float}
      */
     public function simuler(int $typeActeId, float $assiette): array
@@ -153,14 +163,33 @@ class FacturationService
 
     /**
      * Tente de déduire l'assiette (valeur de base) depuis le questionnaire du dossier.
+     *
+     * ⚠️ Les clés de `questionnaires.donnees` sont **préfixées** (`soc.capital_chiffres`,
+     * `bien.prix_vente_chiffres`…) : les noms nus cherchés à l'origine ne correspondaient à
+     * aucun questionnaire réel, si bien qu'aucune assiette n'était jamais déduite et que
+     * chaque barème au pourcentage retombait sur `$dossier->valeur` ou sur zéro. Les deux
+     * formes sont interrogées, les préfixées d'abord — un import historique peut porter les
+     * anciennes.
      */
     private function deduireAssiette(Dossier $dossier): ?float
     {
         $donnees = $dossier->questionnaire?->donnees ?? [];
 
+        // Cession de parts sociales : l'assiette du droit de 2 % est la **valeur des parts
+        // cédées**, jamais le capital social (règle 10 du CR de juillet 2026). Testée avant
+        // tout le reste, sans quoi `soc.capital_chiffres` — présent au questionnaire de
+        // modification puisque la fiche société l'y projette — l'emporterait et gonflerait le
+        // droit dans des proportions considérables.
+        if (isset($donnees['modif.valeur_parts_cedees']) && is_numeric($donnees['modif.valeur_parts_cedees'])) {
+            return (float) $donnees['modif.valeur_parts_cedees'];
+        }
+
         // Chercher dans les clés connues du questionnaire
         $champsAssiette = [
-            'prix',                    // Vente
+            'bien.prix_vente_chiffres', // Vente (avec et sans titre foncier)
+            'soc.capital_chiffres',     // Société
+            'bq.montant_credit_chiffres', // Hypothèque
+            'prix',                    // Vente — forme historique non préfixée
             'prix_vente',              // Vente variante
             'capital_chiffres',        // Société
             'capital',                 // Société variante
@@ -174,10 +203,13 @@ class FacturationService
             }
         }
 
-        // Pour les baux, tenter de calculer loyer × durée
-        if (isset($donnees['loyer_chiffres'], $donnees['duree_bail'])) {
-            $loyer = (float) $donnees['loyer_chiffres'];
-            $duree = (int)   $donnees['duree_bail'];
+        // Pour les baux, tenter de calculer loyer × durée. `bail.duree_chiffres` est la clé
+        // réelle des trois questionnaires de bail ; `duree_bail` n'a jamais existé.
+        $loyer = $donnees['bail.loyer_chiffres'] ?? $donnees['loyer_chiffres'] ?? null;
+        $duree = $donnees['bail.duree_chiffres'] ?? $donnees['duree_bail'] ?? null;
+        if (is_numeric($loyer) && is_numeric($duree)) {
+            $loyer = (float) $loyer;
+            $duree = (int)   $duree;
             if ($loyer > 0 && $duree > 0) {
                 return $loyer * 12 * $duree; // total des loyers mensuels sur la durée
             }

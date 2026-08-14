@@ -21,7 +21,7 @@ class ModeleCourrierController extends Controller
     {
         $rules = [
             'nom'             => ['required', 'string', 'max:200'],
-            'type_document'   => ['required', 'in:acte_principal,page_garde,attestation,declaration,dnsv,insertion,rccm,note_frais,bordereau,annexe,procedure,lettre,recepisse'],
+            'type_document'   => ['required', ModeleCourrier::reglesTypeDocument()],
             'version'         => ['required', 'string', 'max:10'],
             'applicable_tous' => ['required', 'boolean'],
             'type_acte_ids'   => ['required_if:applicable_tous,false', 'array'],
@@ -60,11 +60,10 @@ class ModeleCourrierController extends Controller
     {
         $rules = [
             'nom'             => ['sometimes', 'string', 'max:200'],
-            'type_document'   => ['sometimes', 'in:acte_principal,page_garde,attestation,declaration,dnsv,insertion,rccm,note_frais,bordereau,annexe,procedure,lettre,recepisse'],
+            'type_document'   => ['sometimes', ModeleCourrier::reglesTypeDocument()],
             'version'         => ['sometimes', 'string', 'max:10'],
             'est_actif'           => ['sometimes', 'boolean'],
             'applicable_tous'     => ['sometimes', 'boolean'],
-            'obligatoire_cloture' => ['sometimes', 'boolean'],
             'type_acte_ids'       => ['sometimes', 'array'],
             'type_acte_ids.*'     => ['exists:types_actes,id'],
         ];
@@ -95,10 +94,6 @@ class ModeleCourrierController extends Controller
 
         if ($typeActeIds !== null) {
             $modeleCourrier->typesActes()->sync($typeActeIds);
-        }
-
-        if (array_key_exists('obligatoire_cloture', $data)) {
-            $modeleCourrier->synchroniserCourriersRequis();
         }
 
         return back()->with('success', 'Modèle de courrier mis à jour.');

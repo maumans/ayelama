@@ -15,6 +15,9 @@ class DatabaseSeeder extends Seeder
             ModeleActeSeeder::class,
             ModeleCourrierSeeder::class,
             BaremeSeeder::class,
+            // Après BaremeSeeder : les tarifs officiels du CR de juillet 2026 corrigent
+            // certaines lignes de démonstration (le greffe passe de 100 000 à 180 000 GNF).
+            ReglesGestionBaremeSeeder::class,
         ]);
     }
 }

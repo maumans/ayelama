@@ -13,7 +13,7 @@ class ModeleCourrier extends Model
 
     protected $fillable = [
         'nom', 'type_document', 'chemin_fichier', 'version',
-        'est_actif', 'applicable_tous', 'obligatoire_cloture', 'updated_by',
+        'est_actif', 'applicable_tous', 'updated_by',
     ];
 
     protected function casts(): array
@@ -21,7 +21,6 @@ class ModeleCourrier extends Model
         return [
             'est_actif'           => 'boolean',
             'applicable_tous'     => 'boolean',
-            'obligatoire_cloture' => 'boolean',
         ];
     }
 
@@ -53,20 +52,4 @@ class ModeleCourrier extends Model
         return $this->applicable_tous || $this->typesActes->contains('id', $typeActe->id);
     }
 
-    /**
-     * Répercute obligatoire_cloture sur les courriers déjà générés depuis ce modèle,
-     * dans les dossiers pas encore clôturés — même logique que
-     * ModeleActe::synchroniserDocumentsRequis(), correspondance par `objet` (le champ
-     * où genererDepuisModele() range le nom du modèle) plutôt que `nom`.
-     */
-    public function synchroniserCourriersRequis(): int
-    {
-        $dossierIds = Dossier::where('etape', '!=', 'cloture')->pluck('id');
-
-        return Courrier::whereIn('dossier_id', $dossierIds)
-            ->where('objet', $this->nom)
-            ->where('type', 'transmission')
-            ->where('est_signe_cachete', false)
-            ->update(['est_requis' => $this->obligatoire_cloture]);
-    }
 }

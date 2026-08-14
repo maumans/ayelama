@@ -3,12 +3,21 @@ import { buildPartieFields } from '@/lib/clientFields';
 // Regroupe les champs d'un questionnaire par section. Une nouvelle section démarre
 // à chaque champ portant `section`. Partagé entre la création et l'édition d'un
 // dossier pour garder un seul rendu/une seule logique de payload `parties`.
+//
+// `clientRole` et `societePicker` sont remontés du premier champ au groupe : ils disent
+// respectivement que la section désigne une fiche client (et produit une `Partie`) ou une
+// fiche société du registre (et renseigne `dossiers.societe_id`).
 export function groupFieldsBySection(fields) {
     const groups = [];
     let current = null;
     for (const field of fields) {
         if (field.section || !current) {
-            current = { name: field.section ?? null, clientRole: field.clientRole ?? null, fields: [] };
+            current = {
+                name: field.section ?? null,
+                clientRole: field.clientRole ?? null,
+                societePicker: field.societePicker ?? false,
+                fields: [],
+            };
             groups.push(current);
         }
         current.fields.push(field);
@@ -19,7 +28,7 @@ export function groupFieldsBySection(fields) {
 // Construit le payload `parties` (dossiers.store / dossiers.questionnaire) à partir
 // des sections client-liables (liées à un client existant ou saisies en texte libre)
 // et des blocs répétables (associés, gérants, actionnaires…).
-export function buildPartiesPayload(questionnaire, formValues, clientLinks) {
+export function buildPartiesPayload(questionnaire, formValues, clientLinks, stagedPieces = {}, piecesBrouillon = {}) {
     const parties = [];
 
     for (const group of groupFieldsBySection(questionnaire)) {
@@ -28,23 +37,80 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks) {
         const client = clientLinks[group.clientRole] ?? null;
         const fields = buildPartieFields(client, formValues, prefix);
         if (!fields.nom) continue;
-        parties.push({ ...fields, role: group.clientRole, client_id: client?.id ?? undefined });
+
+        const piecesGroup = stagedPieces[group.clientRole] ?? {};
+        const itemPieces = {};
+        for (const cat of Object.keys(piecesGroup)) {
+             if (piecesGroup[cat]) itemPieces[cat] = piecesGroup[cat];
+        }
+
+        // Pièces déjà téléversées à un brouillon : transmises par emplacement, pas
+        // en fichier — le serveur les relit sur le disque privé.
+        const brouillonGroup = piecesBrouillon[group.clientRole] ?? {};
+        const itemPiecesBrouillon = {};
+        for (const cat of Object.keys(brouillonGroup)) {
+            if (brouillonGroup[cat]?.chemin) itemPiecesBrouillon[cat] = brouillonGroup[cat].chemin;
+        }
+        
+        parties.push({
+            ...fields,
+            role: group.clientRole,
+            client_id: client?.id ?? undefined,
+            // Emplacement de ce rôle dans le questionnaire : c'est ce qui permet au
+            // serveur de reprojeter l'identité depuis la fiche client sans connaître
+            // le schéma (qui vit uniquement ici, en JS). Voir ClientProjectionService.
+            donnees_prefixe: prefix,
+            pieces: Object.keys(itemPieces).length > 0 ? itemPieces : undefined,
+            pieces_brouillon: Object.keys(itemPiecesBrouillon).length > 0 ? itemPiecesBrouillon : undefined,
+        });
     }
 
     for (const field of questionnaire) {
         if (field.type !== 'repeatable' || !field.clientRole) continue;
         const items = formValues[field.id] ?? [];
-        items.forEach(item => {
+        items.forEach((item, idx) => {
             const nom = item.nom || item.prenom_nom;
             if (!nom) return;
+
+            const piecesGroup = stagedPieces[field.id] ?? {};
+            const itemPieces = {};
+            // Extract pieces for this specific index from the stagedPieces map
+            for (const key of Object.keys(piecesGroup)) {
+                if (key.startsWith(`${idx}:`)) {
+                    const cat = key.split(':')[1];
+                    if (piecesGroup[key]) {
+                        itemPieces[cat] = piecesGroup[key];
+                    }
+                }
+            }
+
+            // Idem pour les pièces héritées d'un brouillon, dont les clés portent le
+            // même préfixe d'index (`{idx}:{categorie}`).
+            const brouillonGroup = piecesBrouillon[field.id] ?? {};
+            const itemPiecesBrouillon = {};
+            for (const key of Object.keys(brouillonGroup)) {
+                if (key.startsWith(`${idx}:`) && brouillonGroup[key]?.chemin) {
+                    itemPiecesBrouillon[key.split(':')[1]] = brouillonGroup[key].chemin;
+                }
+            }
+
             parties.push({
                 nom,
                 role: field.clientRole,
-                client_id: item.client_id ?? undefined,
+                partie_id: item.partie_id ?? undefined,
+                client_id: item.client?.id ?? item.client_id ?? undefined,
+                // Bloc + index : le serveur fusionnera l'identité dans donnees[bloc][index]
+                // sans écraser les données propres à l'acte de cette ligne (nombre de
+                // parts, fonction…). Voir ClientProjectionService::reprojeter().
+                donnees_bloc: field.id,
+                donnees_index: idx,
+                type_personne: item.type_personne === 'Personne morale' ? 'morale' : 'physique',
                 cni: item.cni ?? item.piece_numero ?? null,
                 telephone: item.telephone ?? null,
                 adresse: item.adresse ?? item.domicile ?? null,
                 email: item.email ?? null,
+                pieces: Object.keys(itemPieces).length > 0 ? itemPieces : undefined,
+                pieces_brouillon: Object.keys(itemPiecesBrouillon).length > 0 ? itemPiecesBrouillon : undefined,
             });
         });
     }

@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 const PDF_EXTS   = ['pdf'];
 const DOCX_EXTS  = ['docx'];
 const EXCEL_EXTS = ['xlsx', 'xls'];
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
 
 function getExt(chemin) {
     if (!chemin) return '';
@@ -16,6 +17,7 @@ function classifyPreview(chemin) {
     if (PDF_EXTS.includes(ext))   return 'pdf';
     if (DOCX_EXTS.includes(ext))  return 'docx';
     if (EXCEL_EXTS.includes(ext)) return 'excel';
+    if (IMAGE_EXTS.includes(ext)) return 'image';
     return 'unsupported';
 }
 
@@ -188,6 +190,11 @@ export function PreviewBody({ doc, previewUrl, downloadUrl }) {
         <>
             {kind === 'pdf' && (
                 <iframe src={previewUrl} className="w-full h-full border-0" title={doc?.nom} />
+            )}
+            {kind === 'image' && (
+                <div className="flex items-center justify-center w-full h-full bg-slate-900/50 p-4">
+                    <img src={previewUrl} alt={doc?.nom} className="max-w-full max-h-full object-contain rounded shadow-lg" />
+                </div>
             )}
             {kind === 'docx' && <DocxPreview key={doc.id} downloadUrl={downloadUrl} previewUrl={previewUrl} />}
             {kind === 'excel' && <ExcelPreview key={doc.id} downloadUrl={downloadUrl} previewUrl={previewUrl} />}

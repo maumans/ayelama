@@ -31,34 +31,51 @@ import { notifyValidationError } from '@/lib/toast';
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 
-const TYPES_DOC = [
-    { value: 'acte_principal', label: 'Acte principal',       icon: FileCheck,     color: 'bg-ink/10 text-ink border-ink/20' },
-    { value: 'page_garde',     label: 'Page de garde',         icon: BookOpen,      color: 'bg-slate-50 text-slate-600 border-slate-200' },
-    { value: 'attestation',    label: 'Attestation',           icon: ShieldCheck,   color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-    { value: 'declaration',    label: 'Déclaration',           icon: ClipboardList, color: 'bg-violet-50 text-violet-700 border-violet-200' },
-    { value: 'dnsv',           label: 'DNSV',                  icon: Fingerprint,   color: 'bg-orange-50 text-orange-700 border-orange-200' },
-    { value: 'insertion',      label: 'Insertion au JORG',     icon: Newspaper,     color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
-    { value: 'rccm',           label: 'RCCM',                  icon: Building2,     color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-    { value: 'note_frais',     label: 'Note de frais',         icon: Calculator,    color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-    { value: 'bordereau',      label: 'Bordereau / Tableau',   icon: LayoutList,    color: 'bg-pink-50 text-pink-700 border-pink-200' },
-    { value: 'annexe',         label: 'Annexe',                icon: Paperclip,     color: 'bg-blue-50 text-blue-700 border-blue-200' },
-    { value: 'procedure',      label: 'Procédure',             icon: PenLine,       color: 'bg-amber-50 text-amber-700 border-amber-200' },
-    { value: 'lettre',         label: 'Lettre / Transmission', icon: Mail,          color: 'bg-purple-50 text-purple-700 border-purple-200' },
-    { value: 'recepisse',      label: 'Récépissé',             icon: Receipt,       color: 'bg-green-50 text-green-700 border-green-200' },
-];
-const TYPE_DOC_MAP = Object.fromEntries(TYPES_DOC.map(t => [t.value, t]));
+/**
+ * Présentation des types de document — icône et couleur **uniquement**.
+ *
+ * Les libellés ont été retirés le 2026-08-11 : ils vivaient ici en copie de la référence PHP
+ * (`HasTypeDocumentLabel::TYPES_DOCUMENT`) et avaient divergé — les quatre types de la modification
+ * statutaire y manquaient, et leur slug brut ressortait à l'écran. Le libellé est du vocabulaire
+ * métier, il vient donc du serveur (prop `typesDocument`, ou `typeDocLabel` porté par l'objet).
+ * L'icône et la couleur, elles, sont de la présentation et n'ont rien à faire en base.
+ *
+ * Un type absent de cette table garde une icône neutre plutôt que de disparaître.
+ */
+const PRESENTATION_TYPE_DOC = {
+    acte_principal:   { icon: FileCheck,     color: 'bg-ink/10 text-ink border-ink/20' },
+    page_garde:       { icon: BookOpen,      color: 'bg-slate-50 text-slate-600 border-slate-200' },
+    attestation:      { icon: ShieldCheck,   color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    declaration:      { icon: ClipboardList, color: 'bg-violet-50 text-violet-700 border-violet-200' },
+    dnsv:             { icon: Fingerprint,   color: 'bg-orange-50 text-orange-700 border-orange-200' },
+    insertion:        { icon: Newspaper,     color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+    rccm:             { icon: Building2,     color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    acte_cession:     { icon: FileCheck,     color: 'bg-rose-50 text-rose-700 border-rose-200' },
+    pv_modification:  { icon: ClipboardList, color: 'bg-teal-50 text-teal-700 border-teal-200' },
+    statuts_maj:      { icon: BookOpen,      color: 'bg-sky-50 text-sky-700 border-sky-200' },
+    declaration_rccm: { icon: Building2,     color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    note_frais:       { icon: Calculator,    color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+    bordereau:        { icon: LayoutList,    color: 'bg-pink-50 text-pink-700 border-pink-200' },
+    annexe:           { icon: Paperclip,     color: 'bg-blue-50 text-blue-700 border-blue-200' },
+    procedure:        { icon: PenLine,       color: 'bg-amber-50 text-amber-700 border-amber-200' },
+    lettre:           { icon: Mail,          color: 'bg-purple-50 text-purple-700 border-purple-200' },
+    recepisse:        { icon: Receipt,       color: 'bg-green-50 text-green-700 border-green-200' },
+};
+
+const PRESENTATION_NEUTRE = { icon: FileText, color: 'bg-slate-100 text-slate-600 border-slate-200' };
 
 // ── Composants utilitaires ──────────────────────────────────────────────────
 
-function TypeDocBadge({ type, size = 'sm' }) {
-    const t = TYPE_DOC_MAP[type] ?? { label: type, color: 'bg-slate-100 text-slate-600 border-slate-200' };
+/** `label` vient du serveur ; à défaut, le slug reste lisible plutôt que de disparaître. */
+function TypeDocBadge({ type, label, size = 'sm' }) {
+    const presentation = PRESENTATION_TYPE_DOC[type] ?? PRESENTATION_NEUTRE;
     return (
         <span className={cn(
             'inline-flex items-center gap-1 font-medium border rounded-full',
             size === 'sm' ? 'text-[10px] px-2 py-0.5' : 'text-xs px-2.5 py-1',
-            t.color
+            presentation.color
         )}>
-            {t.label}
+            {label ?? type}
         </span>
     );
 }
@@ -98,20 +115,99 @@ function CopyPathButton({ path }) {
     );
 }
 
+/**
+ * Une moitié de la liste des rôles.
+ *
+ * `horsSujet` marque ceux qu'aucun type d'acte coché n'attend : ils restent cochables — préparer un
+ * gabarit avant de le rattacher est légitime — mais la raison est dite, et un bouton rattache le
+ * type qui donnerait un effet au rôle. C'est ce qui manquait : la contradiction était acceptée en
+ * silence, et l'acte n'était produit nulle part.
+ */
+function ListeRoles({ titre, options, data, setData, horsSujet = false, estRoleInerte, typesAttendant, onRattacher }) {
+    if (options.length === 0) return null;
+
+    const basculer = (valeur) => setData('roles', data.roles.includes(valeur)
+        ? data.roles.filter(x => x !== valeur)
+        : [...data.roles, valeur]);
+
+    return (
+        <div>
+            {titre && (
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{titre}</p>
+            )}
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {options.map(td => {
+                    const principal = td.value === data.type_document;
+                    const coche     = data.roles.includes(td.value) || principal;
+                    // Un rôle coché qui ne sert à rien : ni principal, ni attendu par un type coché.
+                    // Le critère ne dépend **pas** du découpage de la liste — c'est ce qui manquait,
+                    // une constitution cochée suffisait à faire taire tout avertissement.
+                    const inerte    = coche && (estRoleInerte?.(td.value) ?? false);
+                    const attendus  = inerte ? (typesAttendant?.(td.value) ?? []) : [];
+
+                    return (
+                        <div key={td.value} className={horsSujet || inerte ? 'sm:col-span-2' : undefined}>
+                            <label className="flex cursor-pointer items-center gap-2 text-sm">
+                                <Checkbox
+                                    checked={coche}
+                                    disabled={principal}
+                                    onCheckedChange={() => basculer(td.value)}
+                                />
+                                <span className={principal || horsSujet || inerte ? 'text-slate-400' : 'text-slate-700'}>
+                                    {td.label}
+                                </span>
+                            </label>
+
+                            {attendus.length > 0 && (
+                                <p className="ml-6 mt-0.5 text-xs text-warning-text">
+                                    Sans effet : aucun type coché n'attend ce rôle. Attendu par{' '}
+                                    {attendus.map((t, i) => (
+                                        <span key={t.id}>
+                                            {i > 0 && ', '}
+                                            <button
+                                                type="button"
+                                                onClick={() => onRattacher?.(t.id)}
+                                                className="underline hover:no-underline"
+                                            >
+                                                {t.label}
+                                            </button>
+                                        </span>
+                                    ))}
+                                    . Cliquez pour rattacher ce type.
+                                </p>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 // ── Modale Créer / Modifier ─────────────────────────────────────────────────
 
 import { useForm } from '@inertiajs/react';
 
-function ModalModele({ open, onClose, typesActes, modele = null }) {
+function ModalModele({ open, onClose, typesActes, categories, typesDocument, modele = null }) {
     const isEdit = !!modele;
-    const { data, setData, post, patch, processing, errors, reset, clearErrors } = useForm({
+    const { data, setData, post, patch, processing, errors, reset, clearErrors, transform } = useForm({
         nom:                 '',
-        type_acte_id:        '',
         type_document:       'acte_principal',
         version:             '1.0',
         fichier:             null,
         chemin_fichier:      '',
-        obligatoire_cloture: false,
+        // Un modèle peut servir plusieurs types depuis le 2026-08-11 : les statuts, la DNSV et le
+        // RCCM d'une SARLU valent aussi pour sa modification. Ces cases sont, depuis la
+        // suppression de `type_acte_id`, la **seule** déclaration d'applicabilité.
+        applicable_tous:     false,
+        type_acte_ids:       [],
+        // Variantes du type d'acte auxquelles le gabarit est restreint. Vide = toutes — un
+        // procès-verbal sert les sept résolutions, un acte de cession une seule.
+        variantes:           [],
+        // Rôles remplis : le vocabulaire diffère entre procédures pour un même document (les
+        // statuts sont `acte_principal` en création, `statuts_maj` en modification).
+        roles:               [],
+        rattachements:       [],
     });
 
     // sync si modele change (ouverture édition)
@@ -121,12 +217,14 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
             if (modele) {
                 setData({
                     nom:                 modele.nom,
-                    type_acte_id:        String(modele.type_acte_id),
                     type_document:       modele.type_document,
                     version:             modele.version,
                     fichier:             null,
                     chemin_fichier:      modele.chemin_fichier,
-                    obligatoire_cloture: !!modele.obligatoire_cloture,
+                    applicable_tous:     !!modele.applicable_tous,
+                    type_acte_ids:       (modele.type_acte_ids ?? []).map(String),
+                    variantes:           [...new Set((modele.rattachements ?? []).map(r => r.variante).filter(Boolean))],
+                    roles:               modele.roles ?? [modele.type_document],
                 });
             } else {
                 reset();
@@ -134,11 +232,121 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
         }
     }, [open, modele]);
 
+    // Même groupage par catégorie que la modale des courriers.
+    const groupesTypes = React.useMemo(() => {
+        const libelles = Object.fromEntries((categories ?? []).map(c => [c.value, c.label]));
+
+        return (typesActes ?? []).reduce((acc, t) => {
+            const cle = libelles[t.categorie] ?? t.categorie ?? 'Autres';
+            (acc[cle] ??= []).push(t);
+            return acc;
+        }, {});
+    }, [typesActes, categories]);
+
+    const basculerType = (id) => {
+        const cle = String(id);
+        setData('type_acte_ids', data.type_acte_ids.includes(cle)
+            ? data.type_acte_ids.filter(v => v !== cle)
+            : [...data.type_acte_ids, cle]);
+    };
+
+    /**
+     * Compose les rattachements envoyés au serveur : un par couple (type d'acte, variante).
+     *
+     * Une variante cochée ne s'applique qu'aux types qui la déclarent — restreindre un gabarit de
+     * vente à « cession de parts » n'aurait aucun sens. Les autres types reçoivent `null`, c'est-à-dire
+     * « toutes les variantes ».
+     */
+    /**
+     * Les noms de gabarits portent leur forme d'origine (« RCCM SARLU », « Statuts de SARL »).
+     * Le nom est structurant — la génération dédoublonne dessus et « Régénérer » retrouve le
+     * gabarit par lui — donc un gabarit partagé produira un acte portant ce nom dans **tous** les
+     * dossiers concernés, y compris une modification. On le signale, sans jamais l'imposer.
+     */
+    const nomNeutreSuggere = (nom) => {
+        const sansForme = String(nom ?? '')
+            .replace(/\s*(de|du|d')?\s*(SARLU|SARL|SASU|SAS|SNC|SAU|SCS|GIE|SA)/gi, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+        return sansForme && sansForme !== String(nom ?? '').trim() ? sansForme : null;
+    };
+
+    /**
+     * Rôles attendus par les types d'actes cochés — `null` si l'un d'eux les accepte tous.
+     *
+     * `null` n'est pas « aucun » mais « tous » : une constitution, une vente ou un bail ne
+     * déclarent pas de documents attendus. On ne scinde alors pas la liste — séparer là où tout est
+     * pertinent serait mentir.
+     */
+    const typesChoisis = (typesActes ?? []).filter(t => data.type_acte_ids.includes(String(t.id)));
+
+    /**
+     * Rôles **explicitement attendus** par les types cochés.
+     *
+     * ⚠️ Un type sans attente déclarée — constitution, vente, bail — n'y contribue rien, et ce n'est
+     * pas un oubli : depuis le correctif de `rolePourProcedure()`, une telle procédure retient
+     * toujours le **rôle principal** du gabarit. Un rôle secondaire n'y sert donc jamais.
+     *
+     * La première version confondait « accepte tout » et « attend tout » : dès qu'une constitution
+     * était cochée, plus rien n'était signalé — et c'est précisément ainsi qu'un gabarit RCCM
+     * rattaché à deux constitutions a pu porter le rôle de modification sans effet et sans
+     * avertissement.
+     */
+    const rolesAttendusParLesTypesChoisis = [...new Set(
+        typesChoisis.flatMap(t => t.roles_attendus ?? [])
+    )];
+
+    /** Un rôle secondaire qui ne sert à rien : ni principal, ni attendu par un type coché. */
+    const estRoleInerte = (role) =>
+        !data.applicable_tous
+        && role !== data.type_document
+        && !rolesAttendusParLesTypesChoisis.includes(role);
+
+    /**
+     * Rôles à mettre en avant — `null` quand aucun type coché ne déclare d'attente : il n'y a alors
+     * rien à trier, et scinder la liste laisserait croire à un classement qui n'existe pas.
+     */
+    const rolesPertinents = (data.applicable_tous || rolesAttendusParLesTypesChoisis.length === 0)
+        ? null
+        : rolesAttendusParLesTypesChoisis;
+
+    /**
+     * Types d'actes qui attendent ce rôle — sert à expliquer pourquoi un rôle est hors sujet, et à
+     * proposer de rattacher le type qui lui donnerait un effet.
+     */
+    const typesAttendant = (role) =>
+        (typesActes ?? []).filter(t => (t.roles_attendus ?? []).includes(role));
+
+    const composerRattachements = () => data.type_acte_ids.flatMap(id => {
+        const type = (typesActes ?? []).find(t => String(t.id) === String(id));
+        const applicables = (type?.variantes ?? [])
+            .filter(v => data.variantes.includes(v.valeur))
+            .map(v => v.valeur);
+
+        return applicables.length > 0
+            ? applicables.map(variante => ({ type_acte_id: id, variante }))
+            : [{ type_acte_id: id, variante: null }];
+    });
+
+    // Variantes proposées : celles des types d'actes effectivement cochés. Un gabarit de vente ne
+    // doit pas se voir proposer « cession de parts sociales ».
+    const variantesDisponibles = React.useMemo(() => {
+        const vues = new Map();
+        for (const id of data.type_acte_ids) {
+            const type = (typesActes ?? []).find(t => String(t.id) === String(id));
+            for (const v of type?.variantes ?? []) vues.set(v.valeur, v);
+        }
+        return [...vues.values()];
+    }, [data.type_acte_ids, typesActes]);
+
     const submit = () => {
         // patch()/post() du formulaire (pas le routeur global) : lie correctement
         // errors/processing à ce useForm — sinon un échec (fichier invalide, validation…)
         // reste totalement silencieux, sans message ni indicateur de chargement.
         // Inertia gère lui-même la conversion PATCH+fichier en POST + _method côté client.
+        // `transform` et non `setData` : ce dernier est asynchrone, la valeur composée partirait
+        // périmée dans la requête déclenchée juste après.
+        transform(d => ({ ...d, rattachements: composerRattachements() }));
         const opts = { forceFormData: true, onSuccess: () => { onClose(); reset(); }, onError: notifyValidationError };
         if (isEdit) {
             patch(`/modeles/${modele.id}`, opts);
@@ -149,14 +357,25 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-lg">
-                <DialogHeader>
+            {/* `flex flex-col overflow-hidden` : la modale porte deux listes à cocher (types d'actes
+                et rôles) et dépassait l'écran — les boutons d'action n'étaient plus atteignables.
+                Seul le corps défile désormais, le pied reste visible. */}
+            {/* La borne de hauteur est posée **ici** et non dans `ui/dialog.jsx` : ce module partagé
+                n'est pas toujours rechargé par le serveur de dev (les imports du projet écrivent
+                `@/components` alors que le dossier est `Components`, et l'invalidation rate). Cette
+                modale reste ainsi correcte quel que soit l'état du graphe de modules. */}
+            <DialogContent className="flex max-h-[90dvh] max-w-lg flex-col overflow-hidden">
+                <DialogHeader className="shrink-0">
                     <DialogTitle className="font-serif text-ink">
                         {isEdit ? 'Modifier le modèle' : "Nouveau modèle d'acte"}
                     </DialogTitle>
                 </DialogHeader>
 
-                <div className="space-y-4 py-2">
+                {/* Corps défilant, pied fixe. Écrit ici plutôt qu'extrait en composant partagé :
+                    ajouter un export à `ui/dialog.jsx` casse le rendu tant que le serveur de dev
+                    n'a pas rafraîchi son graphe de modules — les imports du projet écrivent
+                    `@/components` en minuscule alors que le dossier est `Components`. */}
+                <div className="-mx-1 min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-2">
                     <div className="space-y-1.5">
                         <Label>Nom du modèle</Label>
                         <Input
@@ -167,28 +386,145 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
                         {errors.nom && <p className="text-xs text-danger-text">{errors.nom}</p>}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                            <Label>Type d'acte</Label>
-                            <Select value={data.type_acte_id} onValueChange={v => setData('type_acte_id', v)}>
-                                <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
-                                <SelectContent className="max-h-60">
-                                    {typesActes?.map(t => (
-                                        <SelectItem key={t.id} value={String(t.id)}>{t.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            {errors.type_acte_id && <p className="text-xs text-danger-text">{errors.type_acte_id}</p>}
-                        </div>
-
+                    {/* Le sélecteur « Type d'acte d'origine » a été supprimé avec la colonne
+                        `type_acte_id` (2026-08-11) : il faisait saisir deux fois la même chose que
+                        la liste ci-dessous, qui est la seule à décider de la génération.
+                        « Type de document » reste — c'est le **rôle principal**, autre notion. */}
+                    <div className="grid grid-cols-1 gap-3">
                         <div className="space-y-1.5">
                             <Label>Type de document</Label>
                             <Select value={data.type_document} onValueChange={v => setData('type_document', v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {TYPES_DOC.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                                    {(typesDocument ?? []).map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                                 </SelectContent>
                             </Select>
+                        </div>
+                    </div>
+
+                    {/* Un même gabarit sert souvent plusieurs types : les statuts, la DNSV et le
+                        RCCM d'une SARLU valent aussi pour sa modification de statuts. Sans cela,
+                        l'étude devait recharger les mêmes fichiers sous chaque type, puis maintenir
+                        les copies en parallèle. */}
+                    <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+                        <div>
+                            <Label>Types d'actes concernés</Label>
+                            <p className="mt-0.5 text-xs text-slate-400">
+                                C'est cette liste qui décide de la génération. Un gabarit peut en servir plusieurs.
+                            </p>
+                        </div>
+
+                        <label className="flex w-fit cursor-pointer items-center gap-2.5 text-sm text-slate-700">
+                            <Checkbox checked={data.applicable_tous}
+                                onCheckedChange={(checked) => setData('applicable_tous', checked === true)} />
+                            <span>Applicable à tous les types d'actes</span>
+                        </label>
+
+                        {!data.applicable_tous && (
+                            <div className="max-h-52 space-y-3 overflow-y-auto border-t border-slate-100 pt-2">
+                                {Object.entries(groupesTypes).map(([cat, items]) => (
+                                    <div key={cat}>
+                                        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{cat}</p>
+                                        <div className="space-y-1.5">
+                                            {items.map(t => (
+                                                <label key={t.id} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                                                    <Checkbox checked={data.type_acte_ids.includes(String(t.id))}
+                                                        onCheckedChange={() => basculerType(t.id)} />
+                                                    <span>{t.label}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                                {errors.type_acte_ids && <p className="text-xs text-danger-text">{errors.type_acte_ids}</p>}
+                            </div>
+                        )}
+
+                        {(data.applicable_tous || data.type_acte_ids.length > 1) && data.nom && (
+                            <p className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-warning-bg p-2.5 text-xs text-warning-text">
+                                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                                <span>
+                                    Ce gabarit sert plusieurs procédures : l'acte produit s'appellera
+                                    « {data.nom} » dans <strong>tous</strong> les dossiers concernés.
+                                    {nomNeutreSuggere(data.nom) && (
+                                        <>
+                                            {' '}Un intitulé neutre conviendrait mieux —{' '}
+                                            <button
+                                                type="button"
+                                                onClick={() => setData('nom', nomNeutreSuggere(data.nom))}
+                                                className="underline hover:no-underline"
+                                            >
+                                                « {nomNeutreSuggere(data.nom)} »
+                                            </button>.
+                                        </>
+                                    )}
+                                </span>
+                            </p>
+                        )}
+
+                        {/* Variantes : tout ne se répète pas au sein d'un même type d'acte. Un
+                            procès-verbal sert les sept résolutions d'une modification, un acte de
+                            cession une seule. Vide = toutes. */}
+                        {!data.applicable_tous && variantesDisponibles.length > 0 && (
+                            <div className="space-y-1.5 border-t border-slate-100 pt-3">
+                                <Label>Restreindre à certaines variantes</Label>
+                                <p className="text-xs text-slate-400">
+                                    Aucune cochée : le gabarit sert toutes les variantes du type d'acte.
+                                </p>
+                                <div className="grid grid-cols-1 gap-1.5 pt-1 sm:grid-cols-2">
+                                    {variantesDisponibles.map(v => (
+                                        <label key={v.valeur} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                                            <Checkbox
+                                                checked={data.variantes.includes(v.valeur)}
+                                                onCheckedChange={() => setData('variantes', data.variantes.includes(v.valeur)
+                                                    ? data.variantes.filter(x => x !== v.valeur)
+                                                    : [...data.variantes, v.valeur])}
+                                            />
+                                            <span>{v.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Rôles : le vocabulaire diffère entre procédures pour un même document.
+                            Cocher `acte_principal` et `statuts_maj` fait servir le même gabarit de
+                            statuts à la création et à la modification. */}
+                        <div className="space-y-1.5 border-t border-slate-100 pt-3">
+                            <Label>Rôles remplis par ce gabarit</Label>
+                            <p className="text-xs text-slate-400">
+                                Le rôle principal ci-dessus est coché d'office. En ajouter permet à un même
+                                fichier de servir plusieurs procédures.
+                            </p>
+                            {/* Scindés selon ce que les types cochés attendent réellement : cocher
+                                un rôle qu'aucun d'eux n'attend reste sans effet, et rien ne le
+                                disait — c'est ainsi qu'un gabarit RCCM portant le rôle de
+                                modification n'était produit sur aucun dossier de modification. */}
+                            <div className="max-h-48 space-y-3 overflow-y-auto pt-1">
+                                <ListeRoles
+                                    titre={rolesPertinents ? 'Attendus par vos types d’actes' : null}
+                                    options={(typesDocument ?? []).filter(td => !rolesPertinents || rolesPertinents.includes(td.value))}
+                                    data={data}
+                                    setData={setData}
+                                    estRoleInerte={estRoleInerte}
+                                    typesAttendant={typesAttendant}
+                                    onRattacher={(id) => setData('type_acte_ids', [...data.type_acte_ids, String(id)])}
+                                />
+
+                                {rolesPertinents && (
+                                    <ListeRoles
+                                        titre="Autres rôles"
+                                        options={(typesDocument ?? []).filter(td => !rolesPertinents.includes(td.value))}
+                                        data={data}
+                                        setData={setData}
+                                        horsSujet
+                                        estRoleInerte={estRoleInerte}
+                                        typesAttendant={typesAttendant}
+                                        onRattacher={(id) => setData('type_acte_ids', [...data.type_acte_ids, String(id)])}
+                                    />
+                                )}
+                            </div>
+                            {errors.roles && <p className="text-xs text-danger-text">{errors.roles}</p>}
                         </div>
                     </div>
 
@@ -215,27 +551,9 @@ function ModalModele({ open, onClose, typesActes, modele = null }) {
                             {errors.chemin_fichier && <p className="text-xs text-danger-text">{errors.chemin_fichier}</p>}
                         </div>
                     </div>
-
-                    <label className="flex items-start gap-2.5 rounded-md border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
-                        <Checkbox
-                            checked={data.obligatoire_cloture}
-                            onCheckedChange={v => setData('obligatoire_cloture', !!v)}
-                            className="mt-0.5"
-                        />
-                        <span>
-                            <span className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
-                                <Lock className="h-3.5 w-3.5 text-slate-400" />
-                                Obligatoire à la clôture
-                            </span>
-                            <span className="block text-xs text-slate-400 mt-0.5">
-                                Les documents générés depuis ce modèle devront avoir leur version signée/cachetée
-                                déposée avant que le dossier puisse être clôturé.
-                            </span>
-                        </span>
-                    </label>
                 </div>
 
-                <DialogFooter>
+                <DialogFooter className="shrink-0 border-t border-slate-100 pt-4">
                     <Button variant="outline" onClick={onClose}>Annuler</Button>
                     <Button variant="seal" onClick={submit} disabled={processing}>
                         {isEdit ? 'Enregistrer' : 'Créer le modèle'}
@@ -305,7 +623,9 @@ function ModalModeleCourrier({ open, onClose, typesActes, categories, modele = n
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            {/* La borne de hauteur et le défilement sont désormais portés par `DialogContent`
+                lui-même — plus besoin de les répéter modale par modale. */}
+            <DialogContent className="max-w-lg">
                 <DialogHeader>
                     <DialogTitle className="font-serif text-ink">
                         {isEdit ? 'Modifier le courrier de transmission' : 'Nouveau courrier de transmission'}
@@ -329,7 +649,7 @@ function ModalModeleCourrier({ open, onClose, typesActes, categories, modele = n
                             <Select value={data.type_document} onValueChange={v => setData('type_document', v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {TYPES_DOC.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                                    {(typesDocument ?? []).map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -468,7 +788,7 @@ function GroupeTable({ categorieLabel, items, can, onEdit }) {
                                 </thead>
                                 <tbody>
                                     {items.map(m => {
-                                        const tdInfo = TYPE_DOC_MAP[m.type_document];
+                                        const tdInfo = PRESENTATION_TYPE_DOC[m.type_document] ?? PRESENTATION_NEUTRE;
                                         const Icon = tdInfo?.icon ?? FileText;
                                         return (
                                             <tr key={m.id} className={cn(!m.est_actif && 'opacity-50')}>
@@ -478,18 +798,10 @@ function GroupeTable({ categorieLabel, items, can, onEdit }) {
                                                 <td className="font-medium text-ink max-w-[220px] truncate" title={m.nom}>
                                                     <span className="flex items-center gap-1.5">
                                                         {m.nom}
-                                                        {m.obligatoire_cloture && (
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <Lock className="h-3 w-3 text-seal shrink-0" />
-                                                                </TooltipTrigger>
-                                                                <TooltipContent>Obligatoire à la clôture du dossier</TooltipContent>
-                                                            </Tooltip>
-                                                        )}
                                                     </span>
                                                 </td>
                                                 <td className="text-slate-500 text-sm">{m.typeActeLabel}</td>
-                                                <td><TypeDocBadge type={m.type_document} /></td>
+                                                <td><TypeDocBadge type={m.type_document} label={m.typeDocLabel} /></td>
                                                 <td>
                                                     <span className="font-ref text-seal text-xs font-semibold">v{m.version}</span>
                                                 </td>
@@ -569,7 +881,7 @@ function GroupeTable({ categorieLabel, items, can, onEdit }) {
 // ── Vue Cartes ───────────────────────────────────────────────────────────────
 
 function CarteModele({ modele, can, onEdit }) {
-    const tdInfo = TYPE_DOC_MAP[modele.type_document];
+    const tdInfo = PRESENTATION_TYPE_DOC[modele.type_document] ?? PRESENTATION_NEUTRE;
     const Icon = tdInfo?.icon ?? FileText;
     const [confirmState, setConfirmState] = useState(null);
 
@@ -716,7 +1028,7 @@ function TableModelesCourriers({ items, can, onEdit }) {
                     </thead>
                     <tbody>
                         {items.map(m => {
-                            const tdInfo = TYPE_DOC_MAP[m.type_document];
+                            const tdInfo = PRESENTATION_TYPE_DOC[m.type_document] ?? PRESENTATION_NEUTRE;
                             const Icon = tdInfo?.icon ?? FileText;
                             return (
                                 <tr key={m.id} className={cn(!m.est_actif && 'opacity-50')}>
@@ -724,7 +1036,7 @@ function TableModelesCourriers({ items, can, onEdit }) {
                                         <Icon className={cn('h-3.5 w-3.5', tdInfo ? tdInfo.color.split(' ')[1] : 'text-slate-400')} />
                                     </td>
                                     <td className="font-medium text-ink max-w-[220px] truncate" title={m.nom}>{m.nom}</td>
-                                    <td><TypeDocBadge type={m.type_document} /></td>
+                                    <td><TypeDocBadge type={m.type_document} label={m.typeDocLabel} /></td>
                                     <td className="max-w-[260px]">
                                         {m.applicable_tous ? (
                                             <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-seal-light/30 text-seal border border-seal/20">
@@ -802,7 +1114,7 @@ function TableModelesCourriers({ items, can, onEdit }) {
 export default function ModelesIndex() {
     const {
         modeles = [], modelesCourriers = [], typesActes = [], categories = [],
-        filters = {}, stats = {}, auth,
+        typesDocument = [], filters = {}, stats = {}, auth,
     } = usePage().props;
     const can = auth?.user?.can ?? {};
 
@@ -934,7 +1246,7 @@ export default function ModelesIndex() {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="">Tout type</SelectItem>
-                                {TYPES_DOC.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                                {(typesDocument ?? []).map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                             </SelectContent>
                         </Select>
 
@@ -1061,6 +1373,8 @@ export default function ModelesIndex() {
                     open={modalOpen}
                     onClose={closeModal}
                     typesActes={typesActes}
+                    categories={categories}
+                    typesDocument={typesDocument}
                     modele={editModele}
                 />
 

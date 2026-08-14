@@ -11,6 +11,7 @@ use App\Models\Recu;
 use App\Services\FactureGeneratorService;
 use App\Services\RecuPdfService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -87,12 +88,57 @@ class FactureController extends Controller
         ]);
     }
 
+    /**
+     * Invariant de facturation : la somme des paiements d'une facture ne peut
+     * jamais dépasser son total.
+     *
+     * Contrôlé sous verrou de ligne (`lockForUpdate` sur la facture, posé par
+     * l'appelant) : sans ça, deux encaissements concurrents pourraient chacun
+     * valider face au même solde et le dépasser à eux deux.
+     *
+     * Le pendant de cet invariant est déjà en place côté total : les lignes ne
+     * sont plus modifiables dès qu'un paiement existe (assertLignesModifiables)
+     * et la régénération de facture est refusée (FacturationService::genererFacture).
+     * Le total ne peut donc pas non plus descendre sous les paiements déjà reçus.
+     */
+    private function assertMontantDansSolde(Facture $facture, float $montant, ?int $saufPaiementId = null): void
+    {
+        if ((float) $facture->total_chiffres <= 0) {
+            throw ValidationException::withMessages([
+                'montant' => ["Cette facture n'a aucun montant à encaisser (total à 0 GNF) — ajoutez d'abord une ligne."],
+            ]);
+        }
+
+        $disponible = $facture->soldeDisponible($saufPaiementId);
+
+        if ($disponible <= 0) {
+            throw ValidationException::withMessages([
+                'montant' => ['Cette facture est déjà entièrement soldée — aucun paiement supplémentaire ne peut être enregistré.'],
+            ]);
+        }
+
+        // Comparaison sur des montants arrondis à 2 décimales : les deux valeurs
+        // viennent de colonnes decimal(.,2), un test strict sur des flottants
+        // rejetterait à tort un paiement soldant exactement la facture.
+        if (round($montant, 2) > $disponible) {
+            $fmt = fn (float $v) => number_format($v, 0, ',', ' ');
+
+            throw ValidationException::withMessages([
+                'montant' => [
+                    "Le montant dépasse le solde restant dû. Total facturé : {$fmt((float) $facture->total_chiffres)} GNF, "
+                    . "déjà encaissé : {$fmt($facture->totalPayeEnBase($saufPaiementId))} GNF, "
+                    . "maximum encaissable ici : {$fmt($disponible)} GNF.",
+                ],
+            ]);
+        }
+    }
+
     public function enregistrerPaiement(Request $request, Dossier $dossier)
     {
         $this->authorize('gererFacturation', $dossier);
 
-        $facture = $dossier->factures()->latest('id')->first();
-        abort_if(!$facture, 422, "Aucune facture n'existe encore pour ce dossier.");
+        $factureId = $dossier->factures()->latest('id')->value('id');
+        abort_if(!$factureId, 422, "Aucune facture n'existe encore pour ce dossier.");
 
         $data = $request->validate([
             'date_paiement'  => ['required', 'date'],
@@ -101,11 +147,18 @@ class FactureController extends Controller
             'notes'          => ['nullable', 'string', 'max:500'],
         ]);
 
-        $paiement = Paiement::create([
-            ...$data,
-            'facture_id'        => $facture->id,
-            'enregistre_par_id' => auth()->id(),
-        ]);
+        $paiement = DB::transaction(function () use ($factureId, $data) {
+            // Le verrou sérialise les encaissements concurrents sur cette facture.
+            $facture = Facture::whereKey($factureId)->lockForUpdate()->firstOrFail();
+
+            $this->assertMontantDansSolde($facture, (float) $data['montant']);
+
+            return Paiement::create([
+                ...$data,
+                'facture_id'        => $facture->id,
+                'enregistre_par_id' => auth()->id(),
+            ]);
+        });
 
         JournalActivite::enregistrer(
             $dossier,
@@ -135,7 +188,17 @@ class FactureController extends Controller
         ]);
 
         $avant = $paiement->only(['date_paiement', 'montant', 'moyen_paiement', 'notes']);
-        $paiement->update($data);
+
+        DB::transaction(function () use ($paiement, $data) {
+            $facture = Facture::whereKey($paiement->facture_id)->lockForUpdate()->firstOrFail();
+
+            // Le paiement en cours d'édition libère son propre montant : le porter
+            // de 100 000 à 120 000 sur une facture soldée à 100 000 doit être
+            // refusé, mais le ramener à 80 000 doit passer.
+            $this->assertMontantDansSolde($facture, (float) $data['montant'], $paiement->id);
+
+            $paiement->update($data);
+        });
 
         JournalActivite::enregistrer($dossier, 'Paiement modifié : ' . number_format((float) $avant['montant'], 0, ',', ' ')
             . ' GNF → ' . number_format((float) $paiement->montant, 0, ',', ' ') . ' GNF', 'facturation', ['avant' => $avant, 'apres' => $data]);

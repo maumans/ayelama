@@ -11,13 +11,23 @@ import { toast } from '@/lib/toast';
 
 const EMPTY_CLIENT = {
     type: 'physique',
-    civilite: 'M.', prenom_nom: '', ne_a: '', date_naissance: '', nationalite: 'Guinéenne',
+    civilite: 'M.', nom_famille: '', prenoms: '', ne_a: '', date_naissance: '', nationalite: 'Guinéenne',
     situation_matrimoniale: '', regime_matrimonial: '',
     piece_type: '', piece_numero: '', piece_delivree_le: '', piece_delivree_a: '', piece_expire_le: '',
-    denomination: '', forme: '', rccm: '', representant_legal: '', siege: '',
+    denomination: '', forme: '', rccm: '', representant_legal: '', representant_qualite: '', siege: '',
     quartier: '', commune: '', demeurant_ville: '', pays: 'République de Guinée',
     telephone: '', email: '',
 };
+
+// Ne renvoie au serveur que les colonnes de la fiche : un client chargé depuis
+// l'API porte aussi id/statut/timestamps, et les colonnes calculées ajoutées par
+// ClientController::update (dossiers_mis_a_jour) — les repostrer ferait échouer la
+// validation ou écraserait le statut prospect/client géré par le workflow.
+function champsFiche(client) {
+    return Object.fromEntries(
+        Object.keys(EMPTY_CLIENT).map(k => [k, client?.[k] ?? EMPTY_CLIENT[k]]),
+    );
+}
 
 /**
  * Création rapide d'un client (personne physique ou morale) sans quitter l'assistant
@@ -33,15 +43,24 @@ const EMPTY_CLIENT = {
  * Demandes/Show.jsx pour proposer un brouillon de client à partir des données déjà
  * soumises par le client externe (voir buildClientDraftFromDonnees), à confirmer/
  * corriger avant création plutôt que de tout ressaisir.
+ *
+ * `client` (optionnel) fait basculer la modale en **édition** : PATCH au lieu de
+ * POST. La fiche étant la source de vérité de l'identité, la corriger répercute la
+ * nouvelle valeur sur les dossiers non clôturés qui la référencent — le serveur
+ * renvoie la liste de ces dossiers, annoncée à l'utilisateur plutôt que passée
+ * sous silence (voir ClientProjectionService).
  */
-export function ModalNouveauClient({ open, onClose, onCreated, initialValues }) {
+export function ModalNouveauClient({ open, onClose, onCreated, initialValues, client = null }) {
+    const estEdition = !!client?.id;
     const [form, setForm] = useState({ ...EMPTY_CLIENT, ...initialValues });
     const [errors, setErrors] = useState({});
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
-        if (open) setForm({ ...EMPTY_CLIENT, ...initialValues });
-    }, [open]);
+        if (!open) return;
+        setForm(estEdition ? champsFiche(client) : { ...EMPTY_CLIENT, ...initialValues });
+        setErrors({});
+    }, [open, client?.id]);
 
     const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
     const d = (k) => (val) => setForm(p => ({ ...p, [k]: val }));
@@ -51,7 +70,9 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues }) 
         setSubmitting(true);
         setErrors({});
         try {
-            const res = await axios.post('/clients', form);
+            const res = estEdition
+                ? await axios.patch(`/clients/${client.id}`, form)
+                : await axios.post('/clients', form);
             if (!res.data?.id) {
                 // Réponse 2xx mais sans forme de client exploitable — le cas le plus
                 // fréquent est une redirection silencieuse vers /login (session expirée)
@@ -64,8 +85,17 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues }) 
                     : "Le client n'a pas pu être créé (réponse inattendue du serveur).");
                 return;
             }
+            // Les dossiers réalignés sont annoncés : l'utilisateur corrige une fiche
+            // depuis un écran, l'effet porte potentiellement sur d'autres dossiers.
+            const impactes = res.data.dossiers_mis_a_jour ?? [];
+            if (impactes.length > 0) {
+                toast.success(impactes.length === 1
+                    ? `Fiche mise à jour — dossier ${impactes[0]} et ses actes réalignés.`
+                    : `Fiche mise à jour — ${impactes.length} dossiers et leurs actes réalignés.`);
+            }
+
             onCreated(res.data);
-            setForm(EMPTY_CLIENT);
+            if (!estEdition) setForm(EMPTY_CLIENT);
         } catch (err) {
             if (err.response?.status === 422) {
                 setErrors(err.response.data.errors ?? {});
@@ -80,7 +110,9 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues }) 
     return (
         <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
             <DialogContent className="max-w-lg">
-                <DialogHeader><DialogTitle>Nouveau client</DialogTitle></DialogHeader>
+                <DialogHeader>
+                    <DialogTitle>{estEdition ? 'Modifier la fiche client' : 'Nouveau client'}</DialogTitle>
+                </DialogHeader>
                 <form onSubmit={submit} className="space-y-4">
                     <div className="max-h-[65vh] overflow-y-auto space-y-4 pr-1">
                         <div className="flex gap-2">
@@ -108,10 +140,26 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues }) 
                                             <option>M.</option><option>Mme</option><option>Mlle</option>
                                         </select>
                                     </div>
+                                    {/* Règle 4 du CR juillet 2026 : le nom de famille doit
+                                        figurer en MAJUSCULE dans les actes — impossible avec
+                                        un champ unique, on ne saurait pas quelle partie du
+                                        texte est le nom. */}
                                     <div className="col-span-2 space-y-1.5">
-                                        <Label>Nom et prénoms <span className="text-danger">*</span></Label>
-                                        <Input value={form.prenom_nom} onChange={f('prenom_nom')} placeholder="Ibrahima DIALLO" required />
-                                        {errors.prenom_nom && <p className="text-xs text-danger">{errors.prenom_nom[0]}</p>}
+                                        <Label>Nom de famille <span className="text-danger">*</span></Label>
+                                        <Input
+                                            value={form.nom_famille}
+                                            onChange={f('nom_famille')}
+                                            placeholder="DIALLO"
+                                            required
+                                            className="uppercase"
+                                        />
+                                        <p className="text-[11px] text-slate-400">Apparaîtra en majuscules dans les actes.</p>
+                                        {errors.nom_famille && <p className="text-xs text-danger">{errors.nom_famille[0]}</p>}
+                                    </div>
+                                    <div className="col-span-3 space-y-1.5">
+                                        <Label>Prénoms</Label>
+                                        <Input value={form.prenoms} onChange={f('prenoms')} placeholder="Ibrahima" />
+                                        {errors.prenoms && <p className="text-xs text-danger">{errors.prenoms[0]}</p>}
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
@@ -186,9 +234,16 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues }) 
                                         <Input value={form.rccm} onChange={f('rccm')} placeholder="GN-CON-2020-B-XXXX" className="font-ref" />
                                     </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <Label>Représentant légal</Label>
-                                    <Input value={form.representant_legal} onChange={f('representant_legal')} />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1.5">
+                                        <Label>Représentant légal</Label>
+                                        <Input value={form.representant_legal} onChange={f('representant_legal')} placeholder="Ibrahima DIALLO" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        {/* Attendu par les modèles Word via ${bq.representant_qualite} */}
+                                        <Label>Qualité du représentant</Label>
+                                        <Input value={form.representant_qualite} onChange={f('representant_qualite')} placeholder="Directeur Général / Fondé de pouvoir" />
+                                    </div>
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label>Siège social <span className="text-slate-400 text-xs">(adresse complète, optionnel)</span></Label>

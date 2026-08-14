@@ -58,6 +58,48 @@ class Facture extends Model
         return round((float) $this->total_chiffres - $this->totalPaye(), 2);
     }
 
+    /**
+     * Somme des paiements relue en base, en ignorant éventuellement un paiement.
+     *
+     * Volontairement distincte de totalPaye() : cette dernière peut servir une
+     * relation déjà chargée (donc potentiellement obsolète), ce qui est très bien
+     * pour de l'affichage mais inacceptable pour contrôler l'invariant « les
+     * paiements ne dépassent pas le total facturé ».
+     */
+    public function totalPayeEnBase(?int $saufPaiementId = null): float
+    {
+        return round((float) $this->paiements()
+            ->when($saufPaiementId, fn ($q) => $q->whereKeyNot($saufPaiementId))
+            ->sum('montant'), 2);
+    }
+
+    /**
+     * Montant maximum qu'un paiement peut encore porter sans dépasser le total
+     * facturé. Passer $saufPaiementId lors d'une modification : le paiement en
+     * cours d'édition libère son propre montant.
+     */
+    public function soldeDisponible(?int $saufPaiementId = null): float
+    {
+        return round((float) $this->total_chiffres - $this->totalPayeEnBase($saufPaiementId), 2);
+    }
+
+    public function peutRecevoirPaiement(): bool
+    {
+        // Une facture à 0 (aucun barème applicable) n'a rien à encaisser.
+        return (float) $this->total_chiffres > 0 && $this->soldeRestant() > 0;
+    }
+
+    /**
+     * Détecte les factures encaissées au-delà du total — impossible depuis
+     * l'invariant posé le 2026-08-03, mais des données antérieures peuvent
+     * exister : on les signale plutôt que de les corriger silencieusement (ce
+     * sont des écritures financières).
+     */
+    public function estTropPercue(): bool
+    {
+        return $this->soldeRestant() < 0;
+    }
+
     public function statutPaiement(): string
     {
         if ((float) $this->total_chiffres <= 0) return 'impaye';
@@ -84,6 +126,10 @@ class Facture extends Model
             'totalPaye'         => $this->totalPaye(),
             'soldeRestant'      => $this->soldeRestant(),
             'statut'            => $this->statutPaiement(),
+            // Le front s'appuie dessus pour plafonner la saisie et désactiver le
+            // bouton d'encaissement — même règle que le contrôle serveur.
+            'peutRecevoirPaiement' => $this->peutRecevoirPaiement(),
+            'estTropPercue'        => $this->estTropPercue(),
             'lignes'            => $this->lignes->map(fn ($l) => [
                 'id'          => $l->id,
                 'designation' => $l->designation,

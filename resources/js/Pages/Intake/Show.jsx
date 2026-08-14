@@ -43,6 +43,22 @@ function Field({ field, value, onChange }) {
             />
         );
     }
+    if (field.type === 'year') {
+        return (
+            <Input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder={field.placeholder}
+                value={value || ''}
+                onChange={e => {
+                    const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    onChange(v);
+                }}
+                className={cn(field.mono && 'font-ref')}
+            />
+        );
+    }
     if (field.type === 'tel') {
         return <PhoneField placeholder={field.placeholder} value={value || ''} onValueChange={onChange} />;
     }

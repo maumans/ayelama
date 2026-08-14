@@ -8,13 +8,25 @@ use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Document/pièce polymorphe (Dossier, Formalite ou Partie) — remplace les anciens
+ * Document/pièce polymorphe (Dossier, Formalite, Partie ou Societe) — remplace les anciens
  * modèles Document et FormalitePiece, unifiés pour partager le même mécanisme de
  * versionnage (document_versions) plutôt que d'écraser silencieusement un fichier
  * à chaque régénération/ré-upload. Voir le plan GED.
+ *
+ * ⚠️ `Societe` (2026-08-11) est le seul rattachement qui **n'appartienne pas à un dossier** : les
+ * pièces constitutives d'une société vivent au registre et servent à toutes ses modifications
+ * successives. D'où `sujetAutorisation()` et `estPieceDeRegistre()` ci-dessous.
  */
 class DocumentFichier extends Model
 {
+    use \App\Concerns\HasTypeDocumentLabel;
+
+    /** Ce modèle nomme `categorie` ce que les modèles d'actes nomment `type_document`. */
+    protected function champTypeDocument(): string
+    {
+        return 'categorie';
+    }
+
     protected $fillable = [
         'documentable_type', 'documentable_id', 'nom', 'categorie', 'statut',
         'est_requis', 'est_fourni', 'version_actuelle_id',
@@ -50,8 +62,40 @@ class DocumentFichier extends Model
             $this->documentable instanceof Dossier   => $this->documentable,
             $this->documentable instanceof Formalite => $this->documentable->dossier,
             $this->documentable instanceof Partie    => $this->documentable->dossier,
+            // Une pièce de registre (Societe) n'a pas de dossier gouvernant : elle en sert
+            // plusieurs. Voir sujetAutorisation().
             default => null,
         };
+    }
+
+    /**
+     * Objet sur lequel s'autorise l'accès à ce document.
+     *
+     * Le dossier gouvernant dans le cas général — mais une **pièce constitutive de société**
+     * (statuts d'origine, RCCM d'une société que l'étude n'a pas constituée) n'est gouvernée par
+     * aucun dossier : elle appartient au registre et sert à tous les dossiers de cette société.
+     * `dossierGouvernant()` retourne donc `null` pour elle, et autoriser sur `null` produirait une
+     * erreur opaque.
+     *
+     * `DossierPolicy::view` et `SocietePolicy::view` existent tous deux : les méthodes de lecture de
+     * DocumentController passent par ici et fonctionnent pour les deux familles sans branche.
+     */
+    public function sujetAutorisation(): Dossier|Societe|null
+    {
+        return $this->dossierGouvernant()
+            ?? ($this->documentable instanceof Societe ? $this->documentable : null);
+    }
+
+    /**
+     * Cette pièce appartient-elle au registre des sociétés plutôt qu'à un dossier ?
+     *
+     * Les actions mutantes de DocumentController (édition, régénération, suppression, dépôt d'une
+     * version signée) sont conçues pour des documents de dossier ; une pièce de registre se gère
+     * depuis la société, avec l'autorisation correspondante.
+     */
+    public function estPieceDeRegistre(): bool
+    {
+        return $this->documentable instanceof Societe;
     }
 
     public function versions()

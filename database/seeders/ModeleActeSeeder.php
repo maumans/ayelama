@@ -312,6 +312,58 @@ class ModeleActeSeeder extends Seeder
             ],
 
             // ════════════════════════════════════════════════════════════════
+            // MODIFICATION DE STATUTS (SOC-MOD)
+            // ════════════════════════════════════════════════════════════════
+            // Aucun modèle n'existait pour ce type d'acte : un dossier de modification
+            // arrivait donc en Édition sans aucun document à corriger, alors que la
+            // procédure en produit jusqu'à cinq.
+            //
+            // ⚠️ `type_document` porte ici les slugs de
+            // `TypeModificationStatutaire::documentsRequis()` : c'est par eux que
+            // ActesGeneratorService retient les seuls modèles que les modifications
+            // décidées exigent (un transfert de siège ne doit pas produire d'acte de
+            // cession, une diminution de capital ne produit pas de DNSV).
+            //
+            // `src` reste `null` faute de gabarits reçus — les entrées sont donc créées
+            // inactives, prêtes à recevoir leur .docx depuis Modèles d'actes.
+            [
+                'code' => 'SOC-MOD', 'type_document' => 'acte_cession', 'version' => '1.0',
+                'nom'  => 'Acte de cession de parts sociales',
+                'src'  => null,
+                'dest' => 'modeles/societe/modification-acte-cession.docx',
+            ],
+            [
+                'code' => 'SOC-MOD', 'type_document' => 'pv_modification', 'version' => '1.0',
+                'nom'  => "Procès-verbal d'assemblée générale extraordinaire",
+                'src'  => null,
+                'dest' => 'modeles/societe/modification-pv-age.docx',
+            ],
+            [
+                'code' => 'SOC-MOD', 'type_document' => 'dnsv', 'version' => '1.0',
+                'nom'  => 'DNSV augmentation de capital',
+                'src'  => null,
+                'dest' => 'modeles/societe/modification-dnsv.docx',
+            ],
+            [
+                'code' => 'SOC-MOD', 'type_document' => 'statuts_maj', 'version' => '1.0',
+                'nom'  => 'Statuts mis à jour',
+                'src'  => null,
+                'dest' => 'modeles/societe/modification-statuts-maj.docx',
+            ],
+            [
+                'code' => 'SOC-MOD', 'type_document' => 'declaration_rccm', 'version' => '1.0',
+                'nom'  => 'Déclaration de modification RCCM',
+                'src'  => null,
+                'dest' => 'modeles/societe/modification-rccm.docx',
+            ],
+            [
+                'code' => 'SOC-MOD', 'type_document' => 'page_garde', 'version' => '1.0',
+                'nom'  => 'Page de garde modification',
+                'src'  => null,
+                'dest' => 'modeles/societe/modification-page-garde.docx',
+            ],
+
+            // ════════════════════════════════════════════════════════════════
             // VENTE AVEC TITRE FONCIER (VTE-IMM)
             // ════════════════════════════════════════════════════════════════
             [
@@ -504,8 +556,11 @@ class ModeleActeSeeder extends Seeder
             }
             // src === null → placeholder, est_actif = false
 
-            ModeleActe::firstOrCreate(
-                ['nom' => $m['nom'], 'type_acte_id' => $typeActeId],
+            // Clé d'idempotence : le **nom** seul, `type_acte_id` ayant disparu. Les 68 modèles
+            // seedés portent 68 noms distincts — un test le verrouille, sans quoi une reprise
+            // écraserait silencieusement un gabarit par un autre.
+            $modele = ModeleActe::firstOrCreate(
+                ['nom' => $m['nom']],
                 [
                     'type_document'  => $m['type_document'],
                     'chemin_fichier' => $m['dest'],
@@ -514,6 +569,10 @@ class ModeleActeSeeder extends Seeder
                     'updated_by'     => $admin?->id,
                 ]
             );
+
+            // L'applicabilité ne vient plus d'une colonne : elle se déclare. `firstOrCreate` pour
+            // rester relançable sans dupliquer le rattachement.
+            $modele->rattachements()->firstOrCreate(['type_acte_id' => $typeActeId, 'variante' => null]);
         }
     }
 }

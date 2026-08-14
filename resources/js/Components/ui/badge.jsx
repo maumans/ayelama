@@ -12,11 +12,9 @@ const badgeVariants = cva(
                 secondary: 'bg-slate-100 text-slate-600',
 
                 // Étapes du workflow
-                initialisation: 'bg-slate-100 text-slate-600 border border-slate-200',
                 edition: 'bg-blue-50 text-blue-700 border border-blue-200',
                 revision: 'bg-amber-50 text-amber-700 border border-amber-200',
-                signature_client: 'bg-purple-50 text-purple-700 border border-purple-200',
-                signature_notaire: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
+                signature: 'bg-purple-50 text-purple-700 border border-purple-200',
                 formalites: 'bg-orange-50 text-orange-700 border border-orange-200',
                 expedition: 'bg-teal-50 text-teal-700 border border-teal-200',
                 cloture: 'bg-success-bg text-success-text border border-green-200',

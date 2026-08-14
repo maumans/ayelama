@@ -1,10 +1,12 @@
 <?php
 
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\ClotureController;
 use App\Http\Controllers\CourrierController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DemandeController;
 use App\Http\Controllers\DocumentController;
+use App\Http\Controllers\DossierBrouillonController;
 use App\Http\Controllers\DossierController;
 use App\Http\Controllers\FactureController;
 use App\Http\Controllers\FormaliteController;
@@ -19,6 +21,9 @@ use App\Http\Controllers\RevisionController;
 use App\Http\Controllers\ParametresController;
 use App\Http\Controllers\RepertoireController;
 use App\Http\Controllers\SearchController;
+use App\Http\Controllers\SocieteController;
+use App\Http\Controllers\TypeActeController;
+use App\Http\Controllers\SocietePieceController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -51,12 +56,31 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/dossiers/{dossier:reference}/avancer', [DossierController::class, 'avancer'])->name('dossiers.avancer');
     Route::post('/dossiers/{dossier:reference}/generer-documents', [DossierController::class, 'genererDocuments'])->name('dossiers.generer_documents');
     Route::patch('/dossiers/{dossier:reference}/questionnaire', [DossierController::class, 'updateQuestionnaire'])->name('dossiers.questionnaire.update');
+    Route::get('/dossiers/{dossier:reference}/fiche-recueil', [DossierController::class, 'telechargerFicheRecueil'])->name('dossiers.fiche_recueil');
+    Route::post('/dossiers/{dossier:reference}/accord-client', [DossierController::class, 'televerserAccordClient'])->name('dossiers.accord_client.televerser');
+
+    // Dates de signature : action à part, restreinte à l'étape Signature. Ces champs
+    // étaient dans UpdateDossierRequest, donc modifiables et effaçables à toute étape.
+    Route::patch('/dossiers/{dossier:reference}/signatures', [DossierController::class, 'enregistrerSignatures'])->name('dossiers.signatures');
+
+    // Clôture : vérification pièce par pièce de l'inventaire du dossier. Remplace la
+    // configuration « documents obligatoires par type d'acte » (Paramètres > Clôture,
+    // supprimée) — voir InventaireClotureService.
+    Route::post('/dossiers/{dossier:reference}/cloture/verifications', [ClotureController::class, 'verifier'])->name('dossiers.cloture.verifier');
+    Route::delete('/dossiers/{dossier:reference}/cloture/verifications', [ClotureController::class, 'retirerVerification'])->name('dossiers.cloture.retirer_verification');
+    Route::post('/dossiers/{dossier:reference}/cloture/verifications/rubrique', [ClotureController::class, 'verifierRubrique'])->name('dossiers.cloture.verifier_rubrique');
 
     // Parties additionnelles (personnes non liées à un rôle du questionnaire)
     Route::post('/dossiers/{dossier:reference}/parties', [PartieController::class, 'store'])->name('dossiers.parties.store');
     Route::delete('/parties/{partie}', [PartieController::class, 'destroy'])->name('parties.destroy');
     Route::post('/parties/{partie}/photo', [PartieController::class, 'uploaderPhoto'])->name('parties.photo');
     Route::post('/parties/{partie}/pieces', [PartieController::class, 'uploaderPiece'])->name('parties.pieces.store');
+    Route::post('/parties/{partie}/pieces/{categorie}/televerser', [PartieController::class, 'televerserPieceRequise'])->name('parties.pieces.televerser_requise');
+    // Reprise d'une pièce déjà fournie par la même personne (même `client_id`) dans un autre
+    // dossier — déclarée avant la route paramétrée `{categorie}`, sinon « reprendre-tout » serait
+    // pris pour une catégorie.
+    Route::post('/parties/{partie}/pieces/reprendre-tout', [PartieController::class, 'reprendreTout'])->name('parties.pieces.reprendre_tout');
+    Route::post('/parties/{partie}/pieces/{categorie}/reprendre', [PartieController::class, 'reprendrePiece'])->name('parties.pieces.reprendre');
 
     // Documents
     Route::post('/dossiers/{dossier:reference}/documents', [DocumentController::class, 'store'])->name('dossiers.documents.store');
@@ -120,9 +144,35 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/repertoire', [RepertoireController::class, 'index'])->name('repertoire.index');
     Route::get('/repertoire/autocomplete', [RepertoireController::class, 'autocomplete'])->name('repertoire.autocomplete');
 
+    // Brouillons de l'assistant de création de dossier (saisie inachevée, propre à
+    // son auteur — pas un Dossier, pour ne pas consommer de référence notariale)
+    Route::post('/dossiers/brouillons', [DossierBrouillonController::class, 'store'])->name('dossiers.brouillons.store');
+    Route::delete('/dossiers/brouillons/{brouillon}', [DossierBrouillonController::class, 'destroy'])->name('dossiers.brouillons.destroy');
+
     // Clients (recherche/création rapide depuis le questionnaire de dossier)
     Route::get('/clients/autocomplete', [ClientController::class, 'autocomplete'])->name('clients.autocomplete');
     Route::post('/clients', [ClientController::class, 'store'])->name('clients.store');
+    // Correction d'une fiche : répercute l'identité sur les dossiers non clôturés
+    // qui la référencent (voir ClientProjectionService).
+    Route::patch('/clients/{client}', [ClientController::class, 'update'])->name('clients.update');
+
+    // Sociétés (registre : recherche/création depuis l'assistant, notamment pour ouvrir
+    // un dossier de modification sur une société déjà constituée par l'étude).
+    // Pas de destroy : supprimer une fiche référencée casserait la projection `soc.*` des
+    // dossiers qui s'en servent — une société hors périmètre est désactivée.
+    // Aperçu des actes qu'une procédure produira, avant que le dossier existe — alimente le
+    // récapitulatif de l'assistant, qui annonçait jusqu'ici autre chose que ce qui serait généré.
+    Route::get('/types-actes/{typeActe}/actes-prevus', [TypeActeController::class, 'actesPrevus'])->name('types_actes.actes_prevus');
+
+    Route::get('/societes/autocomplete', [SocieteController::class, 'autocomplete'])->name('societes.autocomplete');
+    // Déclarée AVANT `/societes/{societe}` : sans quoi « pieces » serait pris pour un identifiant.
+    Route::delete('/societes/pieces/{piece}', [SocietePieceController::class, 'destroy'])->name('societes.pieces.destroy');
+    Route::get('/societes/{societe}', [SocieteController::class, 'show'])->name('societes.show');
+    Route::post('/societes', [SocieteController::class, 'store'])->name('societes.store');
+    Route::patch('/societes/{societe}', [SocieteController::class, 'update'])->name('societes.update');
+    // Dossier constitutif d'une société que l'étude n'a pas constituée : statuts en vigueur, RCCM…
+    // Rattaché à la société et non à un dossier — réutilisé par chacune de ses modifications.
+    Route::post('/societes/{societe}/pieces/{categorie}', [SocietePieceController::class, 'televerser'])->name('societes.pieces.televerser');
 
     // Modèles d'actes
     Route::get('/modeles', [ModeleActeController::class, 'index'])->name('modeles.index');
@@ -156,12 +206,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/types-actes', [ParametresController::class, 'typesActes'])->name('types_actes');
         Route::post('/types-actes', [ParametresController::class, 'storeTypeActe'])->name('types_actes.store');
         Route::patch('/types-actes/{typeActe}', [ParametresController::class, 'updateTypeActe'])->name('types_actes.update');
+        // Documents attendus par procédure — configuration effective de l'étude, seedée depuis la
+        // référence du CR de juillet 2026 et réinitialisable à tout moment.
+        Route::patch('/types-actes/{typeActe}/documents-attendus', [ParametresController::class, 'updateDocumentsAttendus'])->name('documents_attendus.update');
+        Route::post('/types-actes/{typeActe}/documents-attendus/reinitialiser', [ParametresController::class, 'reinitialiserDocumentsAttendus'])->name('documents_attendus.reinitialiser');
         Route::get('/baremes', [ParametresController::class, 'baremes'])->name('baremes');
         Route::post('/baremes', [ParametresController::class, 'storeBareme'])->name('baremes.store');
         Route::patch('/baremes/{bareme}', [ParametresController::class, 'updateBareme'])->name('baremes.update');
         Route::delete('/baremes/{bareme}', [ParametresController::class, 'destroyBareme'])->name('baremes.destroy');
-        Route::get('/cloture', [ParametresController::class, 'cloture'])->name('cloture');
-        Route::post('/cloture/bulk', [ParametresController::class, 'bulkObligatoireCloture'])->name('cloture.bulk');
+        // Les routes /cloture et /cloture/bulk ont été supprimées le 2026-08-04 :
+        // l'inventaire de clôture est désormais dérivé du workflow, il n'y a plus rien à
+        // configurer par type d'acte (voir InventaireClotureService).
         Route::get('/apparence', [ParametresController::class, 'apparence'])->name('apparence');
         Route::post('/apparence', [ParametresController::class, 'updateApparence'])->name('apparence.update');
         Route::post('/apparence/logo', [ParametresController::class, 'uploadLogo'])->name('apparence.logo');

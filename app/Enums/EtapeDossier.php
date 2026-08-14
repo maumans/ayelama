@@ -2,13 +2,25 @@
 
 namespace App\Enums;
 
+/**
+ * Étapes du cycle de vie d'un dossier, dans l'ordre.
+ *
+ * `Initialisation` a été réintroduite le 2026-08-04 : la création déposait le dossier
+ * directement en Édition, et `verifierEdition()` y mélangeait deux métiers — constituer
+ * le dossier (questionnaire, pièces d'identité des parties, accord signé du client)
+ * d'un côté, produire les actes de l'autre. Les actes étaient d'ailleurs générés dès la
+ * création, donc sur des données que le client n'avait pas encore validées.
+ *
+ * ⚠️ Ajouter une étape ici oblige à traiter les `match` exhaustifs côté PHP — ils
+ * échouent bruyamment, c'est voulu — MAIS aussi `ETAPE_ORDER` / `ETAPE_TAB` /
+ * `getStepBlockers()` côté JavaScript, qui échouent en silence. Voir décision #38.
+ */
 enum EtapeDossier: string
 {
     case Initialisation   = 'initialisation';
     case Edition          = 'edition';
     case Revision         = 'revision';
-    case SignatureClient  = 'signature_client';
-    case SignatureNotaire = 'signature_notaire';
+    case Signature        = 'signature';
     case Formalites       = 'formalites';
     case Expedition       = 'expedition';
     case Cloture          = 'cloture';
@@ -19,8 +31,7 @@ enum EtapeDossier: string
             self::Initialisation   => 'Initialisation',
             self::Edition          => 'Édition actes',
             self::Revision         => 'Certification des actes',
-            self::SignatureClient  => 'Signature client',
-            self::SignatureNotaire => 'Signature notaire',
+            self::Signature        => 'Signature',
             self::Formalites       => 'Formalités',
             self::Expedition       => 'Expédition',
             self::Cloture          => 'Clôturé',
@@ -32,9 +43,8 @@ enum EtapeDossier: string
         return match($this) {
             self::Initialisation   => self::Edition,
             self::Edition          => self::Revision,
-            self::Revision         => self::SignatureClient,
-            self::SignatureClient  => self::SignatureNotaire,
-            self::SignatureNotaire => self::Formalites,
+            self::Revision         => self::Signature,
+            self::Signature        => self::Formalites,
             self::Formalites       => self::Expedition,
             self::Expedition       => self::Cloture,
             self::Cloture          => null,
@@ -47,9 +57,8 @@ enum EtapeDossier: string
             self::Initialisation   => null,
             self::Edition          => self::Initialisation,
             self::Revision         => self::Edition,
-            self::SignatureClient  => self::Revision,
-            self::SignatureNotaire => self::SignatureClient,
-            self::Formalites       => self::SignatureNotaire,
+            self::Signature        => self::Revision,
+            self::Formalites       => self::Signature,
             self::Expedition       => self::Formalites,
             self::Cloture          => self::Expedition,
         };
@@ -61,11 +70,10 @@ enum EtapeDossier: string
             self::Initialisation   => 0,
             self::Edition          => 1,
             self::Revision         => 2,
-            self::SignatureClient  => 3,
-            self::SignatureNotaire => 4,
-            self::Formalites       => 5,
-            self::Expedition       => 6,
-            self::Cloture          => 7,
+            self::Signature        => 3,
+            self::Formalites       => 4,
+            self::Expedition       => 5,
+            self::Cloture          => 6,
         };
     }
 
@@ -75,8 +83,7 @@ enum EtapeDossier: string
             self::Initialisation,
             self::Edition,
             self::Revision,
-            self::SignatureClient,
-            self::SignatureNotaire,
+            self::Signature,
             self::Formalites,
             self::Expedition,
             self::Cloture,
