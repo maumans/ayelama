@@ -566,7 +566,7 @@ function ModalModele({ open, onClose, typesActes, categories, typesDocument, mod
 
 // ── Modale Créer / Modifier un courrier de transmission ─────────────────────
 
-function ModalModeleCourrier({ open, onClose, typesActes, categories, modele = null }) {
+function ModalModeleCourrier({ open, onClose, typesActes, categories, typesDocument, modele = null }) {
     const isEdit = !!modele;
     const { data, setData, post, patch, processing, errors, reset, clearErrors } = useForm({
         nom:              '',
@@ -1383,6 +1383,7 @@ export default function ModelesIndex() {
                     onClose={closeCourrierModal}
                     typesActes={typesActes}
                     categories={categories}
+                    typesDocument={typesDocument}
                     modele={editCourrier}
                 />
             </AppLayout>
