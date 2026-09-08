@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\EtapeDossier;
 use App\Enums\FormeSociete;
+use App\Support\Normalisation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
@@ -153,7 +154,12 @@ class Societe extends Model
      */
     public static function normaliserDenomination(mixed $valeur): string
     {
-        return preg_replace('/\s+/u', ' ', mb_strtolower(trim((string) $valeur)));
+        // Délègue à `Normalisation::comparable()` depuis que le référentiel de lieux a eu besoin de
+        // la même comparaison : deux détenteurs auraient divergé. La forme y perd ses accents, ce
+        // qui rend la règle 4 légèrement **plus** stricte — « Société Générale » et
+        // « Societe Generale » sont désormais tenues pour la même dénomination. C'est le sens voulu
+        // par la règle (moins de doublons acceptés), jamais l'inverse.
+        return Normalisation::comparable($valeur);
     }
 
     /** Dénomination suivie du sigle, tel qu'on désigne la société dans une liste. */

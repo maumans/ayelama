@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import GuestPublicLayout from '@/Layouts/GuestPublicLayout';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, roleGeo, patchGeo } from '@/data/questionnaires';
 import { getPublicIntakeFields, groupFieldsBySection } from '@/lib/partiesPayload';
 import { buildPartieFields } from '@/lib/clientFields';
 import { Input } from '@/components/ui/input';
@@ -11,12 +11,36 @@ import { Button } from '@/components/ui/button';
 import { DateField } from '@/components/ui/date-field';
 import { NumberField } from '@/components/ui/number-field';
 import { PhoneField } from '@/components/ui/phone-field';
+import { LieuSelect } from '@/components/ui/lieu-select';
+import { ChampVerrouille } from '@/components/ui/champ-verrouille';
 import {
     Upload, Send, CheckCircle2, AlertTriangle, PenLine, ScanLine, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-function Field({ field, value, onChange }) {
+function Field({ field, value, onChange, lieux, formValues }) {
+    const geo = roleGeo(field.id);
+
+    if (geo) {
+        // Cascade **hors ligne** : le référentiel arrive dans les props de la page. Ce formulaire
+        // n'est pas authentifié — aucun point d'entrée ne lui est exposé, et l'ajout d'un lieu n'y
+        // est pas offert : un tiers ne doit pas pouvoir peupler le référentiel de l'étude.
+        const parentNom = geo.parentField ? (formValues[geo.parentField] || null) : null;
+        const options = (lieux?.[geo.niveau] ?? [])
+            .filter(l => geo.parentField ? l.parent === parentNom : true);
+
+        return (
+            <LieuSelect
+                id={field.id}
+                niveau={geo.niveau}
+                parentNom={parentNom}
+                value={value || ''}
+                onChange={onChange}
+                lieuxInitiaux={options}
+            />
+        );
+    }
+
     if (field.type === 'select') {
         return (
             <select
@@ -73,6 +97,19 @@ function Field({ field, value, onChange }) {
             />
         );
     }
+    // Constante de fait (le pays de résidence) : verrouillée pour ne pas être modifiée par
+    // inadvertance, mais déverrouillable — un client peut résider à l'étranger.
+    if (field.readonly) {
+        return (
+            <ChampVerrouille
+                value={value || ''}
+                onChange={onChange}
+                placeholder={field.placeholder}
+                className={cn(field.mono && 'font-ref')}
+            />
+        );
+    }
+
     return (
         <Input
             type={field.type === 'email' ? 'email' : 'text'}
@@ -84,7 +121,7 @@ function Field({ field, value, onChange }) {
     );
 }
 
-function FieldGroup({ fields, formValues, setFormValues }) {
+function FieldGroup({ fields, formValues, setFormValues, lieux }) {
     return (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
             {fields.map(field => (
@@ -97,7 +134,9 @@ function FieldGroup({ fields, formValues, setFormValues }) {
                         <Field
                             field={field}
                             value={formValues[field.id]}
-                            onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
+                            lieux={lieux}
+                            formValues={formValues}
+                            onChange={val => setFormValues(prev => ({ ...prev, ...patchGeo(field.id, val) }))}
                         />
                     </div>
                 </div>
@@ -126,7 +165,9 @@ function buildPartieFromRole(roleFields, formValues, role) {
 }
 
 export default function IntakeShow() {
-    const { etat, demande, token } = usePage().props;
+    // `lieux` : référentiel transmis dans les props plutôt que par un point d'entrée — ce
+    // formulaire n'est pas authentifié.
+    const { etat, demande, token, lieux = {} } = usePage().props;
 
     const [mode, setMode] = useState('manuel');
     const [formValues, setFormValues] = useState({});
@@ -281,14 +322,14 @@ export default function IntakeShow() {
 
                 {roleFields.length > 0 && (
                     <div className="rounded-lg border border-slate-200 bg-white p-4">
-                        <FieldGroup fields={roleFields} formValues={formValues} setFormValues={setFormValues} />
+                        <FieldGroup fields={roleFields} formValues={formValues} setFormValues={setFormValues} lieux={lieux} />
                     </div>
                 )}
 
                 {extraGroups.map((group, gi) => (
                     <div key={gi} className="rounded-lg border border-slate-200 bg-white p-4">
                         {group.name && <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{group.name}</p>}
-                        <FieldGroup fields={group.fields} formValues={formValues} setFormValues={setFormValues} />
+                        <FieldGroup fields={group.fields} formValues={formValues} setFormValues={setFormValues} lieux={lieux} />
                     </div>
                 ))}
 

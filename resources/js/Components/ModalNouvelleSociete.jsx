@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LieuSelect } from '@/components/ui/lieu-select';
 import { Label } from '@/components/ui/label';
 import { PhoneField } from '@/components/ui/phone-field';
 import { DateField } from '@/components/ui/date-field';
@@ -168,18 +169,44 @@ export function ModalNouvelleSociete({ open, onClose, onSaved, initialValues, so
                             </div>
                         </div>
 
+                        {/* Ville d'abord : une commune n'a de sens que sous sa ville. L'ordre
+                            d'affichage suit donc l'ordre de saisie, contrairement à l'ancien
+                            quartier → commune → ville. */}
                         <div className="grid grid-cols-3 gap-3">
                             <div className="space-y-1.5">
-                                <Label>Quartier du siège</Label>
-                                <Input value={form.siege_quartier} onChange={f('siege_quartier')} placeholder="Almamya" />
+                                <Label htmlFor="soc-ville">Ville du siège</Label>
+                                <LieuSelect
+                                    id="soc-ville"
+                                    niveau="ville"
+                                    value={form.siege_ville}
+                                    onChange={(val) => setForm(p => ({ ...p, siege_ville: val, siege_commune: '', siege_quartier: '' }))}
+                                    peutAjouter
+                                />
+                                {erreur('siege_ville')}
                             </div>
                             <div className="space-y-1.5">
-                                <Label>Commune</Label>
-                                <Input value={form.siege_commune} onChange={f('siege_commune')} placeholder="Kaloum" />
+                                <Label htmlFor="soc-commune">Commune</Label>
+                                <LieuSelect
+                                    id="soc-commune"
+                                    niveau="commune"
+                                    parentNom={form.siege_ville}
+                                    value={form.siege_commune}
+                                    onChange={(val) => setForm(p => ({ ...p, siege_commune: val, siege_quartier: '' }))}
+                                    peutAjouter
+                                />
+                                {erreur('siege_commune')}
                             </div>
                             <div className="space-y-1.5">
-                                <Label>Ville</Label>
-                                <Input value={form.siege_ville} onChange={f('siege_ville')} placeholder="Conakry" />
+                                <Label htmlFor="soc-quartier">Quartier</Label>
+                                <LieuSelect
+                                    id="soc-quartier"
+                                    niveau="quartier"
+                                    parentNom={form.siege_commune}
+                                    value={form.siege_quartier}
+                                    onChange={(val) => setForm(p => ({ ...p, siege_quartier: val }))}
+                                    peutAjouter
+                                />
+                                {erreur('siege_quartier')}
                             </div>
                         </div>
 

@@ -13,7 +13,7 @@ import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
 import { ModalEnregistrerPaiement } from '@/Components/Facturation/ModalEnregistrerPaiement';
 import { ModalLigneFacture } from '@/Components/Facturation/ModalLigneFacture';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, roleGeo, patchGeo } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { DateField } from '@/components/ui/date-field';
 import { NumberField } from '@/components/ui/number-field';
@@ -22,6 +22,8 @@ import { ClientPicker } from '@/Components/ui/client-picker';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ChoixMultiple } from '@/Components/ui/choix-multiple';
+import { LieuSelect } from '@/Components/ui/lieu-select';
+import { ChampVerrouille } from '@/Components/ui/champ-verrouille';
 import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
 import { AccordClientCard, ANCRE_ACCORD_CLIENT } from '@/Components/Dossiers/AccordClientCard';
@@ -365,7 +367,21 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                                 {field.required && <span className="text-danger ml-1">*</span>}
                                             </Label>
                                         )}
-                                        {field.type === 'checkbox_group' ? (
+                                        {roleGeo(field.id) ? (
+                                            /* Même cascade que l'assistant : un type de champ géré
+                                               d'un seul côté rendrait la valeur non modifiable
+                                               après la création du dossier. */
+                                            <LieuSelect
+                                                id={`qedit-${field.id}`}
+                                                niveau={roleGeo(field.id).niveau}
+                                                parentNom={roleGeo(field.id).parentField
+                                                    ? (formValues[roleGeo(field.id).parentField] || null)
+                                                    : null}
+                                                value={formValues[field.id] || ''}
+                                                onChange={val => setFormValues(p => ({ ...p, ...patchGeo(field.id, val) }))}
+                                                peutAjouter
+                                            />
+                                        ) : field.type === 'checkbox_group' ? (
                                             <ChoixMultiple
                                                 field={field}
                                                 valeurs={formValues[field.id] ?? []}
@@ -459,6 +475,17 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                                 placeholder={field.placeholder}
                                                 value={formValues[field.id] || ''}
                                                 onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                            />
+                                        ) : field.readonly ? (
+                                            /* `readonly` était honoré par l'assistant mais **pas
+                                               ici** : un champ verrouillé à la création redevenait
+                                               librement modifiable à la première correction. */
+                                            <ChampVerrouille
+                                                id={`qedit-${field.id}`}
+                                                value={formValues[field.id] || ''}
+                                                onChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                                placeholder={field.placeholder}
+                                                className={cn(field.mono && 'font-ref')}
                                             />
                                         ) : (
                                             <Input

@@ -78,6 +78,27 @@ class ClientController extends Controller
      * Règles partagées par store() et update() — la fiche client est le même objet
      * qu'on la crée depuis l'assistant de dossier ou qu'on la corrige ensuite.
      */
+    /**
+     * Messages là où la tournure par défaut se lit mal.
+     *
+     * `before:today` interpole le littéral « today » (« antérieure au today »), et
+     * `prohibited_unless` produit une phrase à double négation. Les autres messages, eux, sont
+     * corrects grâce au tableau `attributes` de `lang/fr/validation.php`.
+     */
+    private function messagesValidation(): array
+    {
+        return [
+            'date_naissance.before'            => 'La date de naissance ne peut pas être dans le futur.',
+            'date_naissance.after'             => 'La date de naissance semble erronée (avant 1900).',
+            'piece_delivree_le.before_or_equal' => "La pièce ne peut pas avoir été délivrée dans le futur.",
+            'piece_delivree_le.after_or_equal' => "La pièce ne peut pas avoir été délivrée avant la naissance du titulaire.",
+            'piece_expire_le.after'            => "La date d'expiration doit être postérieure à la date de délivrance.",
+            'regime_matrimonial.prohibited_unless' => 'Un régime matrimonial ne se renseigne que pour une personne mariée.',
+            'telephone.regex'                  => 'Numéro guinéen attendu — par exemple 622 78 37 32.',
+            'representant_legal.required_if'   => "Une personne morale doit avoir un représentant légal : c'est lui qui signe.",
+        ];
+    }
+
     private function regles(): array
     {
         return [
@@ -90,25 +111,46 @@ class ClientController extends Controller
             'prenoms'                 => ['nullable', 'string', 'max:120'],
             'prenom_nom'              => ['nullable', 'string', 'max:200'],
             'ne_a'                    => ['nullable', 'string', 'max:100'],
-            'date_naissance'          => ['nullable', 'date'],
+
+            // ── Cohérence des dates ──────────────────────────────────────────────────
+            // La validation ne portait que sur le type (`date`) : une pièce pouvait donc expirer
+            // avant d'avoir été délivrée, et une naissance être postérieure à la pièce d'identité.
+            'date_naissance'          => ['nullable', 'date', 'before:today', 'after:1900-01-01'],
             'nationalite'             => ['nullable', 'string', 'max:100'],
-            'piece_type'              => ['nullable', 'string', 'max:100'],
-            'piece_numero'            => ['nullable', 'string', 'max:100'],
-            'piece_delivree_le'       => ['nullable', 'date'],
+
+            // Un type de pièce sans numéro ne prouve rien, et un numéro sans type ne se vérifie
+            // pas : les deux vont ensemble ou pas du tout.
+            'piece_type'              => ['nullable', 'string', 'max:100', 'required_with:piece_numero'],
+            'piece_numero'            => ['nullable', 'string', 'max:100', 'required_with:piece_type'],
+
+            // Une pièce ne peut pas avoir été délivrée avant la naissance de son porteur, ni dans
+            // le futur.
+            'piece_delivree_le'       => ['nullable', 'date', 'before_or_equal:today', 'after_or_equal:date_naissance'],
             'piece_delivree_a'        => ['nullable', 'string', 'max:100'],
-            'piece_expire_le'         => ['nullable', 'date'],
-            'situation_matrimoniale'  => ['nullable', 'string', 'max:50'],
-            'regime_matrimonial'      => ['nullable', 'string', 'max:100'],
+
+            // Expirer **après** avoir été délivrée. Une pièce déjà expirée reste enregistrable —
+            // l'étude doit pouvoir consigner la situation réelle du client avant de lui demander
+            // un renouvellement ; l'avertissement est porté par `avertissements()`.
+            'piece_expire_le'         => ['nullable', 'date', 'after:piece_delivree_le'],
+
+            'situation_matrimoniale'  => ['nullable', 'string', 'max:50', 'in:,Célibataire,Marié(e),Divorcé(e),Veuf/Veuve'],
+
+            // Un régime matrimonial n'a de sens que marié : le renseigner sans situation
+            // correspondante décrit un état civil impossible, que les actes reprendraient.
+            'regime_matrimonial'      => ['nullable', 'string', 'max:100', 'prohibited_unless:situation_matrimoniale,Marié(e)'],
             'denomination'            => ['required_if:type,morale', 'nullable', 'string', 'max:200'],
             'forme'                   => ['nullable', 'string', 'max:50'],
             'rccm'                    => ['nullable', 'string', 'max:100'],
-            'representant_legal'      => ['nullable', 'string', 'max:200'],
+            // On ne fait pas signer une personne morale sans représentant, et l'acte le nomme.
+            'representant_legal'      => ['required_if:type,morale', 'nullable', 'string', 'max:200'],
             'representant_qualite'    => ['nullable', 'string', 'max:150'],
             'demeurant_ville'         => ['nullable', 'string', 'max:100'],
             'quartier'                => ['nullable', 'string', 'max:100'],
             'commune'                 => ['nullable', 'string', 'max:100'],
             'pays'                    => ['nullable', 'string', 'max:100'],
-            'telephone'               => ['nullable', 'string', 'max:25'],
+            // Mobile guinéen : 6XX XX XX XX, indicatif +224 ou 00224 facultatif, espaces et
+            // séparateurs tolérés à la saisie (normalisés à l'enregistrement).
+            'telephone'               => ['nullable', 'string', 'max:25', 'regex:/^(?:\+?224|00224)?[\s.-]*6\d{2}(?:[\s.-]*\d{2}){3}$/'],
             'email'                   => ['nullable', 'email', 'max:150'],
             'siege'                   => ['nullable', 'string', 'max:200'],
         ];
@@ -123,7 +165,7 @@ class ClientController extends Controller
     {
         $this->authorize('create', Client::class);
 
-        $client = Client::create($this->normaliserIdentite($request)->validate($this->regles()));
+        $client = Client::create($this->normaliserIdentite($request)->validate($this->regles(), $this->messagesValidation()));
 
         return response()->json($client, 201);
     }
@@ -145,7 +187,7 @@ class ClientController extends Controller
         // tous les dossiers liés non clôturés (voir ClientPolicy).
         $this->authorize('update', $client);
 
-        $client->update($this->normaliserIdentite($request)->validate($this->regles()));
+        $client->update($this->normaliserIdentite($request)->validate($this->regles(), $this->messagesValidation()));
 
         $dossiersMisAJour = $projection->reprojeterDossiersDuClient($client);
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, roleGeo, patchGeo } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { DateField } from '@/components/ui/date-field';
 import { NumberField } from '@/components/ui/number-field';
@@ -7,6 +7,7 @@ import { PhoneField } from '@/components/ui/phone-field';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ChoixMultiple } from '@/Components/ui/choix-multiple';
+import { LieuSelect } from '@/Components/ui/lieu-select';
 import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
@@ -1568,7 +1569,22 @@ export default function DossierCreate() {
                                                                                         {field.note}
                                                                                     </p>
                                                                                 )}
-                                                                                {field.type === 'checkbox_group' ? (
+                                                                                {roleGeo(field.id) ? (
+                                                                                    /* Cascade ville → commune → quartier. Le rôle est
+                                                                                       déduit de TRIPLETS_GEO, pas du suffixe du nom :
+                                                                                       `bien.livre_foncier_ville` finit par « ville »
+                                                                                       sans être un lieu du référentiel. */
+                                                                                    <LieuSelect
+                                                                                        id={field.id}
+                                                                                        niveau={roleGeo(field.id).niveau}
+                                                                                        parentNom={roleGeo(field.id).parentField
+                                                                                            ? (formValues[roleGeo(field.id).parentField] || null)
+                                                                                            : null}
+                                                                                        value={formValues[field.id] || ''}
+                                                                                        onChange={val => setFormValues(prev => ({ ...prev, ...patchGeo(field.id, val) }))}
+                                                                                        peutAjouter
+                                                                                    />
+                                                                                ) : field.type === 'checkbox_group' ? (
                                                                                     <ChoixMultiple
                                                                                         field={field}
                                                                                         valeurs={formValues[field.id] ?? []}

@@ -88,11 +88,28 @@ class SocieteController extends Controller
             'siege_commune'            => ['nullable', 'string', 'max:100'],
             'siege_ville'              => ['nullable', 'string', 'max:100'],
             'email_societe'            => ['nullable', 'email', 'max:150'],
-            'telephone_societe'        => ['nullable', 'string', 'max:25'],
+            // Même format guinéen que la fiche client — une seule convention pour tout le
+            // répertoire, sinon un numéro accepté ici serait refusé là.
+            'telephone_societe'        => ['nullable', 'string', 'max:25', 'regex:/^(?:\+?224|00224)?[\s.-]*6\d{2}(?:[\s.-]*\d{2}){3}$/'],
             'objet_social'             => ['nullable', 'string'],
             'duree'                    => ['nullable', 'integer', 'min:0'],
-            'date_constitution'        => ['nullable', 'date'],
+            // Une société ne peut pas avoir été constituée dans le futur, ni avant l'indépendance
+            // guinéenne — au-delà, c'est une faute de frappe sur l'année.
+            'date_constitution'        => ['nullable', 'date', 'before_or_equal:today', 'after:1958-01-01'],
             'notaire_origine'          => ['nullable', 'string', 'max:200'],
+        ];
+    }
+
+    /**
+     * Messages là où la tournure par défaut se lit mal — `before_or_equal:today` interpole le
+     * littéral « today ».
+     */
+    private function messagesValidation(): array
+    {
+        return [
+            'date_constitution.before_or_equal' => 'La date de constitution ne peut pas être dans le futur.',
+            'date_constitution.after'           => 'La date de constitution semble erronée (avant 1958).',
+            'telephone_societe.regex'           => 'Numéro guinéen attendu — par exemple 622 78 37 32.',
         ];
     }
 
@@ -105,7 +122,7 @@ class SocieteController extends Controller
     {
         $this->authorize('create', Societe::class);
 
-        $societe = Societe::create($request->validate($this->regles()));
+        $societe = Societe::create($request->validate($this->regles(), $this->messagesValidation()));
 
         return response()->json($this->presenter($societe), 201);
     }
@@ -125,7 +142,7 @@ class SocieteController extends Controller
     {
         $this->authorize('update', $societe);
 
-        $societe->update($request->validate($this->regles()));
+        $societe->update($request->validate($this->regles(), $this->messagesValidation()));
 
         return response()->json($this->presenter($societe->fresh()));
     }

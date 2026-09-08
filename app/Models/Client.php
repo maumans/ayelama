@@ -60,6 +60,39 @@ class Client extends Model
         return $this->type === 'physique';
     }
 
+    /**
+     * La pièce d'identité est-elle expirée ?
+     *
+     * **Avertissement, jamais blocage** (décision du 2026-08-12) : l'étude doit pouvoir consigner la
+     * situation réelle du client — constater qu'une pièce est périmée fait partie du travail — puis
+     * lui demander un renouvellement. La cohérence des dates entre elles, en revanche, est bloquante
+     * (voir `ClientController::regles()`) : c'est une saisie impossible, pas un fait à consigner.
+     */
+    public function pieceExpiree(): bool
+    {
+        return $this->piece_expire_le !== null
+            && $this->piece_expire_le->isPast();
+    }
+
+    /**
+     * Ce qui mérite d'être signalé sur cette fiche sans en empêcher l'enregistrement.
+     *
+     * @return array<int, string>
+     */
+    public function avertissements(): array
+    {
+        $avertissements = [];
+
+        if ($this->pieceExpiree()) {
+            $avertissements[] = sprintf(
+                "Pièce d'identité expirée depuis le %s — à renouveler avant signature.",
+                $this->piece_expire_le->format('d/m/Y'),
+            );
+        }
+
+        return $avertissements;
+    }
+
     public function estProspect(): bool
     {
         return $this->statut === 'prospect';

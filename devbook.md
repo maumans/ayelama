@@ -1071,6 +1071,148 @@ constituée ou celle d'un confrère.
   redemandée. `dossier_id` reste **nul** — ce dossier ne constitue pas la société — ce qui maintient
   l'exigence de son dossier constitutif. Deux tests verrouillent les deux sens
 
+### 🗺️ Référentiel de lieux et contrôles de cohérence sur les identités (2026-08-12)
+
+`ClientController::regles()` ne vérifiait que des **types** : une pièce pouvait expirer avant d'avoir
+été délivrée, une naissance être postérieure à la pièce, un régime matrimonial être renseigné pour un
+célibataire. Et le triplet ville/commune/quartier était en saisie libre à **dix endroits**.
+
+**Ce n'était pas théorique** — les valeurs déjà en base : `Forecariah` enregistré comme **commune**
+(c'est une préfecture), `Kountia` comme **quartier de Conakry** (il est à Dubréka), `GBESSIA` comme
+commune (c'est un quartier de Matoto).
+
+#### 🔴 Le défaut qui rendait tous ces contrôles invisibles
+
+`bootstrap/app.php` réduisait le rendu JSON au seul préfixe `api/*` — qu'**aucune** route du projet
+n'utilise :
+
+```php
+$exceptions->shouldRenderJsonWhen(fn (Request $request) => $request->is('api/*'));
+```
+
+Ce prédicat **remplace** l'heuristique par défaut de Laravel (`expectsJson()`), il ne s'y ajoute pas.
+Toute erreur de validation partait donc en **redirection HTML**, y compris pour les appels XHR :
+mesuré, `POST /clients` invalide renvoyait un **302 text/html**. Conséquence — la branche
+`status === 422` de **toutes** les modales en axios (nouveau client, nouvelle société, dépôt de
+pièce) était du code mort, aucune erreur de champ ne s'est jamais affichée, et le HTML reçu était
+même interprété comme une session expirée.
+
+- [x] `expectsJson()` rétabli, `api/*` conservé pour un futur préfixe d'API. `POST /clients`
+  invalide renvoie désormais **422 + `errors`**
+
+#### Le référentiel — une table, trois niveaux
+
+- [x] `lieux` **auto-référencée** (`parent_id`, `niveau`, `nom_normalise`, `a_verifier`, `actif`) :
+  un seul écran, un seul point d'entrée, un seul composant. La hiérarchie guinéenne est à profondeur
+  variable, un quatrième niveau ne coûtera rien
+- [x] **Unicité relative au parent** : « Matam » est une commune de Conakry **et** une préfecture —
+  une unicité globale l'aurait interdit
+- [x] `App\Support\Normalisation::comparable()` — extraite de `Societe::normaliserDenomination()`,
+  qui y délègue désormais. Elle **retire les accents** : « Forécariah » et « Forecariah » sont le même
+  lieu. La règle 4 en devient légèrement plus stricte, ce qui va dans son sens
+- [x] **La valeur stockée reste le nom**, jamais l'identifiant : aucune migration de
+  `questionnaires.donnees`, et les balises `${soc.siege_quartier}` fonctionnent inchangées. Un acte
+  signé garde le nom qui était le bon ce jour-là
+- [x] `LieuSeeder` — **34 villes** (Conakry + 33 préfectures), **38 communes**, **54 quartiers**.
+  ⚠️ Les quartiers portent `a_verifier = true` : leur liste n'est ni garantie exhaustive ni garantie
+  à jour, et une donnée administrative fausse présentée comme sûre serait pire que du texte libre.
+  `firstOrCreate` et non `updateOrCreate` : une relance ne remet pas à « à vérifier » ce que l'étude
+  a validé — vérifié
+- [x] `ayelema:lieux-rapprocher` — **dry-run par défaut**. Sur la base réelle : 37 valeurs conformes,
+  5 écarts nommés, avec **suggestion** pour les fautes de frappe (« Almanya » → Almamya, « Lambagni »
+  → Lambanyi). Seuil de ressemblance **relatif à la longueur** : un seuil fixe rapprochait « Kountia »
+  de « Koubia », deux lieux sans rapport. `--appliquer` **vide** le champ mal placé plutôt que de
+  deviner où reposer la valeur, et ne touche **jamais** aux questionnaires — ils alimentent des actes
+  déjà produits
+
+#### La cascade et les autorisations
+
+- [x] `LieuSelect` — un composant **par niveau**, parce que le triplet est déclaré comme trois champs
+  distincts à dix endroits : les regrouper aurait imposé de migrer `donnees` et de toucher aux
+  balises Word. Changer la ville **réinitialise** commune et quartier, sans quoi on garde une commune
+  orpheline — l'incohérence même qu'on supprime
+- [x] Un parent manquant **neutralise** le champ au lieu de le remplir : le point d'entrée renvoie
+  `[]` plutôt que les 54 quartiers du pays
+- [x] Une valeur héritée hors référentiel reste **visible et sélectionnée**, signalée — sinon ouvrir
+  une fiche ancienne l'effacerait en silence
+- [x] Ajout en un clic (`peuventOuvrir()`, même ensemble que `ClientPolicy`), **jamais** sans
+  authentification : l'intake public recevra le référentiel dans ses props. Vérifié par test
+- [x] Correction/désactivation réservées à l'**administrateur** : ajouter est un geste de saisie,
+  corriger le référentiel est un acte d'administration
+
+#### Les contrôles de cohérence
+
+- [x] Dates : naissance ni future ni avant 1900 · pièce délivrée ni future ni avant la naissance ·
+  expiration postérieure à la délivrance
+- [x] **Paires indissociables** : un type de pièce sans numéro ne prouve rien, un numéro sans type ne
+  se vérifie pas
+- [x] `regime_matrimonial` `prohibited_unless` marié — et le champ **disparaît** du formulaire sinon,
+  plutôt que d'accepter une saisie que le serveur refuse
+- [x] Personne morale : `representant_legal` **requis** — l'acte le nomme, et c'est lui qui signe
+- [x] Téléphone guinéen (`6XX XX XX XX`, `+224`/`00224` et séparateurs tolérés)
+- [x] **Pièce expirée : avertissement seul** (choix retenu) — `Client::pieceExpiree()` et
+  `avertissements()`. L'étude consigne la situation réelle avant de demander un renouvellement ; la
+  cohérence des dates entre elles, elle, décrit une saisie impossible et reste bloquante
+- [x] Messages réécrits là où Laravel se lit mal (`before:today` interpolait « antérieure au today »)
+- [x] **Pays de résidence verrouillé** — `ChampVerrouille` : la valeur vaut « République de Guinée »
+  sur la totalité des fiches, et la laisser en saisie libre l'exposait à une modification par
+  inadvertance sur une donnée qui figure dans les actes. Verrouillé, **pas supprimé** : un clic
+  délibéré le déverrouille, car un client peut résider à l'étranger. Appliqué à la fiche client et
+  aux **9 champs `pays`** des questionnaires, via le `readonly` déjà prévu par le moteur
+- [x] ⚠️ **`readonly` n'était honoré que par l'assistant** : ni la modale d'édition du questionnaire
+  ni le formulaire public ne le lisaient, si bien qu'un champ verrouillé à la création redevenait
+  librement modifiable à la première correction. Les trois rendus le respectent désormais — même
+  leçon que `checkbox_group` et le type `lieu`
+- [x] `ControlesClientTest` (17 tests) et `LieuxTest` (14 tests) — un test par règle, nommé d'après
+  elle. **376 tests, 368 passent**, les 8 échecs préexistants inchangés
+
+#### La cascade, partout où le triplet apparaît
+
+- [x] **`TRIPLETS_GEO`** — les 7 triplets déclarés **une fois** dans `questionnaires.js`, plus
+  `roleGeo()` et `patchGeo()`. Aucune des **48 déclarations de champ** n'est touchée : les
+  identifiants ne changent pas, donc ni `questionnaires.donnees` ni les balises Word ne bougent.
+  Une table explicite était nécessaire — le préfixe varie (`soc.siege_`, `pp.`, `bq.siege_`,
+  `modif.siege_nouveau_`, ou rien dans les blocs répétables) et le champ ville n'est pas régulier
+  (`siege_ville` ici, `demeurant_ville` là)
+- [x] ⚠️ **Ne pas se fier au suffixe** : `bien.livre_foncier_ville` finit par « ville » sans être un
+  lieu du référentiel — c'est une mention cadastrale. C'est la raison d'être de la table
+- [x] Rendu branché dans les **trois** renderers — `Create.jsx`, la modale d'édition de `Show.jsx`,
+  et `Intake/Show.jsx` — comme `checkbox_group` l'avait exigé : un type géré d'un seul côté rendrait
+  la valeur non modifiable après la création du dossier
+- [x] **Formulaire public** : cascade **hors ligne**, le référentiel voyageant dans les props de
+  l'intake. Aucun point d'entrée exposé, et l'ajout d'un lieu n'y est pas offert — vérifié par test
+- [x] Fiche **société** : même cascade, et l'ordre d'affichage devient ville → commune → quartier,
+  qui est l'ordre de saisie (l'ancien allait à l'envers). Règles de dates et de téléphone alignées
+  sur la fiche client — `date_constitution` ni future ni avant 1958
+- [x] **`Paramètres > Lieux`** — accordéon ville/commune/quartier, **ajout aux trois niveaux**,
+  renommage, activation, et le **filtre « à vérifier »** qui est la liste de travail. Les formulaires
+  d'ajout sont repliés par défaut : cet écran sert d'abord à valider les 54 quartiers amorcés,
+  l'ajout est le geste secondaire. Ils passent par le **même point d'entrée** que la cascade des
+  formulaires, pour que la validation des niveaux n'ait qu'une implémentation
+- [x] **Suppression possible — mais seulement d'un lieu non référencé.** La désactivation seule
+  laissait le référentiel se remplir de scories sans recours : un lieu ajouté par erreur, mal
+  orthographié ou placé au mauvais niveau ne pouvait plus partir. `Lieu::estSupprimable()` refuse
+  dans deux cas seulement, et le message distingue lesquels parce que la conduite à tenir diffère :
+  **des enfants** (les supprimer d'abord — une cascade silencieuse emporterait les quartiers d'une
+  commune) ou **un nom employé** dans une fiche ou un questionnaire, donc possiblement dans un acte
+  produit (désactiver plutôt). `nomsEmployes()` balaie une seule fois pour tout l'écran, blocs
+  répétables compris — le faire par lieu rebalaierait les questionnaires 126 fois. La corbeille
+  n'apparaît que si la suppression est possible ; sinon elle est grisée et l'infobulle dit pourquoi
+- [x] **`a_verifier` dépend de qui ajoute** — un clerc créant un lieu en pleine saisie fait un geste
+  utile mais non validé, il entre dans la liste de travail ; un administrateur ajoutant depuis
+  l'écran du référentiel **est** cette validation, et marquer son propre ajout le lui renverrait à
+  lui-même
+- [x] Asymétrie des droits : **ajouter** un lieu manquant est un geste de saisie (rôles qui ouvrent
+  des dossiers), **corriger** le référentiel est un acte d'administration — renommer « Ratoma »
+  changerait la liste proposée à toute l'étude
+- [x] `CascadeGeoQuestionnaireTest` (18 tests) : les quartiers d'une commune ne débordent pas sur
+  l'autre, un lieu ajouté sert immédiatement, le public ne peut pas écrire, un niveau inconnu est
+  refusé, le seeder place bien une préfecture comme **ville** portant sa commune urbaine homonyme
+
+**394 tests, 386 passent** — 49 ajoutés, les 8 échecs préexistants inchangés. Vérifié sur la base :
+`/parametres/lieux`, `/parametres`, `/dossiers/create`, `/repertoire`, `/modeles`, les 18 fiches et
+le formulaire public d'intake répondent tous en 200.
+
 ### 🔤 Le vocabulaire des types de document, servi et non recopié (2026-08-11)
 
 Signalé à l'usage : la colonne **TYPE** de l'onglet Actes affichait `statuts_maj` et

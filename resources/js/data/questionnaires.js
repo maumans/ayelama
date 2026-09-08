@@ -62,7 +62,7 @@ const PP_ASSOCIE_UNIQUE = [
     { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
     { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
     { id: 'pp.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
-    { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+    { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
     { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
     { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
     { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: true },
@@ -83,7 +83,7 @@ const GER_FIELDS = [
     { id: 'ger.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'ger.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'ger.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false },
-    { id: 'ger.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+    { id: 'ger.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
     { id: 'ger.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
     { id: 'ger.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
     { id: 'ger.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: true },
@@ -112,7 +112,7 @@ const ASSOCIE_SCHEMA = [
     { id: 'quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false },
-    { id: 'pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+    { id: 'pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
     { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false },
     { id: 'cni', label: "N° pièce d'identité", type: 'text', placeholder: 'GN00123456', required: false, mono: true, showIf: { field: 'type_personne', equals: 'Personne physique' } },
     { id: 'piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
@@ -132,7 +132,7 @@ const GERANT_SCHEMA = [
     { id: 'quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false },
-    { id: 'pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+    { id: 'pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
     { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false },
     { id: 'piece_numero', label: "N° pièce d'identité", type: 'text', placeholder: 'GN00123456', required: false, mono: true },
     { id: 'piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
@@ -262,7 +262,7 @@ export const QUESTIONNAIRES = {
         { id: 'ger.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false, showIf: { field: 'ger.est_different' } },
-        { id: 'ger.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, showIf: { field: 'ger.est_different' } },
+        { id: 'ger.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true, showIf: { field: 'ger.est_different' } },
         { id: 'ger.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: false, mono: true, showIf: { field: 'ger.est_different' } },
         { id: 'ger.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false, showIf: { field: 'ger.est_different' } },
@@ -441,7 +441,7 @@ export const QUESTIONNAIRES = {
         { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'pp.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
-        { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+        { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
         { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
         { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
@@ -459,7 +459,7 @@ export const QUESTIONNAIRES = {
         { id: 'acq.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'acq.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'acq.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
-        { id: 'acq.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+        { id: 'acq.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
         { id: 'acq.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
         { id: 'acq.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'acq.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
@@ -498,7 +498,7 @@ export const QUESTIONNAIRES = {
         { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'pp.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
-        { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+        { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
         { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
         { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
@@ -516,7 +516,7 @@ export const QUESTIONNAIRES = {
         { id: 'acq.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'acq.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'acq.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
-        { id: 'acq.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false },
+        { id: 'acq.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
         { id: 'acq.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
         { id: 'acq.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'acq.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
@@ -940,3 +940,75 @@ export const TYPE_ACTE_CODE_MAP = {
     // Modification
     'SOC-MOD': 'modification',
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Triplets géographiques — ville → commune → quartier
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Les triplets ville/commune/quartier des questionnaires, déclarés **une fois**.
+ *
+ * Le référentiel de lieux (2026-08-12) rend ces trois champs dépendants : une commune n'existe que
+ * sous sa ville, un quartier que sous sa commune. Plutôt que de retyper les **48 déclarations de
+ * champ** concernées — et de risquer d'en oublier —, la relation est décrite ici et les rendus la
+ * consultent. Les identifiants de champ ne changent pas : ni `questionnaires.donnees`, ni les
+ * balises `${soc.siege_quartier}` des modèles Word n'ont à bouger.
+ *
+ * Le préfixe varie (`soc.siege_`, `pp.`, `bq.siege_`, `modif.siege_nouveau_`, ou rien du tout dans
+ * les blocs répétables) et le nom du champ ville n'est pas régulier (`siege_ville` ici,
+ * `demeurant_ville` là) : une convention de nommage ne suffisait pas, cette table est explicite.
+ */
+export const TRIPLETS_GEO = [
+    { ville: 'soc.siege_ville',              commune: 'soc.siege_commune',              quartier: 'soc.siege_quartier' },
+    { ville: 'bq.siege_ville',               commune: 'bq.siege_commune',               quartier: 'bq.siege_quartier' },
+    { ville: 'modif.siege_nouveau_ville',    commune: 'modif.siege_nouveau_commune',    quartier: 'modif.siege_nouveau_quartier' },
+    { ville: 'pp.demeurant_ville',           commune: 'pp.commune',                     quartier: 'pp.quartier' },
+    { ville: 'ger.demeurant_ville',          commune: 'ger.commune',                    quartier: 'ger.quartier' },
+    { ville: 'acq.demeurant_ville',          commune: 'acq.commune',                    quartier: 'acq.quartier' },
+    // Blocs répétables (associés, gérants) : les champs y sont nommés sans préfixe.
+    { ville: 'demeurant_ville',              commune: 'commune',                        quartier: 'quartier' },
+];
+
+/**
+ * Rôle géographique d'un champ — `null` s'il n'en a pas.
+ *
+ * ⚠️ `bien.livre_foncier_ville` finit par « ville » sans être un lieu du référentiel : c'est la
+ * ville du livre foncier, une mention cadastrale. Ne pas se fier au suffixe est précisément la
+ * raison d'être de `TRIPLETS_GEO`.
+ *
+ * @returns {{niveau: string, parentField: string|null}|null}
+ */
+export function roleGeo(fieldId) {
+    for (const triplet of TRIPLETS_GEO) {
+        if (fieldId === triplet.ville)    return { niveau: 'ville',    parentField: null };
+        if (fieldId === triplet.commune)  return { niveau: 'commune',  parentField: triplet.ville };
+        if (fieldId === triplet.quartier) return { niveau: 'quartier', parentField: triplet.commune };
+    }
+
+    return null;
+}
+
+/**
+ * Valeurs à écrire quand un champ géographique change : la valeur elle-même, **et le vidage de ses
+ * descendants**.
+ *
+ * Sans ce vidage, changer la ville laisse une commune orpheline — « Ratoma » sous « Kindia » —
+ * c'est-à-dire exactement l'incohérence que la cascade est là pour supprimer.
+ *
+ * @returns {Object} patch à fusionner dans les valeurs du formulaire
+ */
+export function patchGeo(fieldId, valeur) {
+    const triplet = TRIPLETS_GEO.find(t => [t.ville, t.commune, t.quartier].includes(fieldId));
+
+    if (!triplet) return { [fieldId]: valeur };
+
+    if (fieldId === triplet.ville) {
+        return { [triplet.ville]: valeur, [triplet.commune]: '', [triplet.quartier]: '' };
+    }
+
+    if (fieldId === triplet.commune) {
+        return { [triplet.commune]: valeur, [triplet.quartier]: '' };
+    }
+
+    return { [triplet.quartier]: valeur };
+}

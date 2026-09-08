@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import {
     AlertTriangle, Check, CheckCircle, CheckCircle2, ChevronDown, ChevronUp,
     ClipboardCheck, ExternalLink, FileText, Lock, Palette, Pencil, Percent, Plus,
-    Scale, Search, Settings, Shield, ShieldCheck, Trash2, Upload, UserCog, Users, X, XCircle,
+    Scale, Search, Settings, Shield, ShieldCheck, Trash2, Upload, UserCog, Users, X, XCircle, MapPin,
 } from 'lucide-react';
 import { ROLE_META } from '@/data/roles';
 import { RoleBadgeList } from '@/components/ui/role-badge';
@@ -1099,6 +1099,17 @@ export default function ParametresIndex({
                         >
                             <Scale className="h-4 w-4" />
                             Barèmes & Taux
+                            <ExternalLink className="h-3 w-3 opacity-50" />
+                        </button>
+                        {/* Référentiel des lieux (2026-08-12) : les quartiers amorcés
+                            automatiquement portent « à vérifier » et attendent la validation de
+                            l'étude — cet écran est leur liste de travail. */}
+                        <button
+                            onClick={() => router.visit('/parametres/lieux')}
+                            className="flex items-center gap-2 px-5 py-3.5 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+                        >
+                            <MapPin className="h-4 w-4" />
+                            Lieux
                             <ExternalLink className="h-3 w-3 opacity-50" />
                         </button>
                         {/* L'onglet « Clôture » a été retiré le 2026-08-04 : l'inventaire de

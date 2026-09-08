@@ -40,9 +40,12 @@ class ClientCreationTest extends TestCase
         $user = User::factory()->create();
         $user->syncRoles([RoleUtilisateur::Clerc]);
 
+        // `representant_legal` est requis depuis le 2026-08-12 : on ne fait pas signer une personne
+        // morale sans représentant, et l'acte le nomme.
         $response = $this->actingAs($user)->postJson('/clients', [
-            'type'         => 'morale',
-            'denomination' => 'Société XYZ SARL',
+            'type'               => 'morale',
+            'denomination'       => 'Société XYZ SARL',
+            'representant_legal' => 'Ibrahima DIALLO',
         ]);
 
         $response->assertStatus(201)->assertJson([

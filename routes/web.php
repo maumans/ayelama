@@ -12,6 +12,7 @@ use App\Http\Controllers\FactureController;
 use App\Http\Controllers\FormaliteController;
 use App\Http\Controllers\GedController;
 use App\Http\Controllers\IntakeController;
+use App\Http\Controllers\LieuController;
 use App\Http\Controllers\ModeleActeController;
 use App\Http\Controllers\ModeleCourrierController;
 use App\Http\Controllers\NotificationController;
@@ -164,6 +165,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // récapitulatif de l'assistant, qui annonçait jusqu'ici autre chose que ce qui serait généré.
     Route::get('/types-actes/{typeActe}/actes-prevus', [TypeActeController::class, 'actesPrevus'])->name('types_actes.actes_prevus');
 
+    // Référentiel des lieux — alimente la cascade ville → commune → quartier des formulaires.
+    // Sous authentification : le formulaire public d'intake reçoit le référentiel dans ses props,
+    // pour qu'aucune écriture ne soit atteignable sans être connecté.
+    Route::get('/lieux', [LieuController::class, 'index'])->name('lieux.index');
+    Route::post('/lieux', [LieuController::class, 'store'])->name('lieux.store');
+
     Route::get('/societes/autocomplete', [SocieteController::class, 'autocomplete'])->name('societes.autocomplete');
     // Déclarée AVANT `/societes/{societe}` : sans quoi « pieces » serait pris pour un identifiant.
     Route::delete('/societes/pieces/{piece}', [SocietePieceController::class, 'destroy'])->name('societes.pieces.destroy');
@@ -210,6 +217,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // référence du CR de juillet 2026 et réinitialisable à tout moment.
         Route::patch('/types-actes/{typeActe}/documents-attendus', [ParametresController::class, 'updateDocumentsAttendus'])->name('documents_attendus.update');
         Route::post('/types-actes/{typeActe}/documents-attendus/reinitialiser', [ParametresController::class, 'reinitialiserDocumentsAttendus'])->name('documents_attendus.reinitialiser');
+        // Référentiel des lieux : correction et validation des lieux amorcés au seeder.
+        Route::get('/lieux', [ParametresController::class, 'lieux'])->name('lieux');
+        Route::patch('/lieux/{lieu}', [ParametresController::class, 'updateLieu'])->name('lieux.update');
+        // Suppression possible seulement pour un lieu non référencé — voir Lieu::estSupprimable().
+        Route::delete('/lieux/{lieu}', [ParametresController::class, 'destroyLieu'])->name('lieux.destroy');
         Route::get('/baremes', [ParametresController::class, 'baremes'])->name('baremes');
         Route::post('/baremes', [ParametresController::class, 'storeBareme'])->name('baremes.store');
         Route::patch('/baremes/{bareme}', [ParametresController::class, 'updateBareme'])->name('baremes.update');

@@ -179,6 +179,116 @@ class ParametresController extends Controller
         return back()->with('success', 'Utilisateur mis à jour.');
     }
 
+    /**
+     * Référentiel des lieux — ville → commune → quartier.
+     *
+     * L'arborescence est renvoyée en entier : 126 lieux amorcés, quelques centaines à terme. Un
+     * chargement paresseux par niveau compliquerait l'écran sans gain mesurable à cette échelle.
+     */
+    public function lieux(Request $request)
+    {
+        $this->authorize('viewAny', \App\Models\Lieu::class);
+
+        $villes = \App\Models\Lieu::whereNull('parent_id')
+            ->with(['enfants.enfants'])
+            ->orderBy('nom')
+            ->get();
+
+        // Une seule fois pour l'écran : `estSupprimable()` sans argument rebalaierait les
+        // questionnaires pour chacun des 126 lieux.
+        $employes = \App\Models\Lieu::nomsEmployes();
+
+        return Inertia::render('Parametres/Lieux', [
+            'villes' => $villes->map(fn ($ville) => [
+                'id'          => $ville->id,
+                'nom'         => $ville->nom,
+                'actif'       => $ville->actif,
+                'a_verifier'  => $ville->a_verifier,
+                'supprimable' => $ville->estSupprimable($employes),
+                'communes'   => $ville->enfants->map(fn ($commune) => [
+                    'id'          => $commune->id,
+                    'nom'         => $commune->nom,
+                    'actif'       => $commune->actif,
+                    'a_verifier'  => $commune->a_verifier,
+                    'supprimable' => $commune->estSupprimable($employes),
+                    'quartiers'  => $commune->enfants->map(fn ($q) => [
+                        'id'          => $q->id,
+                        'nom'         => $q->nom,
+                        'actif'       => $q->actif,
+                        'a_verifier'  => $q->a_verifier,
+                        'supprimable' => $q->estSupprimable($employes),
+                    ])->values(),
+                ])->values(),
+            ]),
+            // Compteur de travail : les lieux amorcés au seeder dont l'exactitude n'est pas
+            // garantie et que l'étude doit valider.
+            'aVerifier' => \App\Models\Lieu::where('a_verifier', true)->count(),
+        ]);
+    }
+
+    /**
+     * Corrige un lieu : renomme, valide (« à vérifier » retiré) ou désactive.
+     *
+     * Pas de suppression — un nom peut figurer dans des dossiers et des actes déjà produits, et le
+     * référentiel ne stocke pas de clé étrangère vers eux. Désactiver retire le lieu des listes
+     * proposées sans réécrire le passé, même parti que pour les fiches clients.
+     */
+    public function updateLieu(Request $request, \App\Models\Lieu $lieu)
+    {
+        $this->authorize('update', $lieu);
+
+        $data = $request->validate([
+            'nom'        => ['sometimes', 'string', 'max:120'],
+            'actif'      => ['sometimes', 'boolean'],
+            'a_verifier' => ['sometimes', 'boolean'],
+        ]);
+
+        $lieu->update($data);
+
+        return back()->with('success', 'Lieu mis à jour.');
+    }
+
+    /**
+     * Supprime un lieu du référentiel — **uniquement s'il n'est référencé nulle part**.
+     *
+     * La désactivation seule laissait le référentiel se remplir de scories sans recours : un lieu
+     * ajouté par erreur, mal orthographié ou placé au mauvais niveau ne pouvait plus partir.
+     *
+     * Le refus est **explicite** et distingue ses deux causes, parce que la conduite à tenir
+     * diffère : vider un lieu de ses enfants, ou se rabattre sur la désactivation quand son nom
+     * figure déjà dans une fiche — et donc possiblement dans un acte produit.
+     */
+    public function destroyLieu(\App\Models\Lieu $lieu)
+    {
+        $this->authorize('update', $lieu);
+
+        if ($lieu->enfants()->exists()) {
+            return back()->with(
+                'error',
+                sprintf(
+                    "« %s » contient %d lieu(x) : supprimez-les d'abord, une suppression en cascade serait silencieuse.",
+                    $lieu->nom,
+                    $lieu->enfants()->count(),
+                ),
+            );
+        }
+
+        if (! $lieu->estSupprimable()) {
+            return back()->with(
+                'error',
+                sprintf(
+                    '« %s » est employé dans une fiche ou un questionnaire — désactivez-le plutôt, pour ne pas réécrire le passé.',
+                    $lieu->nom,
+                ),
+            );
+        }
+
+        $nom = $lieu->nom;
+        $lieu->delete();
+
+        return back()->with('success', "« {$nom} » retiré du référentiel.");
+    }
+
     public function typesActes()
     {
         $modeles = ModeleActe::with('rattachements')->get();
