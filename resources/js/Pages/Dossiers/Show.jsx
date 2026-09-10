@@ -13,17 +13,16 @@ import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
 import { ModalEnregistrerPaiement } from '@/Components/Facturation/ModalEnregistrerPaiement';
 import { ModalLigneFacture } from '@/Components/Facturation/ModalLigneFacture';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, roleGeo, patchGeo } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
+import { ChampQuestionnaire, classesChamp } from '@/Components/Questionnaire/ChampQuestionnaire';
+import { allerAuBlocant, blocantsEtape, motifsParChamp } from '@/lib/blocantsEtape';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { DateField } from '@/components/ui/date-field';
 import { NumberField } from '@/components/ui/number-field';
-import { PhoneField } from '@/components/ui/phone-field';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ChoixMultiple } from '@/Components/ui/choix-multiple';
-import { LieuSelect } from '@/Components/ui/lieu-select';
-import { ChampVerrouille } from '@/Components/ui/champ-verrouille';
 import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
 import { AccordClientCard, ANCRE_ACCORD_CLIENT } from '@/Components/Dossiers/AccordClientCard';
@@ -327,6 +326,39 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
     const allFields = fields.length > 0 ? fields : genericFields;
     const visibleFields = getVisibleFields(allFields, formValues);
 
+    /**
+     * Nombre d'options chargées par champ géo, remonté par `LieuSelect`.
+     *
+     * Sert au blocant : sans cela il répondait « Choisissez une valeur » devant une liste vide —
+     * or 33 des 39 communes n'ont aucun quartier au référentiel.
+     */
+    const [optionsGeo, setOptionsGeo] = useState({});
+    const noterOptionsGeo = (id, nb) => setOptionsGeo(p => (p[id] === nb ? p : { ...p, [id]: nb }));
+
+    /**
+     * **Les mêmes règles que l'assistant de création**, par le même module.
+     *
+     * Le modal n'en avait aucune : les champs requis et la cohérence des dates n'étaient contrôlés
+     * qu'à la création, et une correction ultérieure pouvait réintroduire une pièce expirant avant
+     * sa délivrance. `step: 1` place l'appel sur l'étape « détails », la seule qui concerne le
+     * questionnaire ; `objet` et `notaireId` sont neutralisés — ils appartiennent à la fiche, pas
+     * au questionnaire, et sont déjà renseignés à ce stade.
+     */
+    const blocants = blocantsEtape({
+        step: 1,
+        // Sentinelle : `blocantsEtape` refuse d'évaluer sans type d'acte, mais le modal ne
+        // s'ouvre que sur un dossier qui en a déjà un — il n'y a rien à choisir ici.
+        typeActe: { id: 'questionnaire-existant' },
+        visibleFields,
+        formValues,
+        objet: 'renseigné sur la fiche',
+        notaireId: 'renseigné sur la fiche',
+        optionsGeo,
+        estMasque: (field, groupe) => !champsAffichables(groupe).some(f => f.id === field.id),
+    });
+
+    const blocantsParChamp = motifsParChamp(blocants);
+
     return (
         <>
         <Dialog open={open} onOpenChange={onClose}>
@@ -360,143 +392,46 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                     </div>
                                 )}
                                 {champsAffichables(group).map(field => (
-                                    <div key={field.id} className="space-y-1.5">
-                                        {field.type !== 'repeatable' && field.type !== 'checkbox' && field.type !== 'checkbox_required' && (
-                                            <Label htmlFor={`qedit-${field.id}`}>
-                                                {field.label}
-                                                {field.required && <span className="text-danger ml-1">*</span>}
-                                            </Label>
-                                        )}
-                                        {roleGeo(field.id) ? (
-                                            /* Même cascade que l'assistant : un type de champ géré
-                                               d'un seul côté rendrait la valeur non modifiable
-                                               après la création du dossier. */
-                                            <LieuSelect
-                                                id={`qedit-${field.id}`}
-                                                niveau={roleGeo(field.id).niveau}
-                                                parentNom={roleGeo(field.id).parentField
-                                                    ? (formValues[roleGeo(field.id).parentField] || null)
-                                                    : null}
-                                                value={formValues[field.id] || ''}
-                                                onChange={val => setFormValues(p => ({ ...p, ...patchGeo(field.id, val) }))}
-                                                peutAjouter
-                                            />
-                                        ) : field.type === 'checkbox_group' ? (
-                                            <ChoixMultiple
-                                                field={field}
-                                                valeurs={formValues[field.id] ?? []}
-                                                onChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
-                                                idPrefix="qedit-"
-                                                exclusions={exclusionsModification}
-                                            />
-                                        ) : field.type === 'repeatable' ? (
-                                            <>
-                                                <p className="text-sm font-medium text-slate-700 mb-1">
-                                                    {field.label}
-                                                    {field.required && <span className="text-danger ml-1">*</span>}
-                                                </p>
+                                    <div
+                                        key={field.id}
+                                        className={classesChamp({
+                                            field,
+                                            enDefaut: blocantsParChamp.has(field.id),
+                                        })}
+                                    >
+                                        {/* Même moteur que l'assistant de création et que le
+                                            formulaire public : un type ou un contrôle géré d'un seul
+                                            côté rendait la valeur non modifiable après la création
+                                            du dossier — c'est arrivé quatre fois. */}
+                                        <ChampQuestionnaire
+                                            field={field}
+                                            valeurs={formValues}
+                                            onPatch={(patch) => setFormValues(p => ({ ...p, ...patch }))}
+                                            motif={blocantsParChamp.get(field.id)}
+                                            idPrefix="qedit-"
+                                            peutAjouter
+                                            onNombreOptions={(nb) => noterOptionsGeo(field.id, nb)}
+                                            rendreChoixMultiple={(f) => (
+                                                <ChoixMultiple
+                                                    field={f}
+                                                    valeurs={formValues[f.id] ?? []}
+                                                    onChange={val => setFormValues(p => ({ ...p, [f.id]: val }))}
+                                                    idPrefix="qedit-"
+                                                    exclusions={exclusionsModification}
+                                                />
+                                            )}
+                                            rendreRepeatable={(f) => (
                                                 <RepeatableGroup
-                                                    fieldDef={field}
-                                                    value={formValues[field.id] ?? []}
-                                                    onChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
+                                                    fieldDef={f}
+                                                    value={formValues[f.id] ?? []}
+                                                    onChange={val => setFormValues(p => ({ ...p, [f.id]: val }))}
                                                     partiesById={partiesById}
                                                     piecesRequises={usePage().props.piecesRequises}
-                                                    stagedPieces={stagedPieces[field.id] || {}}
-                                                    onStagedPieceChange={(key, file) => handleStagedPieceChange(field.id, key, file)}
+                                                    stagedPieces={stagedPieces[f.id] || {}}
+                                                    onStagedPieceChange={(key, file) => handleStagedPieceChange(f.id, key, file)}
                                                 />
-                                            </>
-                                        ) : field.type === 'textarea' ? (
-                                            <textarea
-                                                id={`qedit-${field.id}`}
-                                                rows={3}
-                                                placeholder={field.placeholder}
-                                                value={formValues[field.id] || ''}
-                                                onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.value }))}
-                                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-                                            />
-                                        ) : field.type === 'select' ? (
-                                            <select
-                                                id={`qedit-${field.id}`}
-                                                value={formValues[field.id] || ''}
-                                                onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.value }))}
-                                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                            >
-                                                <option value="">— Choisir —</option>
-                                                {(field.options ?? []).map(opt => (
-                                                    <option key={opt} value={opt}>{opt}</option>
-                                                ))}
-                                            </select>
-                                        ) : (field.type === 'checkbox' || field.type === 'checkbox_required') ? (
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    id={`qedit-${field.id}`}
-                                                    checked={!!formValues[field.id]}
-                                                    onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.checked }))}
-                                                    className="h-4 w-4 rounded border-slate-300 text-seal focus:ring-seal"
-                                                />
-                                                <label htmlFor={`qedit-${field.id}`} className="text-sm text-slate-700 cursor-pointer">
-                                                    {field.label}
-                                                    {field.required && <span className="text-danger ml-1">*</span>}
-                                                </label>
-                                            </div>
-                                        ) : field.type === 'date' ? (
-                                            <DateField
-                                                id={`qedit-${field.id}`}
-                                                value={formValues[field.id] || ''}
-                                                onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
-                                            />
-                                        ) : field.type === 'number' ? (
-                                            <NumberField
-                                                id={`qedit-${field.id}`}
-                                                decimals={field.decimals ?? 0}
-                                                placeholder={field.placeholder}
-                                                value={formValues[field.id] || ''}
-                                                onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
-                                                className={cn(field.mono && 'font-ref')}
-                                            />
-                                        ) : field.type === 'year' ? (
-                                            <Input
-                                                id={`qedit-${field.id}`}
-                                                type="text"
-                                                inputMode="numeric"
-                                                maxLength={4}
-                                                placeholder={field.placeholder}
-                                                value={formValues[field.id] || ''}
-                                                onChange={e => {
-                                                    const v = e.target.value.replace(/\D/g, '').slice(0, 4);
-                                                    setFormValues(p => ({ ...p, [field.id]: v }));
-                                                }}
-                                                className="font-ref"
-                                            />
-                                        ) : field.type === 'tel' ? (
-                                            <PhoneField
-                                                id={`qedit-${field.id}`}
-                                                placeholder={field.placeholder}
-                                                value={formValues[field.id] || ''}
-                                                onValueChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
-                                            />
-                                        ) : field.readonly ? (
-                                            /* `readonly` était honoré par l'assistant mais **pas
-                                               ici** : un champ verrouillé à la création redevenait
-                                               librement modifiable à la première correction. */
-                                            <ChampVerrouille
-                                                id={`qedit-${field.id}`}
-                                                value={formValues[field.id] || ''}
-                                                onChange={val => setFormValues(p => ({ ...p, [field.id]: val }))}
-                                                placeholder={field.placeholder}
-                                                className={cn(field.mono && 'font-ref')}
-                                            />
-                                        ) : (
-                                            <Input
-                                                id={`qedit-${field.id}`}
-                                                type={field.type === 'email' ? 'email' : 'text'}
-                                                placeholder={field.placeholder}
-                                                value={formValues[field.id] || ''}
-                                                onChange={e => setFormValues(p => ({ ...p, [field.id]: e.target.value }))}
-                                                className={cn(field.mono && 'font-ref')}
-                                            />
-                                        )}
+                                            )}
+                                        />
                                     </div>
                                 ))}
                                 {/* Pièces justificatives pour les rôles simples (non-répétables) */}
@@ -550,9 +485,34 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                             <p className="text-sm text-slate-400 italic py-4 text-center">Aucun champ de questionnaire trouvé.</p>
                         )}
                     </div>
+                    {/* Ce qui manque, **énuméré** — comme dans l'assistant de création. Le modal
+                        n'affichait rien : on enregistrait un questionnaire incohérent sans le
+                        savoir, et le serveur ne validait pas davantage. */}
+                    {blocants.length > 0 && (
+                        <div className="mt-3 rounded-lg border border-amber-200 bg-warning-bg p-3">
+                            <p className="flex items-center gap-1.5 text-xs font-medium text-warning-text">
+                                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                {blocants.length} point{blocants.length > 1 ? 's' : ''} à corriger avant enregistrement
+                            </p>
+                            <ul className="mt-1.5 space-y-0.5">
+                                {blocants.map(b => (
+                                    <li key={b.cle} className="text-xs text-slate-600">
+                                        <button
+                                            type="button"
+                                            onClick={() => allerAuBlocant(b.ancre ? `qedit-${b.ancre}` : null)}
+                                            className="text-left hover:text-seal hover:underline"
+                                        >
+                                            <span className="font-medium">{b.label}</span> — {b.raison}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
                     <DialogFooter className="pt-4 mt-2 border-t border-slate-100">
                         <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-                        <Button type="submit">Enregistrer le questionnaire</Button>
+                        <Button type="submit" disabled={blocants.length > 0}>Enregistrer le questionnaire</Button>
                     </DialogFooter>
                 </form>
             </DialogContent>

@@ -5,6 +5,8 @@
 // les bonnes clés dans `donnees`, la génération de documents fonctionne sans aucun changement
 // côté backend.
 
+import { isoDateToFR } from '@/lib/dates';
+
 function adresseComposite(client) {
     return [client.quartier, client.commune, client.demeurant_ville].filter(Boolean).join(', ');
 }
@@ -41,6 +43,23 @@ const SUFFIXES_IDENTITE = new Set([
  * et tous les bq.* de crédit — la même personne peut détenir 100 parts dans une
  * société et 5 dans une autre.
  */
+/**
+ * Suffixes dont la valeur est une date, et qui doivent donc entrer dans `donnees` au format
+ * **JJ/MM/AAAA** (voir le contrat dans lib/dates.js).
+ *
+ * La fiche client vient de l'API, où une colonne castée est sérialisée en horodatage
+ * (`1970-02-05T00:00:00.000000Z`). Recopiée telle quelle, cette valeur partait **dans l'acte
+ * authentique** — et comme `ActesGeneratorService` ne dérive `${..._jma}` et `${..._lettres}` que
+ * depuis une date française, ces deux balises restaient en outre non produites.
+ *
+ * La conversion vit dans les helpers `set()` ci-dessous plutôt qu'à chaque appel : un suffixe de
+ * date ajouté ensuite est ainsi couvert sans qu'on y pense.
+ */
+const SUFFIXES_DATE = new Set(['date_naissance', 'piece_delivree_le', 'piece_expire_le']);
+
+const valeurQuestionnaire = (suffixe, valeur) =>
+    SUFFIXES_DATE.has(suffixe) ? (isoDateToFR(valeur) || valeur) : valeur;
+
 export function estChampIdentite(fieldId) {
     const suffixe = fieldId.includes('.') ? fieldId.split('.').slice(1).join('.') : fieldId;
     return SUFFIXES_IDENTITE.has(suffixe);
@@ -55,7 +74,7 @@ export function mapClientToPrefixedFields(client, prefix, fieldIds) {
     const set = (suffix, value) => {
         const id = `${prefix}.${suffix}`;
         if (idSet.has(id) && value !== null && value !== undefined && value !== '') {
-            values[id] = value;
+            values[id] = valeurQuestionnaire(suffix, value);
         }
     };
 
@@ -119,7 +138,9 @@ export function mapClientToRepeatableItem(client, fieldIds) {
     const idSet = new Set(fieldIds);
     const item = {};
     const set = (id, value) => {
-        if (idSet.has(id) && value !== null && value !== undefined && value !== '') item[id] = value;
+        if (idSet.has(id) && value !== null && value !== undefined && value !== '') {
+            item[id] = valeurQuestionnaire(id, value);
+        }
     };
 
     const nom = client.type === 'physique' ? client.prenom_nom : client.denomination;

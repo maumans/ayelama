@@ -10,6 +10,8 @@
 // langage que la fiche.
 
 import { groupFieldsBySection } from '@/lib/partiesPayload';
+import { CONTRAINTES_DATES, PAIRES_DATES, roleGeo } from '@/data/questionnaires';
+import { incoherenceOrdre, incoherencePassee, incoherencesTriplet } from '@/lib/coherenceDates';
 
 export const OBJET_LONGUEUR_MIN = 10;
 
@@ -25,8 +27,29 @@ function estRempli(valeur) {
     return valeur !== null && valeur !== undefined && valeur !== false && valeur !== '';
 }
 
-/** Raison rédigée pour un champ requis vide — le type du champ dit ce qu'on attend. */
-function raisonChampVide(field) {
+/**
+ * Raison rédigée pour un champ requis vide — le type du champ dit ce qu'on attend.
+ *
+ * `nbOptionsGeo` distingue les deux situations d'un champ de lieu, que « Choisissez une valeur »
+ * confondait : *aucune option n'existe* et *aucune n'a été choisie*. Le premier cas est majoritaire
+ * — 33 des 39 communes n'ont aucun quartier au référentiel — et le message renvoyait alors l'étude
+ * vers une liste vide, sans dire que le recours (ajouter le lieu) était juste en dessous.
+ */
+function raisonChampVide(field, nbOptionsGeo = undefined) {
+    const geo = roleGeo(field.id);
+
+    if (geo) {
+        if (nbOptionsGeo === null) {
+            return geo.niveau === 'commune'
+                ? "Choisissez d'abord la ville"
+                : "Choisissez d'abord la commune";
+        }
+
+        if (nbOptionsGeo === 0) {
+            return `Aucun${geo.niveau === 'commune' ? 'e' : ''} ${geo.niveau} au référentiel — ajoutez-${geo.niveau === 'commune' ? 'la' : 'le'} depuis le champ`;
+        }
+    }
+
     switch (field.type) {
         case 'checkbox_group':    return 'Cochez au moins une option';
         case 'checkbox_required': return 'Cette confirmation est obligatoire';
@@ -34,6 +57,59 @@ function raisonChampVide(field) {
         case 'date':              return 'Renseignez une date';
         default:                  return 'Champ obligatoire';
     }
+}
+
+/**
+ * Incohérences de dates du questionnaire — les mêmes contrôles que la fiche client, appliqués aux
+ * champs déclarés dans `PAIRES_DATES` et `CONTRAINTES_DATES`.
+ *
+ * Ne portent que sur des champs **présents dans le questionnaire courant** : une paire déclarée dont
+ * aucun champ n'existe ici ne doit rien produire.
+ */
+function blocantsDates(visibleFields, formValues) {
+    const parId = new Map(visibleFields.map(f => [f.id, f]));
+    const blocants = [];
+
+    const ajouter = (champ, message) => {
+        const field = parId.get(champ);
+        if (!field) return;
+
+        blocants.push({
+            cle: champ,
+            section: field.section || 'Informations générales',
+            label: field.label,
+            raison: message,
+            ancre: champ,
+        });
+    };
+
+    for (const groupe of PAIRES_DATES) {
+        const present = [groupe.naissance, groupe.delivree, groupe.expire].some(c => c && parId.has(c));
+        if (!present) continue;
+
+        const anomalies = incoherencesTriplet(
+            {
+                naissance: groupe.naissance ? formValues[groupe.naissance] : null,
+                delivree:  groupe.delivree  ? formValues[groupe.delivree]  : null,
+                expire:    groupe.expire    ? formValues[groupe.expire]    : null,
+            },
+            groupe,
+        );
+
+        for (const { champ, message } of anomalies) ajouter(champ, message);
+    }
+
+    for (const contrainte of CONTRAINTES_DATES) {
+        if (!parId.has(contrainte.champ)) continue;
+
+        const anomalie = contrainte.genre === 'passee'
+            ? incoherencePassee(formValues[contrainte.champ], contrainte.message)
+            : incoherenceOrdre(formValues[contrainte.apres], formValues[contrainte.champ], contrainte.message);
+
+        if (anomalie) ajouter(contrainte.champ, anomalie);
+    }
+
+    return blocants;
 }
 
 /**
@@ -58,6 +134,10 @@ export function ancreSection(nom) {
  * @param {object}   ctx.formValues
  * @param {string}   ctx.objet
  * @param {string}   ctx.notaireId
+ * @param {object}   [ctx.optionsGeo]     id de champ géo → nombre d'options chargées (`null` si le
+ *                                        parent n'est pas encore choisi). Remonté par `LieuSelect`,
+ *                                        pour que le blocant ne réponde pas « Choisissez une
+ *                                        valeur » devant une liste vide.
  * @param {Function} [ctx.estMasque]      (field, groupe) => bool — le champ est-il retiré de la
  *                                        saisie parce qu'une fiche liée le porte ? Il bloque
  *                                        toujours, mais on ne peut pas y renvoyer : on renvoie
@@ -66,7 +146,7 @@ export function ancreSection(nom) {
  *          Dans l'ordre d'apparition à l'écran — c'est cet ordre qui décide vers quel champ on
  *          défile en premier.
  */
-export function blocantsEtape({ step, categorie, typeActe, visibleFields = [], formValues = {}, objet = '', notaireId = '', estMasque = null }) {
+export function blocantsEtape({ step, categorie, typeActe, visibleFields = [], formValues = {}, objet = '', notaireId = '', estMasque = null, optionsGeo = {} }) {
     if (step === 0) {
         // L'étape « catégorie » souffrait du même défaut, en moins visible : « Suivant » y était
         // grisé sans rien dire non plus.
@@ -126,12 +206,18 @@ export function blocantsEtape({ step, categorie, typeActe, visibleFields = [], f
                     label: field.label,
                     raison: masque
                         ? 'Absent de la fiche liée — complétez la fiche, ou détachez-la pour saisir ici'
-                        : raisonChampVide(field),
+                        : raisonChampVide(field, optionsGeo[field.id]),
                     ancre: masque ? ancreSection(groupe.name) : field.id,
                 });
             }
         }
     }
+
+    // ── Cohérence des dates ──────────────────────────────────────────────────
+    // Distincte des champs requis : ici la valeur **est** saisie, mais décrit une situation
+    // impossible. Ces contrôles n'existaient que sur la fiche client, et aucun des 25 champs de date
+    // des questionnaires n'était vérifié — ni ici, ni côté serveur.
+    blocants.push(...blocantsDates(visibleFields, formValues));
 
     // ── Informations générales du dossier ────────────────────────────────────
     const objetSaisi = (objet ?? '').trim();
@@ -191,6 +277,24 @@ export function compterParSection(blocants) {
 /** Clés des champs en défaut — pour l'état d'erreur des champs après une tentative de validation. */
 export function clesEnDefaut(blocants) {
     return new Set(blocants.map(b => b.cle));
+}
+
+/**
+ * Champ → motif rédigé, pour afficher la raison **sous le champ concerné**.
+ *
+ * Une `Map` plutôt qu'un `Set` doublé d'un `find` dans la liste : le rendu interroge un champ à la
+ * fois, et le premier blocant d'un champ est celui qu'on montre.
+ *
+ * @returns {Map<string, string>}
+ */
+export function motifsParChamp(blocants) {
+    const motifs = new Map();
+
+    for (const blocant of blocants) {
+        if (!motifs.has(blocant.cle)) motifs.set(blocant.cle, blocant.raison);
+    }
+
+    return motifs;
 }
 
 /**

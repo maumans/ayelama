@@ -264,14 +264,37 @@ class DossierController extends Controller
         ]);
     }
 
+    /**
+     * Refuse en 422 les dates de questionnaire qui décrivent une situation impossible.
+     *
+     * Extrait plutôt que recopié aux deux appelants (création et mise à jour du questionnaire) :
+     * c'est exactement la duplication qui a produit les quatre divergences du rendu de champ.
+     *
+     * @param  array<string, mixed> $donnees
+     */
+    private function refuserDatesIncoherentes(array $donnees): void
+    {
+        $erreurs = app(\App\Services\CoherenceDonneesService::class)->erreurs($donnees);
+
+        if ($erreurs !== []) {
+            throw \Illuminate\Validation\ValidationException::withMessages($erreurs);
+        }
+    }
+
     public function store(
         StoreDossierRequest $request,
         \App\Services\ActesGeneratorService $generatorService,
         \App\Services\FacturationService $facturationService,
         \App\Services\FormaliteGenerationService $formaliteGenerationService
     ) {
+        $donnees = $request->validated();
+
+        // Même contrôle qu'à la mise à jour du questionnaire : un dossier ne doit pas **naître**
+        // incohérent. Le brouillon, lui, reste libre — c'est une saisie en cours (décision #34).
+        $this->refuserDatesIncoherentes($donnees['donnees'] ?? []);
+
         $dossier = $this->creerDossier(
-            $request->validated(),
+            $donnees,
             $generatorService,
             $facturationService,
             $formaliteGenerationService
@@ -684,7 +707,17 @@ class DossierController extends Controller
             ...StoreDossierRequest::partiesRules(),
         ]);
 
-        DB::transaction(function () use ($dossier, $validated) {
+        // `donnees` n'était validé que dans sa forme (`array`) : toute la cohérence du questionnaire
+        // vivait dans le navigateur, et une pièce expirant avant sa délivrance entrait sans un mot.
+        // Voir CoherenceDonneesService pour ce qui est vérifié — et pourquoi les champs obligatoires
+        // ne le sont pas.
+        $this->refuserDatesIncoherentes($validated['donnees']);
+
+        // ⚠️ `$projection` **doit** être capturé : il est appelé plus bas dans cette closure
+        // (`reprojeter`). Son absence faisait échouer tout enregistrement du questionnaire par une
+        // ErrorException « Undefined variable », dans la transaction — donc annulée en silence, la
+        // saisie perdue et un 500 renvoyé à l'écran.
+        DB::transaction(function () use ($dossier, $validated, $projection) {
             if ($dossier->questionnaire) {
                 $dossier->questionnaire->update(['donnees' => $validated['donnees']]);
             } else {

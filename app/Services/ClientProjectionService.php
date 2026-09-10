@@ -248,11 +248,15 @@ class ClientProjectionService
         foreach ($table + self::SUFFIXES_COMMUNS as $suffixe => $attribut) {
             $valeur = $client->{$attribut};
 
-            // Les dates sont castées en Carbon sur le modèle : les modèles Word
-            // attendent une chaîne, et le frontend un format ISO qu'il sait
-            // réafficher (voir isoDateToFR dans resources/js/lib/dates.js).
+            // Les dates sont castées en Carbon sur le modèle, et `donnees` les porte en
+            // **JJ/MM/AAAA** : c'est le format que le modèle Word reçoit tel quel, celui que
+            // `DateField` sait réafficher, et le seul depuis lequel `ActesGeneratorService` dérive
+            // `${..._jma}` et `${..._lettres}`.
+            //
+            // Cette ligne produisait `Y-m-d` : la même clé existait donc en deux formats selon
+            // qu'elle avait été saisie ou projetée, et l'acte imprimait la forme ISO.
             if ($valeur instanceof \DateTimeInterface) {
-                $valeur = $valeur->format('Y-m-d');
+                $valeur = $valeur->format('d/m/Y');
             }
 
             if ($valeur !== null && $valeur !== '') {

@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LieuSelect } from '@/components/ui/lieu-select';
 import { ChampVerrouille } from '@/components/ui/champ-verrouille';
+import { REGIMES_MATRIMONIAUX, SITUATIONS_MATRIMONIALES } from '@/data/questionnaires';
 import { Label } from '@/components/ui/label';
 import { PhoneField } from '@/components/ui/phone-field';
 import { DateField } from '@/components/ui/date-field';
+import { frDateToISO, isoDateToFR, isoDateSeule } from '@/lib/dates';
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 
@@ -26,10 +28,34 @@ const EMPTY_CLIENT = {
 // l'API porte aussi id/statut/timestamps, et les colonnes calculées ajoutées par
 // ClientController::update (dossiers_mis_a_jour) — les repostrer ferait échouer la
 // validation ou écraserait le statut prospect/client géré par le workflow.
-function champsFiche(client) {
-    return Object.fromEntries(
-        Object.keys(EMPTY_CLIENT).map(k => [k, client?.[k] ?? EMPTY_CLIENT[k]]),
+// Les trois dates de la fiche, dont l'état de cette modale porte l'**ISO** (voir lib/dates.js) :
+// c'est le format de leur destination, une colonne castée `date`.
+const CHAMPS_DATE = ['date_naissance', 'piece_delivree_le', 'piece_expire_le'];
+
+/**
+ * Ramène une date à `AAAA-MM-JJ`, d'où qu'elle vienne — les deux sources de pré-remplissage de
+ * cette modale n'emploient pas le même format :
+ *   - une fiche relue depuis l'API porte un horodatage (`1985-01-04T00:00:00.000000Z`) ;
+ *   - `initialValues`, construit depuis un questionnaire par `buildClientDraftFromDonnees`, porte
+ *     du français (`04/01/1985`) — et le poster tel quel provoquait l'inversion jour/mois.
+ * Une longueur fixe est par ailleurs nécessaire aux comparaisons de chaînes d'`incoherencesDates`.
+ */
+const versISO = (valeur) => isoDateSeule(valeur) || frDateToISO(valeur);
+
+function datesEnISO(valeurs) {
+    if (!valeurs) return valeurs;
+
+    const dates = Object.fromEntries(
+        CHAMPS_DATE.filter(k => k in valeurs).map(k => [k, versISO(valeurs[k])]),
     );
+
+    return { ...valeurs, ...dates };
+}
+
+function champsFiche(client) {
+    return datesEnISO(Object.fromEntries(
+        Object.keys(EMPTY_CLIENT).map(k => [k, client?.[k] ?? EMPTY_CLIENT[k]]),
+    ));
 }
 
 /**
@@ -55,13 +81,13 @@ function champsFiche(client) {
  */
 export function ModalNouveauClient({ open, onClose, onCreated, initialValues, client = null }) {
     const estEdition = !!client?.id;
-    const [form, setForm] = useState({ ...EMPTY_CLIENT, ...initialValues });
+    const [form, setForm] = useState({ ...EMPTY_CLIENT, ...datesEnISO(initialValues) });
     const [errors, setErrors] = useState({});
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
         if (!open) return;
-        setForm(estEdition ? champsFiche(client) : { ...EMPTY_CLIENT, ...initialValues });
+        setForm(estEdition ? champsFiche(client) : { ...EMPTY_CLIENT, ...datesEnISO(initialValues) });
         setErrors({});
     }, [open, client?.id]);
 
@@ -95,6 +121,10 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
     /**
      * Incohérences de dates détectées **avant** l'envoi, pour un retour immédiat. Le serveur reste
      * l'autorité (`ClientController::regles()`) : ceci n'en est que le reflet.
+     *
+     * Comparaisons de chaînes, donc **valides uniquement en AAAA-MM-JJ** — c'est ce que garantit
+     * `datesEnISO()` à l'entrée et `frDateToISO()` à la saisie. Avec du français dans l'état,
+     * `'10/10/2027' < '2026-09-08'` est vrai et la pièce était annoncée expirée à tort.
      */
     const incoherencesDates = () => {
         const messages = [];
@@ -216,7 +246,7 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
                                     </div>
                                     <div className="space-y-1.5">
                                         <Label>Date de naissance</Label>
-                                        <DateField value={form.date_naissance} onValueChange={d('date_naissance')} />
+                                        <DateField value={isoDateToFR(form.date_naissance)} onValueChange={val => d('date_naissance')(frDateToISO(val))} />
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
@@ -228,20 +258,44 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
                                         <Label>Situation matrimoniale</Label>
                                         <select value={form.situation_matrimoniale} onChange={(e) => changerSituation(e.target.value)} className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal">
                                             <option value="">— Choisir —</option>
-                                            <option>Célibataire</option>
-                                            <option>Marié(e)</option>
-                                            <option>Divorcé(e)</option>
-                                            <option>Veuf/Veuve</option>
+                                            {SITUATIONS_MATRIMONIALES.map(s => <option key={s}>{s}</option>)}
                                         </select>
+                                        {erreur('situation_matrimoniale')}
                                     </div>
                                 </div>
                                 {/* Un régime matrimonial n'a de sens que marié : le champ disparaît
                                     sinon, plutôt que d'accepter une saisie que le serveur refuse. */}
                                 {form.situation_matrimoniale === 'Marié(e)' && (
                                     <div className="space-y-1.5">
-                                        <Label>Régime matrimonial</Label>
-                                        <Input value={form.regime_matrimonial} onChange={f('regime_matrimonial')} placeholder="Communauté de biens / Séparation de biens" />
+                                        <Label htmlFor="client-regime">
+                                            Régime matrimonial <span className="text-danger">*</span>
+                                        </Label>
+                                        <select
+                                            id="client-regime"
+                                            value={form.regime_matrimonial}
+                                            onChange={f('regime_matrimonial')}
+                                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal"
+                                        >
+                                            <option value="">— Choisir —</option>
+                                            {REGIMES_MATRIMONIAUX.map(r => <option key={r}>{r}</option>)}
+                                            {/* Valeur héritée d'une saisie libre antérieure : gardée
+                                                sélectionnée et signalée, jamais effacée en silence. */}
+                                            {form.regime_matrimonial
+                                                && !REGIMES_MATRIMONIAUX.includes(form.regime_matrimonial) && (
+                                                <option value={form.regime_matrimonial}>
+                                                    {form.regime_matrimonial} — hors liste
+                                                </option>
+                                            )}
+                                        </select>
                                         {erreur('regime_matrimonial')}
+                                        {form.regime_matrimonial
+                                            && !REGIMES_MATRIMONIAUX.includes(form.regime_matrimonial) && (
+                                            <p className="flex items-start gap-1 text-xs text-warning-text">
+                                                <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                                                Cette valeur ne figure pas dans la liste — choisissez-en une
+                                                pour pouvoir enregistrer.
+                                            </p>
+                                        )}
                                     </div>
                                 )}
                                 <div className="grid grid-cols-2 gap-3">
@@ -257,7 +311,7 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1.5">
                                         <Label>Pièce délivrée le</Label>
-                                        <DateField value={form.piece_delivree_le} onValueChange={d('piece_delivree_le')} />
+                                        <DateField value={isoDateToFR(form.piece_delivree_le)} onValueChange={val => d('piece_delivree_le')(frDateToISO(val))} />
                                     </div>
                                     <div className="space-y-1.5">
                                         <Label>Délivrée à</Label>
@@ -266,7 +320,7 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label>Pièce expire le <span className="text-slate-400 text-xs">(optionnel)</span></Label>
-                                    <DateField value={form.piece_expire_le} onValueChange={d('piece_expire_le')} />
+                                    <DateField value={isoDateToFR(form.piece_expire_le)} onValueChange={val => d('piece_expire_le')(frDateToISO(val))} />
                                 </div>
                             </>
                         ) : (

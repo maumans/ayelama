@@ -219,6 +219,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/types-actes/{typeActe}/documents-attendus/reinitialiser', [ParametresController::class, 'reinitialiserDocumentsAttendus'])->name('documents_attendus.reinitialiser');
         // Référentiel des lieux : correction et validation des lieux amorcés au seeder.
         Route::get('/lieux', [ParametresController::class, 'lieux'])->name('lieux');
+        // ⚠️ **Avant** `/lieux/{lieu}` : déclarée après, « valider » serait pris pour un
+        // identifiant de lieu et la route répondrait 404.
+        Route::patch('/lieux/valider', [ParametresController::class, 'validerLieux'])->name('lieux.valider');
         Route::patch('/lieux/{lieu}', [ParametresController::class, 'updateLieu'])->name('lieux.update');
         // Suppression possible seulement pour un lieu non référencé — voir Lieu::estSupprimable().
         Route::delete('/lieux/{lieu}', [ParametresController::class, 'destroyLieu'])->name('lieux.destroy');

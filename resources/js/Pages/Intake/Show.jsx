@@ -2,143 +2,33 @@ import React, { useState } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import GuestPublicLayout from '@/Layouts/GuestPublicLayout';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, roleGeo, patchGeo } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP } from '@/data/questionnaires';
 import { getPublicIntakeFields, groupFieldsBySection } from '@/lib/partiesPayload';
 import { buildPartieFields } from '@/lib/clientFields';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { DateField } from '@/components/ui/date-field';
-import { NumberField } from '@/components/ui/number-field';
-import { PhoneField } from '@/components/ui/phone-field';
-import { LieuSelect } from '@/components/ui/lieu-select';
-import { ChampVerrouille } from '@/components/ui/champ-verrouille';
+import { Input } from '@/Components/ui/input';
+import { Label } from '@/Components/ui/label';
+import { Button } from '@/Components/ui/button';
+import { ChampQuestionnaire, classesChamp } from '@/Components/Questionnaire/ChampQuestionnaire';
 import {
     Upload, Send, CheckCircle2, AlertTriangle, PenLine, ScanLine, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-function Field({ field, value, onChange, lieux, formValues }) {
-    const geo = roleGeo(field.id);
-
-    if (geo) {
-        // Cascade **hors ligne** : le référentiel arrive dans les props de la page. Ce formulaire
-        // n'est pas authentifié — aucun point d'entrée ne lui est exposé, et l'ajout d'un lieu n'y
-        // est pas offert : un tiers ne doit pas pouvoir peupler le référentiel de l'étude.
-        const parentNom = geo.parentField ? (formValues[geo.parentField] || null) : null;
-        const options = (lieux?.[geo.niveau] ?? [])
-            .filter(l => geo.parentField ? l.parent === parentNom : true);
-
-        return (
-            <LieuSelect
-                id={field.id}
-                niveau={geo.niveau}
-                parentNom={parentNom}
-                value={value || ''}
-                onChange={onChange}
-                lieuxInitiaux={options}
-            />
-        );
-    }
-
-    if (field.type === 'select') {
-        return (
-            <select
-                value={value || ''}
-                onChange={e => onChange(e.target.value)}
-                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-            >
-                <option value="">— Choisir —</option>
-                {(field.options ?? []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-        );
-    }
-    if (field.type === 'date') {
-        return <DateField value={value || ''} onValueChange={onChange} />;
-    }
-    if (field.type === 'number') {
-        return (
-            <NumberField
-                decimals={field.decimals ?? 0}
-                placeholder={field.placeholder}
-                value={value || ''}
-                onValueChange={onChange}
-                className={cn(field.mono && 'font-ref')}
-            />
-        );
-    }
-    if (field.type === 'year') {
-        return (
-            <Input
-                type="text"
-                inputMode="numeric"
-                maxLength={4}
-                placeholder={field.placeholder}
-                value={value || ''}
-                onChange={e => {
-                    const v = e.target.value.replace(/\D/g, '').slice(0, 4);
-                    onChange(v);
-                }}
-                className={cn(field.mono && 'font-ref')}
-            />
-        );
-    }
-    if (field.type === 'tel') {
-        return <PhoneField placeholder={field.placeholder} value={value || ''} onValueChange={onChange} />;
-    }
-    if (field.type === 'textarea') {
-        return (
-            <textarea
-                rows={3}
-                placeholder={field.placeholder}
-                value={value || ''}
-                onChange={e => onChange(e.target.value)}
-                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-            />
-        );
-    }
-    // Constante de fait (le pays de résidence) : verrouillée pour ne pas être modifiée par
-    // inadvertance, mais déverrouillable — un client peut résider à l'étranger.
-    if (field.readonly) {
-        return (
-            <ChampVerrouille
-                value={value || ''}
-                onChange={onChange}
-                placeholder={field.placeholder}
-                className={cn(field.mono && 'font-ref')}
-            />
-        );
-    }
-
+function FieldGroup({ fields, formValues, setFormValues, lieux, blocantsParChamp = new Map() }) {
     return (
-        <Input
-            type={field.type === 'email' ? 'email' : 'text'}
-            placeholder={field.placeholder}
-            value={value || ''}
-            onChange={e => onChange(e.target.value)}
-            className={cn(field.mono && 'font-ref')}
-        />
-    );
-}
-
-function FieldGroup({ fields, formValues, setFormValues, lieux }) {
-    return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
             {fields.map(field => (
-                <div key={field.id} className={cn(field.type === 'textarea' && 'sm:col-span-2')}>
-                    <Label htmlFor={field.id}>
-                        {field.label}
-                        {field.required && <span className="text-danger ml-1">*</span>}
-                    </Label>
-                    <div className="mt-1.5">
-                        <Field
-                            field={field}
-                            value={formValues[field.id]}
-                            lieux={lieux}
-                            formValues={formValues}
-                            onChange={val => setFormValues(prev => ({ ...prev, ...patchGeo(field.id, val) }))}
-                        />
-                    </div>
+                <div key={field.id} className={classesChamp({ field, enDefaut: blocantsParChamp.has(field.id) })}>
+                    <ChampQuestionnaire
+                        field={field}
+                        valeurs={formValues}
+                        onPatch={(patch) => setFormValues(prev => ({ ...prev, ...patch }))}
+                        motif={blocantsParChamp.get(field.id)}
+                        // Le référentiel arrive dans les props de la page : ce formulaire n'est pas
+                        // authentifié, aucun point d'entrée ne lui est exposé — et l'ajout d'un lieu
+                        // n'y est pas offert, un tiers ne devant pas peupler le référentiel.
+                        referentielHorsLigne={lieux}
+                    />
                 </div>
             ))}
         </div>

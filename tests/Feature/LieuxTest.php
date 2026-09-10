@@ -42,7 +42,105 @@ class LieuxTest extends TestCase
         return $ville;
     }
 
+
+    // ── Valider un lieu : un geste à part entière (2026-09-09) ───────────────
+
+    public function test_un_lieu_se_valide_sans_etre_renomme(): void
+    {
+        // Le défaut signalé par l'étude : **seul un renommage** levait `a_verifier`. Devant
+        // 53 quartiers marqués, il n'existait aucun moyen de dire « celui-ci est bon » — sinon
+        // en le renommant à l'identique.
+        $quartier = Lieu::create([
+            'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Nongo', 'a_verifier' => true,
+        ]);
+
+        $this->actingAs($this->utilisateur(RoleUtilisateur::Administrateur))
+            ->patch("/parametres/lieux/{$quartier->id}", ['a_verifier' => false])
+            ->assertRedirect();
+
+        $frais = $quartier->fresh();
+
+        $this->assertFalse($frais->a_verifier);
+        $this->assertSame('Nongo', $frais->nom, 'Valider ne doit pas toucher au nom.');
+    }
+
+    public function test_un_renommage_ne_vaut_plus_validation(): void
+    {
+        // Les deux gestes sont distincts : corriger une orthographe n'est pas confirmer que le lieu
+        // existe et qu'il est bien placé. Confondre les deux validait en masse sans relecture.
+        $quartier = Lieu::create([
+            'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Nongo', 'a_verifier' => true,
+        ]);
+
+        $this->actingAs($this->utilisateur(RoleUtilisateur::Administrateur))
+            ->patch("/parametres/lieux/{$quartier->id}", ['nom' => 'Nongo Centre'])
+            ->assertRedirect();
+
+        $frais = $quartier->fresh();
+
+        $this->assertSame('Nongo Centre', $frais->nom);
+        $this->assertTrue($frais->a_verifier, 'Renommer ne vaut pas valider.');
+    }
+
+    public function test_la_validation_en_lot_ne_touche_que_les_enfants_directs(): void
+    {
+        // Jamais récursive : valider une ville ne doit pas confirmer en silence des dizaines de
+        // quartiers que personne n'a lus.
+        $ville   = Lieu::create(['niveau' => Lieu::NIVEAU_VILLE, 'nom' => 'Conakry', 'a_verifier' => true]);
+        $commune = Lieu::create(['parent_id' => $ville->id, 'niveau' => Lieu::NIVEAU_COMMUNE, 'nom' => 'Ratoma', 'a_verifier' => true]);
+        $quartier = Lieu::create(['parent_id' => $commune->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Nongo', 'a_verifier' => true]);
+
+        $this->actingAs($this->utilisateur(RoleUtilisateur::Administrateur))
+            ->patch('/parametres/lieux/valider', ['parent_id' => $ville->id])
+            ->assertRedirect();
+
+        $this->assertFalse($commune->fresh()->a_verifier, 'La commune est un enfant direct.');
+        $this->assertTrue($quartier->fresh()->a_verifier, 'Le quartier est deux niveaux plus bas.');
+        $this->assertTrue($ville->fresh()->a_verifier, 'Le parent lui-même reste marqué.');
+    }
+
+    public function test_la_validation_en_lot_valide_les_quartiers_d_une_commune(): void
+    {
+        $ville   = Lieu::create(['niveau' => Lieu::NIVEAU_VILLE, 'nom' => 'Conakry']);
+        $commune = Lieu::create(['parent_id' => $ville->id, 'niveau' => Lieu::NIVEAU_COMMUNE, 'nom' => 'Dixinn']);
+
+        foreach (['Bellevue', 'Camayenne', 'Hafia'] as $nom) {
+            Lieu::create(['parent_id' => $commune->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => $nom, 'a_verifier' => true]);
+        }
+
+        $this->actingAs($this->utilisateur(RoleUtilisateur::Administrateur))
+            ->patch('/parametres/lieux/valider', ['parent_id' => $commune->id])
+            ->assertRedirect();
+
+        $this->assertSame(0, Lieu::where('parent_id', $commune->id)->where('a_verifier', true)->count());
+    }
+
+    public function test_la_validation_en_lot_exige_l_autorisation(): void
+    {
+        $ville = Lieu::create(['niveau' => Lieu::NIVEAU_VILLE, 'nom' => 'Conakry']);
+        $commune = Lieu::create(['parent_id' => $ville->id, 'niveau' => Lieu::NIVEAU_COMMUNE, 'nom' => 'Ratoma', 'a_verifier' => true]);
+
+        // Un clerc peut **ajouter** un lieu en pleine saisie, il ne peut pas le valider : son ajout
+        // entre justement dans la liste de travail de l'administrateur.
+        $this->actingAs($this->utilisateur(RoleUtilisateur::Clerc))
+            ->patch('/parametres/lieux/valider', ['parent_id' => $ville->id])
+            ->assertForbidden();
+
+        $this->assertTrue($commune->fresh()->a_verifier);
+    }
+
+    public function test_la_route_de_validation_en_lot_ne_capture_pas_un_identifiant(): void
+    {
+        // Piège d'ordre de déclaration : placée après `/lieux/{lieu}`, la route « valider » aurait
+        // été lue comme un identifiant de lieu et aurait répondu 404.
+        $this->assertSame(
+            'parametres.lieux.valider',
+            app('router')->getRoutes()->getByName('parametres.lieux.valider')?->getName(),
+        );
+    }
+
     // ── Structure ────────────────────────────────────────────────────────────
+
 
     public function test_un_meme_nom_est_permis_sous_deux_parents_distincts(): void
     {

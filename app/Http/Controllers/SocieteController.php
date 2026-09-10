@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Partie;
 use App\Models\Societe;
+use App\Support\Normalisation;
 use Illuminate\Http\Request;
 
 /**
@@ -73,6 +74,24 @@ class SocieteController extends Controller
      * Règles partagées par store() et update() — la fiche société est le même objet qu'on
      * la crée depuis l'assistant de dossier ou qu'on la corrige ensuite.
      */
+    /**
+     * Convertit en ISO la date reçue au format français, **avant** validation — voir
+     * `Normalisation::datesEnISO()` pour le pourquoi, et `ClientController::normaliserDates()`
+     * pour le pendant sur la fiche client.
+     *
+     * La modale envoie désormais de l'ISO, mais un import referait l'inversion en silence.
+     */
+    private function normaliserDates(Request $request): Request
+    {
+        $converties = Normalisation::datesEnISO($request->all(), ['date_constitution']);
+
+        if ($converties !== []) {
+            $request->merge($converties);
+        }
+
+        return $request;
+    }
+
     private function regles(): array
     {
         return [
@@ -122,7 +141,7 @@ class SocieteController extends Controller
     {
         $this->authorize('create', Societe::class);
 
-        $societe = Societe::create($request->validate($this->regles(), $this->messagesValidation()));
+        $societe = Societe::create($this->normaliserDates($request)->validate($this->regles(), $this->messagesValidation()));
 
         return response()->json($this->presenter($societe), 201);
     }
@@ -142,7 +161,7 @@ class SocieteController extends Controller
     {
         $this->authorize('update', $societe);
 
-        $societe->update($request->validate($this->regles(), $this->messagesValidation()));
+        $societe->update($this->normaliserDates($request)->validate($this->regles(), $this->messagesValidation()));
 
         return response()->json($this->presenter($societe->fresh()));
     }

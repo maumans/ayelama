@@ -14,10 +14,10 @@ import { cn } from '@/lib/utils';
  * l'enregistrer. Le déverrouillage est explicite et visible, ce qui est exactement la demande —
  * empêcher la modification *involontaire*, pas la modification.
  */
-export function ChampVerrouille({ value, onChange, placeholder, id, className }) {
+export function ChampVerrouille({ value, onChange, placeholder, id, className, disabled = false }) {
     const [deverrouille, setDeverrouille] = useState(false);
 
-    if (deverrouille) {
+    if (deverrouille && !disabled) {
         return (
             <Input
                 id={id}
@@ -35,11 +35,13 @@ export function ChampVerrouille({ value, onChange, placeholder, id, className })
         <button
             type="button"
             id={id}
+            disabled={disabled}
             onClick={() => setDeverrouille(true)}
             title="Cliquez pour modifier — cette valeur est la même sur la quasi-totalité des fiches"
             className={cn(
                 'flex h-10 w-full items-center gap-2 rounded-md border border-slate-200 bg-slate-50',
-                'px-3 py-2 text-left text-sm text-slate-500 transition-colors hover:border-slate-300',
+                'px-3 py-2 text-left text-sm text-slate-500 transition-colors',
+                disabled ? 'cursor-not-allowed' : 'hover:border-slate-300',
                 className,
             )}
         >

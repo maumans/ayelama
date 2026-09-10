@@ -6,6 +6,33 @@ use Illuminate\Database\Eloquent\Model;
 
 class Client extends Model
 {
+    /**
+     * Régimes matrimoniaux — **liste fermée**, et seule référence du projet.
+     *
+     * Le champ était en saisie libre, avec pour résultat mesuré en base **quatre orthographes pour
+     * deux régimes** : « Communauté de biens », « Communaté de bien » (deux fautes), « Séparation »
+     * et « Séparation de biens ». Les modèles Word substituant la valeur brute, la faute partait
+     * telle quelle dans les actes authentiques.
+     *
+     * ⚠️ Ces quatre régimes sont le socle civiliste. Que tous soient praticables en Guinée, et
+     * lequel s'applique à défaut de contrat de mariage, relèvent de l'étude : la liste est ici, à un
+     * seul endroit, pour être corrigeable en une ligne — et non recopiée dans huit déclarations de
+     * questionnaire comme avant.
+     *
+     * Miroir côté frontend : `REGIMES_MATRIMONIAUX` dans `resources/js/data/questionnaires.js`, que
+     * les questionnaires étant statiques on ne peut pas alimenter depuis PHP. Un test compare les
+     * deux listes, sans quoi un régime ajouté d'un seul côté serait sélectionnable et refusé.
+     */
+    public const REGIMES_MATRIMONIAUX = [
+        'Communauté de biens',
+        'Séparation de biens',
+        'Communauté réduite aux acquêts',
+        'Communauté universelle',
+    ];
+
+    /** Situations matrimoniales — déjà un `select` partout, mais dont les options étaient recopiées. */
+    public const SITUATIONS_MATRIMONIALES = ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'];
+
     protected $fillable = [
         'type', 'statut',
         // Personne physique
@@ -37,6 +64,10 @@ class Client extends Model
             'date_naissance'     => 'date',
             'piece_delivree_le'  => 'date',
             'piece_expire_le'    => 'date',
+            // Volontairement **hors `$fillable`** : ce témoin est posé par la migration de
+            // reprise des dates inversées, et levé par ClientController::update() quand l'étude
+            // a validé la fiche. Aucune requête ne doit pouvoir l'écrire.
+            'dates_a_confirmer'  => 'array',
         ];
     }
 
@@ -90,7 +121,61 @@ class Client extends Model
             );
         }
 
+        if ($this->dates_a_confirmer) {
+            $avertissements[] = $this->messageDatesAConfirmer();
+        }
+
         return $avertissements;
+    }
+
+    /** Libellés des colonnes reprises, tels qu'un clerc les lit sur la fiche. */
+    private const LIBELLES_DATES = [
+        'date_naissance'    => 'naissance',
+        'piece_delivree_le' => 'délivrance de la pièce',
+        'piece_expire_le'   => 'expiration de la pièce',
+    ];
+
+    /**
+     * Deux modales postaient leurs dates en français vers une colonne castée : PHP y lisait un
+     * mois/jour américain et `01/04/1985` devenait le 4 janvier. La migration
+     * `corriger_dates_inversees_clients` a réinversé ces valeurs.
+     *
+     * Le mécanisme est certain, mais **une ligne prise isolément reste ambiguë** — « 04/01/1985 »
+     * peut être un vrai 4 janvier. L'avertissement donne donc les deux lectures et invite au
+     * recontrôle sur la pièce d'identité, plutôt que de présenter la valeur reprise comme sûre.
+     *
+     * Il disparaît au premier enregistrement de la fiche : ouvrir et valider, c'est confirmer.
+     */
+    private function messageDatesAConfirmer(): string
+    {
+        $details = [];
+
+        foreach ((array) $this->dates_a_confirmer as $colonne => $lectures) {
+            $retenu = $this->enFrancais($lectures['retenu'] ?? null);
+            $avant  = $this->enFrancais($lectures['avant'] ?? null);
+
+            if ($retenu === null) {
+                continue;
+            }
+
+            $libelle   = self::LIBELLES_DATES[$colonne] ?? $colonne;
+            $details[] = $avant === null
+                ? "{$libelle} {$retenu}"
+                : "{$libelle} {$retenu} (enregistrée {$avant})";
+        }
+
+        return 'Dates reprises automatiquement — jour et mois avaient été inversés à la saisie. '
+            . "À recontrôler sur la pièce d'identité : " . implode(', ', $details)
+            . '. Enregistrer la fiche lève cet avertissement.';
+    }
+
+    private function enFrancais(?string $iso): ?string
+    {
+        if (!$iso || !preg_match('#^(\d{4})-(\d{2})-(\d{2})#', $iso, $p)) {
+            return null;
+        }
+
+        return "{$p[3]}/{$p[2]}/{$p[1]}";
     }
 
     public function estProspect(): bool

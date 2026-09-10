@@ -7,6 +7,8 @@
 // vide dans les actes générés ; oubliée côté PHP, la fiche du registre ne se met plus à
 // jour quand la modification devient effective.
 
+import { isoDateToFR } from '@/lib/dates';
+
 const CHAMPS = {
     'soc.denomination': 'denomination',
     'soc.forme': 'forme',
@@ -83,7 +85,17 @@ export function mapSocieteToQuestionnaire(societe) {
         const brute = societe[colonne];
         if (brute === null || brute === undefined || brute === '') continue;
 
-        valeurs[cle] = MONTANTS.has(colonne) ? String(Math.round(Number(brute))) : brute;
+        if (MONTANTS.has(colonne)) {
+            valeurs[cle] = String(Math.round(Number(brute)));
+        } else if (DATES.has(colonne)) {
+            // La fiche vient de l'API, où une colonne castée est sérialisée en horodatage
+            // (`2019-07-25T00:00:00.000000Z`). Recopiée telle quelle, cette valeur partait dans
+            // l'acte authentique et laissait `${..._jma}` / `${..._lettres}` non dérivées, faute
+            // d'être reconnue comme une date. `donnees` attend du JJ/MM/AAAA — voir lib/dates.js.
+            valeurs[cle] = isoDateToFR(brute) || brute;
+        } else {
+            valeurs[cle] = brute;
+        }
     }
 
     // Hors de CHAMPS, donc prérempli **sans** être masqué (voir estChampSociete). Le serveur le
@@ -99,6 +111,9 @@ export function mapSocieteToQuestionnaire(societe) {
 }
 
 const MONTANTS = new Set(['capital_chiffres', 'valeur_nominale_chiffres']);
+
+/** Miroir de `Societe::COLONNES_DATE` (PHP) — les deux doivent évoluer ensemble. */
+const DATES = new Set(['date_constitution']);
 
 /** Libellé court d'une société, pour un récapitulatif ou une puce. */
 export function societeDisplayName(societe) {

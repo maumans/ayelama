@@ -29,6 +29,15 @@ export function LieuSelect({
     disabled = false,
     placeholder,
     id,
+    /**
+     * Remonte le nombre d'options réellement disponibles, pour que **le blocant du formulaire dise
+     * la même chose que le champ**.
+     *
+     * Sans cela, `blocantsEtape` répondait « Choisissez une valeur » devant une liste vide : le
+     * message était juste dans sa formulation et faux dans son sens. Seul ce composant connaît le
+     * résultat de la requête, d'où la remontée.
+     */
+    onNombreOptions = null,
 }) {
     const attendUnParent = niveau !== 'ville';
     const parentManquant = attendUnParent && !parentNom;
@@ -37,6 +46,7 @@ export function LieuSelect({
     // fonctionne, en recevant le référentiel dans ses props plutôt que par un point d'entrée
     // exposé sans authentification.
     const horsLigne = Array.isArray(lieuxInitiaux);
+    const nbInitiaux = horsLigne ? lieuxInitiaux.length : 0;
 
     const [lieux, setLieux] = useState(horsLigne ? lieuxInitiaux : []);
     const [chargement, setChargement] = useState(false);
@@ -45,9 +55,17 @@ export function LieuSelect({
     const [erreurAjout, setErreurAjout] = useState(null);
     const inputAjout = useRef(null);
 
+    // Gardée dans une ref : la passer en dépendance de l'effet le relancerait à chaque rendu du
+    // parent, et donc rechargerait la liste en boucle.
+    const rapporter = useRef(onNombreOptions);
+    rapporter.current = onNombreOptions;
+
     useEffect(() => {
         if (horsLigne || parentManquant) {
             if (parentManquant) setLieux([]);
+            // `null` et non `0` : « parent pas encore choisi » n'est pas « référentiel vide », et
+            // le blocant doit pouvoir les distinguer.
+            rapporter.current?.(parentManquant ? null : nbInitiaux);
             return;
         }
 
@@ -56,12 +74,18 @@ export function LieuSelect({
 
         axios
             .get('/lieux', { params: { niveau, parent: parentNom }, signal: controleur.signal })
-            .then(({ data }) => setLieux(data.lieux ?? []))
-            .catch((err) => { if (!axios.isCancel(err)) setLieux([]); })
+            .then(({ data }) => {
+                const recus = data.lieux ?? [];
+                setLieux(recus);
+                rapporter.current?.(recus.length);
+            })
+            .catch((err) => { if (!axios.isCancel(err)) { setLieux([]); rapporter.current?.(0); } })
             .finally(() => setChargement(false));
 
         return () => controleur.abort();
-    }, [niveau, parentNom, horsLigne, parentManquant]);
+    // `nbInitiaux` plutôt que `lieuxInitiaux` : un tableau est une référence neuve à chaque rendu du
+    // parent, et l'effet se relancerait sans fin.
+    }, [niveau, parentNom, horsLigne, parentManquant, nbInitiaux]);
 
     useEffect(() => {
         if (ajoutOuvert) inputAjout.current?.focus();
@@ -91,6 +115,19 @@ export function LieuSelect({
     // sélectionnée, sinon ouvrir une fiche ancienne l'effacerait en silence.
     const horsReferentiel = value && !lieux.some(l => l.nom === value);
 
+    /**
+     * Le parent est choisi, mais le référentiel ne contient **rien** sous lui.
+     *
+     * Cas majoritaire et non anecdotique : 33 des 39 communes n'ont aucun quartier — seule Conakry
+     * est peuplée. Le champ affichait alors « — Choisir — » devant une liste vide, et le blocant
+     * répondait « Choisissez une valeur » : l'étude se retrouvait devant un champ obligatoire
+     * impossible à satisfaire, sans savoir que la solution (ajouter le lieu) était juste en dessous
+     * en petits caractères gris.
+     */
+    const referentielVide = !parentManquant && !chargement && lieux.length === 0 && !horsReferentiel;
+
+    const libelleNiveau = niveau === 'ville' ? 'ville' : niveau === 'commune' ? 'commune' : 'quartier';
+
     return (
         <div className="space-y-1">
             <select
@@ -107,7 +144,9 @@ export function LieuSelect({
                 <option value="">
                     {parentManquant
                         ? `— choisissez d'abord ${niveau === 'commune' ? 'la ville' : 'la commune'} —`
-                        : (placeholder ?? '— Choisir —')}
+                        : referentielVide
+                            ? `— aucun ${libelleNiveau} au référentiel${parentNom ? ` pour ${parentNom}` : ''} —`
+                            : (placeholder ?? '— Choisir —')}
                 </option>
 
                 {horsReferentiel && (
@@ -134,13 +173,32 @@ export function LieuSelect({
                 </p>
             )}
 
+            {/* Référentiel vide : on le dit, et on nomme le recours. Sans ce message, le champ
+                obligatoire paraissait cassé — la liste étant vide et le lien d'ajout discret. */}
+            {referentielVide && (
+                <p className="flex items-start gap-1 text-xs text-warning-text">
+                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                    {peutAjouter
+                        ? `Aucun ${libelleNiveau} n'est encore enregistré${parentNom ? ` pour ${parentNom}` : ''} — ajoutez-le ci-dessous, il servira aux dossiers suivants.`
+                        : `Aucun ${libelleNiveau} n'est proposé${parentNom ? ` pour ${parentNom}` : ''} — laissez vide et signalez-le à l'étude.`}
+                </p>
+            )}
+
             {/* L'ajout n'est offert qu'aux écrans authentifiés : sur le formulaire public, un tiers
-                ne doit pas pouvoir peupler le référentiel de l'étude. */}
+                ne doit pas pouvoir peupler le référentiel de l'étude.
+
+                Mis en **évidence** quand la liste est vide : c'est précisément le moment où il est
+                le seul recours, et c'est là qu'il passait inaperçu en petits caractères gris. */}
             {peutAjouter && !parentManquant && !ajoutOuvert && (
                 <button
                     type="button"
                     onClick={() => setAjoutOuvert(true)}
-                    className="flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-seal"
+                    className={cn(
+                        'flex items-center gap-1 text-xs transition-colors',
+                        referentielVide
+                            ? 'rounded-md border border-seal/40 bg-seal-light px-2 py-1 font-medium text-seal-hover hover:border-seal'
+                            : 'text-slate-400 hover:text-seal',
+                    )}
                 >
                     <Plus className="h-3 w-3" />
                     Ajouter {niveau === 'ville' ? 'une ville' : niveau === 'commune' ? 'une commune' : 'un quartier'}

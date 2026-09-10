@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Client;
 use App\Services\ClientProjectionService;
+use App\Support\Normalisation;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ClientController extends Controller
 {
@@ -75,9 +77,33 @@ class ClientController extends Controller
     }
 
     /**
-     * Règles partagées par store() et update() — la fiche client est le même objet
-     * qu'on la crée depuis l'assistant de dossier ou qu'on la corrige ensuite.
+     * Convertit en ISO les dates reçues au format français, **avant** validation.
+     *
+     * Même motif et même raison que `normaliserIdentite()` ci-dessus : la conversion doit précéder
+     * la validation, que ni la règle `date` ni le cast Eloquent n'atteignent à temps.
+     *
+     * Sans cela, PHP lit `JJ/MM/AAAA` comme du **mois/jour américain** :
+     *   - `13/05/1985` → `strtotime` échoue → la règle `date` refuse une date pourtant valide ;
+     *   - `01/04/1985` → devient le **4 janvier**, enregistré sans la moindre erreur.
+     *
+     * Les modales envoient désormais de l'ISO, mais un import ou un ancien formulaire referait
+     * l'inversion en silence — et c'est le silence qui était grave, pas le format. On convertit
+     * donc plutôt que de refuser : l'appelant historique reste servi.
      */
+    private function normaliserDates(Request $request): Request
+    {
+        $converties = Normalisation::datesEnISO(
+            $request->all(),
+            ['date_naissance', 'piece_delivree_le', 'piece_expire_le'],
+        );
+
+        if ($converties !== []) {
+            $request->merge($converties);
+        }
+
+        return $request;
+    }
+
     /**
      * Messages là où la tournure par défaut se lit mal.
      *
@@ -94,11 +120,18 @@ class ClientController extends Controller
             'piece_delivree_le.after_or_equal' => "La pièce ne peut pas avoir été délivrée avant la naissance du titulaire.",
             'piece_expire_le.after'            => "La date d'expiration doit être postérieure à la date de délivrance.",
             'regime_matrimonial.prohibited_unless' => 'Un régime matrimonial ne se renseigne que pour une personne mariée.',
+            'regime_matrimonial.required_if'    => "Le régime matrimonial est nécessaire pour une personne mariée : l'acte le nomme.",
+            'regime_matrimonial.in'             => 'Choisissez un régime dans la liste — cette valeur serait reprise telle quelle dans les actes.',
+            'situation_matrimoniale.in'         => 'Choisissez une situation dans la liste.',
             'telephone.regex'                  => 'Numéro guinéen attendu — par exemple 622 78 37 32.',
             'representant_legal.required_if'   => "Une personne morale doit avoir un représentant légal : c'est lui qui signe.",
         ];
     }
 
+    /**
+     * Règles partagées par store() et update() — la fiche client est le même objet
+     * qu'on la crée depuis l'assistant de dossier ou qu'on la corrige ensuite.
+     */
     private function regles(): array
     {
         return [
@@ -133,11 +166,25 @@ class ClientController extends Controller
             // un renouvellement ; l'avertissement est porté par `avertissements()`.
             'piece_expire_le'         => ['nullable', 'date', 'after:piece_delivree_le'],
 
-            'situation_matrimoniale'  => ['nullable', 'string', 'max:50', 'in:,Célibataire,Marié(e),Divorcé(e),Veuf/Veuve'],
+            // Les listes vivent sur le modèle, seule référence — elles étaient recopiées ici et dans
+            // les dix déclarations de questionnaire.
+            'situation_matrimoniale'  => ['nullable', 'string', 'max:50', Rule::in(['', ...Client::SITUATIONS_MATRIMONIALES])],
 
-            // Un régime matrimonial n'a de sens que marié : le renseigner sans situation
-            // correspondante décrit un état civil impossible, que les actes reprendraient.
-            'regime_matrimonial'      => ['nullable', 'string', 'max:100', 'prohibited_unless:situation_matrimoniale,Marié(e)'],
+            // Trois règles complémentaires, et non redondantes — c'est leur conjonction qui décrit
+            // un état civil réel :
+            //   `required_if`       : l'acte nomme le régime, le laisser vide reporte le problème à
+            //                         la rédaction ;
+            //   `prohibited_unless` : un régime sans mariage décrit un état impossible ;
+            //   `Rule::in`          : le régime n'est pas du texte libre — la base portait quatre
+            //                         orthographes pour deux régimes, dont « Communaté de bien ».
+            'regime_matrimonial'      => [
+                'nullable',
+                'string',
+                'max:100',
+                'required_if:situation_matrimoniale,Marié(e)',
+                'prohibited_unless:situation_matrimoniale,Marié(e)',
+                Rule::in(['', ...Client::REGIMES_MATRIMONIAUX]),
+            ],
             'denomination'            => ['required_if:type,morale', 'nullable', 'string', 'max:200'],
             'forme'                   => ['nullable', 'string', 'max:50'],
             'rccm'                    => ['nullable', 'string', 'max:100'],
@@ -165,7 +212,7 @@ class ClientController extends Controller
     {
         $this->authorize('create', Client::class);
 
-        $client = Client::create($this->normaliserIdentite($request)->validate($this->regles(), $this->messagesValidation()));
+        $client = Client::create($this->normaliserDates($this->normaliserIdentite($request))->validate($this->regles(), $this->messagesValidation()));
 
         return response()->json($client, 201);
     }
@@ -187,7 +234,14 @@ class ClientController extends Controller
         // tous les dossiers liés non clôturés (voir ClientPolicy).
         $this->authorize('update', $client);
 
-        $client->update($this->normaliserIdentite($request)->validate($this->regles(), $this->messagesValidation()));
+        $client->update($this->normaliserDates($this->normaliserIdentite($request))->validate($this->regles(), $this->messagesValidation()));
+
+        // Ouvrir la fiche et l'enregistrer, c'est en confirmer les dates : on lève ici le témoin
+        // posé par la migration de reprise des dates inversées. Il n'est pas `fillable` — aucune
+        // requête ne peut l'écrire, et c'est bien ce geste-ci qui vaut confirmation.
+        if ($client->dates_a_confirmer) {
+            $client->forceFill(['dates_a_confirmer' => null])->save();
+        }
 
         $dossiersMisAJour = $projection->reprojeterDossiersDuClient($client);
 

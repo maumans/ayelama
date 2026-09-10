@@ -249,6 +249,38 @@ class ParametresController extends Controller
     }
 
     /**
+     * Valide d'un coup les enfants directs d'un lieu — les quartiers d'une commune, les communes
+     * d'une ville.
+     *
+     * L'étude a 53 quartiers marqués « à vérifier » : les confirmer un par un demanderait autant
+     * d'allers-retours, et cette friction est exactement ce qui a fait que **rien** n'a été validé
+     * depuis l'amorçage. La validation reste un geste humain, elle n'a pas à être laborieuse.
+     *
+     * Bornée aux **enfants directs**, jamais récursive : valider une ville ne doit pas confirmer en
+     * silence des dizaines de quartiers que personne n'a lus. C'est aussi pourquoi l'autorisation
+     * porte sur le parent — celui que l'utilisateur a effectivement sous les yeux.
+     */
+    public function validerLieux(Request $request)
+    {
+        $data = $request->validate([
+            'parent_id' => ['required', 'integer', 'exists:lieux,id'],
+        ]);
+
+        $parent = \App\Models\Lieu::findOrFail($data['parent_id']);
+
+        $this->authorize('update', $parent);
+
+        $valides = $parent->enfants()->where('a_verifier', true)->update(['a_verifier' => false]);
+
+        return back()->with(
+            'success',
+            $valides === 0
+                ? "Aucun lieu à valider sous « {$parent->nom} »."
+                : sprintf('%d lieu(x) validé(s) sous « %s ».', $valides, $parent->nom),
+        );
+    }
+
+    /**
      * Supprime un lieu du référentiel — **uniquement s'il n'est référencé nulle part**.
      *
      * La désactivation seule laissait le référentiel se remplir de scories sans recours : un lieu

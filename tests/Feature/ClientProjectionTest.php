@@ -89,9 +89,11 @@ class ClientProjectionTest extends TestCase
         $this->assertSame('GN0123456', $donnees['pp.piece_numero']);
         $this->assertSame('CNI CEDEAO', $donnees['pp.piece_type']);
         $this->assertSame('Conakry', $donnees['pp.demeurant_ville']);
-        // Les dates sont sérialisées en ISO : les modèles Word attendent une chaîne
-        // et le frontend sait réafficher ce format.
-        $this->assertSame('1985-03-15', $donnees['pp.date_naissance']);
+        // `donnees` porte les dates en **JJ/MM/AAAA** : c'est le format que le modèle Word reçoit
+        // tel quel, et le seul depuis lequel ActesGeneratorService dérive ${..._jma} et
+        // ${..._lettres}. Cette assertion attendait de l'ISO et verrouillait donc le défaut —
+        // l'acte imprimait « 1985-03-15 », voire l'horodatage complet.
+        $this->assertSame('15/03/1985', $donnees['pp.date_naissance']);
         // Adresse composite, pour les schémas qui n'ont qu'un champ d'adresse libre.
         $this->assertSame('Tanerie, Matoto, Conakry', $donnees['pp.adresse']);
     }

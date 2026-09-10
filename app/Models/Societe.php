@@ -66,6 +66,15 @@ class Societe extends Model
         'soc.date_constitution'        => 'date_constitution',
     ];
 
+    /**
+     * Colonnes castées `date` parmi celles ci-dessus.
+     *
+     * `donnees` porte les dates en `JJ/MM/AAAA` et ces colonnes en ISO : la traversée demande donc
+     * une conversion **dans les deux sens**. Sans elle, PHP lit le français comme du mois/jour
+     * américain, et `01/04/2019` entrait au registre comme le 4 janvier.
+     */
+    private const COLONNES_DATE = ['date_constitution'];
+
     protected function casts(): array
     {
         return [
@@ -195,7 +204,7 @@ class Societe extends Model
             $attributs['forme'] = $formeParDefaut;
         }
 
-        return $attributs;
+        return array_merge($attributs, Normalisation::datesEnISO($attributs, self::COLONNES_DATE));
     }
 
     /**
@@ -228,6 +237,8 @@ class Societe extends Model
             $ajouts[$colonne] = $donnees[$cle];
         }
 
+        $ajouts = array_merge($ajouts, Normalisation::datesEnISO($ajouts, self::COLONNES_DATE));
+
         if ($ajouts !== []) {
             $this->update($ajouts);
         }
@@ -258,11 +269,14 @@ class Societe extends Model
                 continue;
             }
 
-            // Les dates partent au format ISO : c'est ce que les champs `date` du
-            // questionnaire attendent, et le format sous lequel les autres valeurs de
-            // `donnees` sont déjà stockées.
+            // `donnees` porte les dates en **JJ/MM/AAAA** : c'est le format que le modèle Word
+            // reçoit tel quel, celui que `DateField` sait réafficher, et le seul depuis lequel
+            // `ActesGeneratorService` dérive `${..._jma}` et `${..._lettres}`.
+            //
+            // Ce commentaire affirmait l'inverse — les champs `date` du questionnaire attendent du
+            // français, et une valeur ISO y restait invisible tout en s'imprimant dans l'acte.
             $donnees[$cle] = $valeur instanceof \DateTimeInterface
-                ? $valeur->format('Y-m-d')
+                ? $valeur->format('d/m/Y')
                 : $valeur;
         }
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import axios from 'axios';
-import { AlertTriangle, Check, ChevronDown, ChevronRight, MapPin, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, Check, ChevronDown, ChevronRight, MapPin, Pencil, Plus, Trash2, X } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,11 +19,16 @@ import { cn } from '@/lib/utils';
  *
  * Sa raison d'être : les quartiers amorcés au seeder portent `a_verifier`, parce que leur liste
  * n'est ni garantie exhaustive ni garantie à jour. Le filtre « à vérifier » est donc la **liste de
- * travail** de l'étude — corriger un nom ou le valider le fait sortir du filtre.
+ * travail** de l'étude.
  *
- * Pas de suppression : un nom peut figurer dans des dossiers et des actes déjà produits, et le
- * référentiel ne porte aucune clé étrangère vers eux. Désactiver retire le lieu des listes
- * proposées sans réécrire le passé.
+ * ⚠️ **Valider est un geste à part entière**, exposé sur le badge et en lot par parent. Auparavant,
+ * seul un renommage levait `a_verifier` : l'étude se retrouvait devant 53 quartiers marqués sans
+ * aucun moyen de les confirmer, sinon en les renommant à l'identique. Renommer corrige une
+ * orthographe ; valider confirme que le lieu existe et qu'il est bien placé.
+ *
+ * Désactiver retire le lieu des listes proposées sans réécrire le passé — un nom peut figurer dans
+ * des actes déjà produits, et le référentiel ne porte aucune clé étrangère vers eux. La suppression
+ * n'est offerte que pour un lieu référencé nulle part (voir `Lieu::estSupprimable()`).
  */
 export default function ParametresLieux() {
     const { villes = [], aVerifier = 0 } = usePage().props;
@@ -99,6 +104,20 @@ export default function ParametresLieux() {
         } catch (err) {
             setErreurAjout(err.response?.data?.message ?? "Ce lieu n'a pas pu être ajouté.");
         }
+    };
+
+    /**
+     * Valide d'un coup les enfants directs d'un lieu.
+     *
+     * Un aller-retour au lieu de seize : c'est cette friction qui a fait que rien n'a été validé
+     * depuis l'amorçage. Jamais récursif — valider une ville ne confirme pas en silence des dizaines
+     * de quartiers que personne n'a lus (voir `ParametresController::validerLieux`).
+     */
+    const validerEnLot = (parent) => {
+        router.patch('/parametres/lieux/valider', { parent_id: parent.id }, {
+            preserveScroll: true,
+            preserveState: true,
+        });
     };
 
     const [aSupprimer, setASupprimer] = useState(null);
@@ -197,6 +216,13 @@ export default function ParametresLieux() {
                                         onSupprimer={setASupprimer}
                                     />
 
+                                    <BoutonValiderEnLot
+                                        parent={ville}
+                                        enfants={ville.communes}
+                                        libelleEnfant="commune"
+                                        onValider={validerEnLot}
+                                    />
+
                                     <span className="shrink-0 text-xs text-slate-400">
                                         {ville.communes.length} commune{ville.communes.length > 1 ? 's' : ''}
                                     </span>
@@ -238,6 +264,13 @@ export default function ParametresLieux() {
                                                         setNomEdite={setNomEdite}
                                                         onEnregistrer={enregistrer}
                                                         onSupprimer={setASupprimer}
+                                                    />
+
+                                                    <BoutonValiderEnLot
+                                                        parent={commune}
+                                                        enfants={commune.quartiers}
+                                                        libelleEnfant="quartier"
+                                                        onValider={validerEnLot}
                                                     />
 
                                                     <span className="shrink-0 text-xs text-slate-400">
@@ -297,7 +330,31 @@ export default function ParametresLieux() {
     );
 }
 
-/** Une ligne du référentiel : nom, badge « à vérifier », renommage, activation. */
+/**
+ * « Valider les N quartiers » — n'apparaît que s'il y a effectivement quelque chose à valider.
+ *
+ * Un bouton toujours visible mais inopérant apprendrait à l'ignorer ; ici sa présence **est**
+ * l'information : ce parent contient des lieux non confirmés.
+ */
+function BoutonValiderEnLot({ parent, enfants, libelleEnfant, onValider }) {
+    const enAttente = enfants.filter(e => e.a_verifier).length;
+
+    if (enAttente === 0) return null;
+
+    return (
+        <button
+            type="button"
+            onClick={() => onValider(parent)}
+            title={`Confirmer les ${enAttente} ${libelleEnfant}s marqués « à vérifier » sous ${parent.nom}`}
+            className="flex shrink-0 items-center gap-1 rounded-md border border-amber-200 bg-warning-bg px-2 py-0.5 text-xs text-warning-text transition-colors hover:border-seal hover:bg-seal-light hover:text-seal-hover"
+        >
+            <BadgeCheck className="h-3 w-3" />
+            Valider {enAttente} {libelleEnfant}{enAttente > 1 ? 's' : ''}
+        </button>
+    );
+}
+
+/** Une ligne du référentiel : nom, badge « à vérifier », validation, renommage, activation. */
 function LigneLieu({ lieu, niveau, enEdition, setEnEdition, nomEdite, setNomEdite, onEnregistrer, onSupprimer }) {
     const editeIci = enEdition === lieu.id;
 
@@ -309,16 +366,20 @@ function LigneLieu({ lieu, niveau, enEdition, setEnEdition, nomEdite, setNomEdit
                     value={nomEdite}
                     onChange={(e) => setNomEdite(e.target.value)}
                     onKeyDown={(e) => {
-                        if (e.key === 'Enter') onEnregistrer(lieu, { nom: nomEdite, a_verifier: false });
+                        // ⚠️ Le renommage **ne vaut plus validation**. Il levait `a_verifier`, ce qui
+                        // faisait du renommage le seul moyen de valider un lieu — un accident, pas
+                        // une décision : corriger une orthographe n'est pas confirmer que le lieu
+                        // existe et est bien placé. Les deux gestes sont désormais distincts.
+                        if (e.key === 'Enter') onEnregistrer(lieu, { nom: nomEdite });
                         if (e.key === 'Escape') setEnEdition(null);
                     }}
                     className="h-8 max-w-xs text-sm"
                 />
                 <button
                     type="button"
-                    onClick={() => onEnregistrer(lieu, { nom: nomEdite, a_verifier: false })}
+                    onClick={() => onEnregistrer(lieu, { nom: nomEdite })}
                     className="rounded-md border border-seal/40 bg-seal-light p-1.5 text-seal-hover hover:border-seal"
-                    title="Enregistrer et marquer comme vérifié"
+                    title="Enregistrer le nom"
                 >
                     <Check className="h-3.5 w-3.5" />
                 </button>
@@ -344,10 +405,24 @@ function LigneLieu({ lieu, niveau, enEdition, setEnEdition, nomEdite, setNomEdit
                 {lieu.nom}
             </span>
 
+            {/* Le badge **est** l'action : cliquer dessus valide le lieu. Il n'existait aucun moyen
+                de le faire — seul le renommage levait le marqueur, ce qui bloquait l'étude devant
+                53 quartiers marqués sans recours. */}
             {lieu.a_verifier && (
-                <Badge variant="outline" className="shrink-0 border-amber-200 bg-warning-bg text-warning-text">
-                    à vérifier
-                </Badge>
+                <button
+                    type="button"
+                    onClick={() => onEnregistrer(lieu, { a_verifier: false })}
+                    title="Confirmer ce lieu — il ne sera plus signalé à vérifier"
+                    className="shrink-0"
+                >
+                    <Badge
+                        variant="outline"
+                        className="border-amber-200 bg-warning-bg text-warning-text transition-colors hover:border-seal hover:bg-seal-light hover:text-seal-hover"
+                    >
+                        à vérifier
+                        <BadgeCheck className="ml-1 h-3 w-3" />
+                    </Badge>
+                </button>
             )}
 
             <button

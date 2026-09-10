@@ -1,0 +1,1 @@
+function e(e){let t=String(e??``).replace(/\D/g,``).slice(0,9);return[t.slice(0,3),t.slice(3,5),t.slice(5,7),t.slice(7,9)].filter(Boolean).join(` `)}export{e as t};

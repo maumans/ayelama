@@ -149,6 +149,32 @@ class ControlesClientTest extends TestCase
         ])->assertCreated();
     }
 
+    public function test_un_regime_hors_liste_est_refuse(): void
+    {
+        // Le cœur du changement : « Communaté de bien » partait telle quelle dans les actes.
+        $this->creer([
+            'situation_matrimoniale' => 'Marié(e)',
+            'regime_matrimonial'     => 'Communaté de bien',
+        ])->assertStatus(422)->assertJsonValidationErrors('regime_matrimonial');
+    }
+
+    public function test_une_personne_mariee_sans_regime_est_refusee(): void
+    {
+        // L'acte nomme le régime : le laisser vide reporte le problème à la rédaction.
+        $this->creer(['situation_matrimoniale' => 'Marié(e)'])
+            ->assertStatus(422)->assertJsonValidationErrors('regime_matrimonial');
+    }
+
+    public function test_les_quatre_regimes_de_la_liste_sont_acceptes(): void
+    {
+        foreach (\App\Models\Client::REGIMES_MATRIMONIAUX as $regime) {
+            $this->creer([
+                'situation_matrimoniale' => 'Marié(e)',
+                'regime_matrimonial'     => $regime,
+            ])->assertCreated("« {$regime} » doit être accepté.");
+        }
+    }
+
     public function test_une_situation_matrimoniale_hors_liste_est_refusee(): void
     {
         $this->creer(['situation_matrimoniale' => 'Concubinage'])

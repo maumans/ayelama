@@ -32,4 +32,36 @@ class Normalisation
 
         return preg_replace('/\s+/u', ' ', trim($texte));
     }
+
+    /**
+     * Convertit en ISO (`AAAA-MM-JJ`) les valeurs reçues au format français `JJ/MM/AAAA`, et ne
+     * renvoie **que** les champs effectivement convertis — de quoi les fusionner dans une requête
+     * sans écraser ce qui était déjà au bon format.
+     *
+     * Cette conversion doit précéder la validation : ni la règle `date` ni le cast Eloquent
+     * n'interviennent à temps, et PHP lit `JJ/MM/AAAA` comme du **mois/jour américain** —
+     *   - `13/05/1985` → `strtotime` échoue → une date valide est refusée ;
+     *   - `01/04/1985` → devient le **4 janvier**, enregistré sans la moindre erreur.
+     *
+     * La règle vit ici, et non dans chaque contrôleur : deux détenteurs auraient divergé, et c'est
+     * précisément la divergence de format qui a produit le défaut.
+     *
+     * @param  array<string, mixed>  $valeurs
+     * @param  list<string>          $champs
+     * @return array<string, string>
+     */
+    public static function datesEnISO(array $valeurs, array $champs): array
+    {
+        $converties = [];
+
+        foreach ($champs as $champ) {
+            $valeur = $valeurs[$champ] ?? null;
+
+            if (is_string($valeur) && preg_match('#^(\d{2})/(\d{2})/(\d{4})$#', trim($valeur), $p)) {
+                $converties[$champ] = "{$p[3]}-{$p[2]}-{$p[1]}";
+            }
+        }
+
+        return $converties;
+    }
 }

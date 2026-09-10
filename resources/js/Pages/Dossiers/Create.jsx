@@ -1,13 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, roleGeo, patchGeo } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
-import { DateField } from '@/components/ui/date-field';
-import { NumberField } from '@/components/ui/number-field';
-import { PhoneField } from '@/components/ui/phone-field';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ChoixMultiple } from '@/Components/ui/choix-multiple';
-import { LieuSelect } from '@/Components/ui/lieu-select';
 import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
@@ -16,7 +12,8 @@ import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estCha
 import { mapSocieteToQuestionnaire, estChampSociete, ficheRenseigneChamp, societeDisplayName } from '@/lib/societeFields';
 import { groupFieldsBySection, buildPartiesPayload } from '@/lib/partiesPayload';
 import { construireFormDataBrouillon, libelleBrouillon, compterPieces } from '@/lib/brouillonDossier';
-import { allerAuBlocant, ancreSection, blocantsEtape, clesEnDefaut, compterParSection, OBJET_LONGUEUR_MIN } from '@/lib/blocantsEtape';
+import { allerAuBlocant, ancreSection, blocantsEtape, compterParSection, motifsParChamp, OBJET_LONGUEUR_MIN } from '@/lib/blocantsEtape';
+import { ChampQuestionnaire, classesChamp } from '@/Components/Questionnaire/ChampQuestionnaire';
 import { BadgeSection, BlocantsPanel, CompteurBlocants } from '@/Components/Dossiers/BlocantsPanel';
 import { notifyValidationError, toast } from '@/lib/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -966,14 +963,24 @@ export default function DossierCreate() {
 
     // Ce qui manque pour avancer — une **liste**, plus un booléen : le bouton grisé sans explication
     // était impossible à diagnostiquer sur un questionnaire de trente champs. Voir blocantsEtape.js.
+    /**
+     * Nombre d'options chargées par champ géo, remonté par `LieuSelect`.
+     *
+     * Sans lui, le blocant répondait « Choisissez une valeur » devant une liste vide — or 33 des
+     * 39 communes n'ont aucun quartier au référentiel, et le seul recours (ajouter le lieu) n'était
+     * pas nommé.
+     */
+    const [optionsGeo, setOptionsGeo] = useState({});
+    const noterOptionsGeo = (id, nb) => setOptionsGeo(p => (p[id] === nb ? p : { ...p, [id]: nb }));
+
     const blocants = blocantsEtape({
-        step, categorie, typeActe, visibleFields, formValues, objet, notaireId,
+        step, categorie, typeActe, visibleFields, formValues, objet, notaireId, optionsGeo,
         // `champsAffichables` retire les champs portés par une fiche liée : ils restent
         // obligatoires mais ne sont plus à l'écran. Le dire, plutôt que de renvoyer vers un
         // champ qui n'existe pas dans le DOM.
         estMasque: (field, groupe) => !champsAffichables(groupe).some(f => f.id === field.id),
     });
-    const blocantsParChamp = clesEnDefaut(blocants);
+    const blocantsParChamp = motifsParChamp(blocants);
     const blocantsParNomSection = compterParSection(blocants);
 
     /**
@@ -1516,171 +1523,47 @@ export default function DossierCreate() {
                                                         const grille = (
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
                                                             {champsAffichables(group).map(field => {
-                                                                const isCheckbox = field.type === 'checkbox' || field.type === 'checkbox_required';
-                                                                const isFullWidth = isCheckbox || field.type === 'textarea' || field.type === 'repeatable' || field.type === 'checkbox_group';
                                                                 // En rouge seulement après une tentative d'avancement, et le rouge
                                                                 // s'efface dès la saisie (le champ quitte alors la liste des blocants).
                                                                 const enDefaut = validationTentee && blocantsParChamp.has(field.id);
-                                                                const motif = enDefaut
-                                                                    ? blocants.find(b => b.cle === field.id)?.raison
-                                                                    : null;
-                                                                return (
-                                                                    <div
-                                                                        key={field.id}
-                                                                        className={cn(
-                                                                            isFullWidth && 'sm:col-span-2',
-                                                                            field.showIf && 'pl-3 border-l-2 border-seal/30',
-                                                                            // Cible les contrôles descendants plutôt que d'ajouter une
-                                                                            // prop à chacun des dix types de champ rendus ici.
-                                                                            enDefaut && '[&_input]:border-danger [&_textarea]:border-danger [&_select]:border-danger [&_input]:ring-1 [&_input]:ring-danger/20'
-                                                                        )}
-                                                                    >
-                                                                        {isCheckbox ? (
-                                                                            <div className="py-0.5">
-                                                                                <div className="flex items-center gap-2.5">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        id={field.id}
-                                                                                        checked={!!formValues[field.id]}
-                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.checked }))}
-                                                                                        className="h-4 w-4 rounded border-slate-300 text-seal focus:ring-seal"
-                                                                                    />
-                                                                                    <label htmlFor={field.id} className="text-sm text-slate-700 cursor-pointer leading-snug">
-                                                                                        {field.label}
-                                                                                        {field.required && <span className="text-danger ml-1">*</span>}
-                                                                                    </label>
-                                                                                </div>
-                                                                                {field.note && (
-                                                                                    <p className="text-xs text-warning-text flex items-center gap-1 mt-1 ml-6">
-                                                                                        <AlertCircle className="h-3 w-3" />
-                                                                                        {field.note}
-                                                                                    </p>
-                                                                                )}
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="space-y-1.5">
-                                                                                <Label htmlFor={field.id}>
-                                                                                    {field.label}
-                                                                                    {field.required && <span className="text-danger ml-1">*</span>}
-                                                                                </Label>
-                                                                                {field.note && (
-                                                                                    <p className="text-xs text-warning-text flex items-center gap-1">
-                                                                                        <AlertCircle className="h-3 w-3" />
-                                                                                        {field.note}
-                                                                                    </p>
-                                                                                )}
-                                                                                {roleGeo(field.id) ? (
-                                                                                    /* Cascade ville → commune → quartier. Le rôle est
-                                                                                       déduit de TRIPLETS_GEO, pas du suffixe du nom :
-                                                                                       `bien.livre_foncier_ville` finit par « ville »
-                                                                                       sans être un lieu du référentiel. */
-                                                                                    <LieuSelect
-                                                                                        id={field.id}
-                                                                                        niveau={roleGeo(field.id).niveau}
-                                                                                        parentNom={roleGeo(field.id).parentField
-                                                                                            ? (formValues[roleGeo(field.id).parentField] || null)
-                                                                                            : null}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onChange={val => setFormValues(prev => ({ ...prev, ...patchGeo(field.id, val) }))}
-                                                                                        peutAjouter
-                                                                                    />
-                                                                                ) : field.type === 'checkbox_group' ? (
-                                                                                    <ChoixMultiple
-                                                                                        field={field}
-                                                                                        valeurs={formValues[field.id] ?? []}
-                                                                                        onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
-                                                                                        exclusions={exclusionsModification}
-                                                                                    />
-                                                                                ) : field.type === 'repeatable' ? (
-                                                                                    <RepeatableGroup
-                                                                                        fieldDef={field}
-                                                                                        value={formValues[field.id] ?? []}
-                                                                                        onChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
-                                                                                        poolClients={poolClients}
-                                                                                        onClientCreated={addClientToPool}
-                                                                                        piecesRequises={usePage().props.piecesRequises}
-                                                                                        stagedPieces={stagedPieces[field.id] || {}}
-                                                                                        onStagedPieceChange={(key, file) => handleStagedPieceChange(field.id, key, file)}
-                                                                                        piecesBrouillon={piecesBrouillon[field.id] || {}}
-                                                                                        onRetirerPieceBrouillon={(key) => retirerPieceBrouillon(field.id, key)}
-                                                                                    />
-                                                                                ) : field.type === 'textarea' ? (
-                                                                                    <textarea
-                                                                                        id={field.id}
-                                                                                        rows={3}
-                                                                                        placeholder={field.placeholder}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-                                                                                    />
-                                                                                ) : field.type === 'select' ? (
-                                                                                    <select
-                                                                                        id={field.id}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                                                    >
-                                                                                        <option value="">— Choisir —</option>
-                                                                                        {(field.options ?? []).map(opt => (
-                                                                                            <option key={opt} value={opt}>{opt}</option>
-                                                                                        ))}
-                                                                                    </select>
-                                                                                ) : field.type === 'date' ? (
-                                                                                    <DateField
-                                                                                        id={field.id}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onValueChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
-                                                                                    />
-                                                                                ) : field.type === 'number' ? (
-                                                                                    <NumberField
-                                                                                        id={field.id}
-                                                                                        decimals={field.decimals ?? 0}
-                                                                                        placeholder={field.placeholder}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onValueChange={val => setFormValuesTracked(prev => ({ ...prev, [field.id]: val }))}
-                                                                                        className={cn(field.mono && 'font-ref', field.readonly && 'bg-slate-50 text-slate-500 cursor-not-allowed')}
-                                                                                        disabled={!!field.readonly}
-                                                                                    />
-                                                                                ) : field.type === 'year' ? (
-                                                                                    <Input
-                                                                                        id={field.id}
-                                                                                        type="text"
-                                                                                        inputMode="numeric"
-                                                                                        maxLength={4}
-                                                                                        placeholder={field.placeholder}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onChange={e => {
-                                                                                            const v = e.target.value.replace(/\D/g, '').slice(0, 4);
-                                                                                            setFormValues(prev => ({ ...prev, [field.id]: v }));
-                                                                                        }}
-                                                                                        className="font-ref"
-                                                                                    />
-                                                                                ) : field.type === 'tel' ? (
-                                                                                    <PhoneField
-                                                                                        id={field.id}
-                                                                                        placeholder={field.placeholder}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onValueChange={val => setFormValues(prev => ({ ...prev, [field.id]: val }))}
-                                                                                    />
-                                                                                ) : (
-                                                                                    <Input
-                                                                                        id={field.id}
-                                                                                        type={field.type === 'email' ? 'email' : 'text'}
-                                                                                        placeholder={field.placeholder}
-                                                                                        value={formValues[field.id] || ''}
-                                                                                        onChange={e => setFormValues(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                                                                        className={cn(field.mono && 'font-ref')}
-                                                                                    />
-                                                                                )}
-                                                                            </div>
-                                                                        )}
 
-                                                                        {motif && (
-                                                                            <p className="mt-1 flex items-center gap-1 text-xs text-danger">
-                                                                                <AlertCircle className="h-3 w-3 shrink-0" />
-                                                                                {motif}
-                                                                            </p>
-                                                                        )}
+                                                                return (
+                                                                    <div key={field.id} className={classesChamp({ field, enDefaut })}>
+                                                                        {/* Moteur unique, partagé avec le modal d'édition et le
+                                                                            formulaire public d'intake : c'est ce qui garantit que
+                                                                            `readonly`, la cascade géo et la cohérence des dates
+                                                                            valent partout — quatre comportements avaient été
+                                                                            implémentés d'un seul côté. */}
+                                                                        <ChampQuestionnaire
+                                                                            field={field}
+                                                                            valeurs={formValues}
+                                                                            onPatch={(patch) => setFormValuesTracked(prev => ({ ...prev, ...patch }))}
+                                                                            motif={enDefaut ? blocantsParChamp.get(field.id) : null}
+                                                                            peutAjouter
+                                                                            onNombreOptions={(nb) => noterOptionsGeo(field.id, nb)}
+                                                                            rendreChoixMultiple={(f) => (
+                                                                                <ChoixMultiple
+                                                                                    field={f}
+                                                                                    valeurs={formValues[f.id] ?? []}
+                                                                                    onChange={val => setFormValues(prev => ({ ...prev, [f.id]: val }))}
+                                                                                    exclusions={exclusionsModification}
+                                                                                />
+                                                                            )}
+                                                                            rendreRepeatable={(f) => (
+                                                                                <RepeatableGroup
+                                                                                    fieldDef={f}
+                                                                                    value={formValues[f.id] ?? []}
+                                                                                    onChange={val => setFormValues(prev => ({ ...prev, [f.id]: val }))}
+                                                                                    poolClients={poolClients}
+                                                                                    onClientCreated={addClientToPool}
+                                                                                    piecesRequises={usePage().props.piecesRequises}
+                                                                                    stagedPieces={stagedPieces[f.id] || {}}
+                                                                                    onStagedPieceChange={(key, file) => handleStagedPieceChange(f.id, key, file)}
+                                                                                    piecesBrouillon={piecesBrouillon[f.id] || {}}
+                                                                                    onRetirerPieceBrouillon={(key) => retirerPieceBrouillon(f.id, key)}
+                                                                                />
+                                                                            )}
+                                                                        />
 
                                                                         {/* Champ visible malgré la fiche rattachée : elle ne le
                                                                             renseigne pas. Le dire évite de laisser croire à une

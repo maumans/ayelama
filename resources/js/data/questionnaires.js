@@ -16,6 +16,29 @@
 // Blocs réutilisables (évite la duplication)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ⚠️ **Déclarées avant les schémas, et non plus à côté de FORMES_SOCIETE.** Les littéraux de
+// schéma ci-dessous s'évaluent à l'initialisation du module : une constante `const` référencée
+// depuis eux mais déclarée plus bas est dans sa zone morte temporelle, et le module échoue à
+// l'exécution — « Cannot access 'SITUATIONS_MATRIMONIALES' before initialization ». Un bundler
+// ne le signale pas, et la page reste blanche. FORMES_SOCIETE n'a pas ce problème : elle n'est
+// utilisée qu'après sa propre déclaration.
+
+// Régimes matrimoniaux — miroir de App\Models\Client::REGIMES_MATRIMONIAUX. Le champ était en
+// saisie libre : la base en portait **quatre orthographes pour deux régimes**, dont « Communaté de
+// bien », que les modèles Word reprenaient telle quelle dans les actes.
+export const REGIMES_MATRIMONIAUX = [
+    'Communauté de biens',
+    'Séparation de biens',
+    'Communauté réduite aux acquêts',
+    'Communauté universelle',
+];
+
+// Situations matrimoniales — miroir de App\Models\Client::SITUATIONS_MATRIMONIALES. Déjà un
+// `select` partout, mais dont les dix déclarations recopiaient chacune leurs options : même défaut
+// que celui corrigé sur FORMES_SOCIETE.
+export const SITUATIONS_MATRIMONIALES = ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'];
+
+
 const SOC_BASE = [
     { id: 'soc.denomination', label: 'Dénomination sociale', type: 'text', placeholder: 'Ex : Faya Distribution SARLU', required: true, section: 'Société', publicIntake: true },
     { id: 'soc.sigle', label: 'Sigle (facultatif)', type: 'text', placeholder: 'Ex : FD', required: false, publicIntake: true },
@@ -57,8 +80,8 @@ const PP_ASSOCIE_UNIQUE = [
     { id: 'pp.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: true },
     { id: 'pp.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: true },
     { id: 'pp.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-    { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-    { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false },
+    { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+    { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
     { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
     { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
     { id: 'pp.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
@@ -79,7 +102,7 @@ const GER_FIELDS = [
     { id: 'ger.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: true },
     { id: 'ger.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: true },
     { id: 'ger.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-    { id: 'ger.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
+    { id: 'ger.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
     { id: 'ger.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'ger.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'ger.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false },
@@ -107,8 +130,8 @@ const ASSOCIE_SCHEMA = [
     { id: 'ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
     { id: 'date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
     { id: 'nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
-    { id: 'situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
-    { id: 'regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
+    { id: 'situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
+    { id: 'regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false, showIf: { field: 'type_personne', equals: 'Personne physique' } },
     { id: 'quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false },
@@ -127,8 +150,8 @@ const GERANT_SCHEMA = [
     { id: 'ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
     { id: 'date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
     { id: 'nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-    { id: 'situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-    { id: 'regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false },
+    { id: 'situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+    { id: 'regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
     { id: 'quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false },
@@ -258,7 +281,7 @@ export const QUESTIONNAIRES = {
         { id: 'ger.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false, showIf: { field: 'ger.est_different' } },
-        { id: 'ger.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false, showIf: { field: 'ger.est_different' } },
+        { id: 'ger.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: false, showIf: { field: 'ger.est_different' } },
@@ -436,8 +459,8 @@ export const QUESTIONNAIRES = {
         { id: 'pp.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
         { id: 'pp.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
         { id: 'pp.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-        { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-        { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false },
+        { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+        { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
         { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'pp.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
@@ -454,8 +477,8 @@ export const QUESTIONNAIRES = {
         { id: 'acq.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
         { id: 'acq.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
         { id: 'acq.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-        { id: 'acq.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-        { id: 'acq.regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false },
+        { id: 'acq.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+        { id: 'acq.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
         { id: 'acq.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'acq.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'acq.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
@@ -493,8 +516,8 @@ export const QUESTIONNAIRES = {
         { id: 'pp.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
         { id: 'pp.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
         { id: 'pp.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-        { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-        { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false },
+        { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+        { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
         { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'pp.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
@@ -511,8 +534,8 @@ export const QUESTIONNAIRES = {
         { id: 'acq.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
         { id: 'acq.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
         { id: 'acq.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-        { id: 'acq.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-        { id: 'acq.regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation', required: false },
+        { id: 'acq.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+        { id: 'acq.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
         { id: 'acq.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'acq.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'acq.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
@@ -595,8 +618,8 @@ export const QUESTIONNAIRES = {
         { id: 'pp.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
         { id: 'pp.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: false },
         { id: 'pp.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-        { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'], required: false },
-        { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'text', placeholder: 'Communauté de biens / Séparation de biens', required: false },
+        { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+        { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
         { id: 'pp.adresse', label: 'Adresse complète', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true },
         { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
         { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
@@ -965,6 +988,11 @@ export const TRIPLETS_GEO = [
     { ville: 'pp.demeurant_ville',           commune: 'pp.commune',                     quartier: 'pp.quartier' },
     { ville: 'ger.demeurant_ville',          commune: 'ger.commune',                    quartier: 'ger.quartier' },
     { ville: 'acq.demeurant_ville',          commune: 'acq.commune',                    quartier: 'acq.quartier' },
+    // Bloc **dérivé** de GER_FIELDS par substitution de préfixe (`ger.` → `gerant_entrant.`) : ses
+    // champs géo existaient donc sans figurer ici, et n'avaient aucune cascade — le clerc y saisissait
+    // une commune en texte libre pendant que le bloc « gérant » d'à côté proposait le référentiel.
+    // Un préfixe dérivé se déclare ici comme les autres : la dérivation ne l'inscrit pas d'elle-même.
+    { ville: 'gerant_entrant.demeurant_ville', commune: 'gerant_entrant.commune',        quartier: 'gerant_entrant.quartier' },
     // Blocs répétables (associés, gérants) : les champs y sont nommés sans préfixe.
     { ville: 'demeurant_ville',              commune: 'commune',                        quartier: 'quartier' },
 ];
@@ -978,6 +1006,53 @@ export const TRIPLETS_GEO = [
  *
  * @returns {{niveau: string, parentField: string|null}|null}
  */
+/**
+ * Groupes de dates dont la cohérence se contrôle ensemble — naissance, délivrance et expiration
+ * d'une même personne.
+ *
+ * Même parti que `TRIPLETS_GEO` juste au-dessus, et pour la même raison : les contrôles existaient
+ * dans `ModalNouveauClient` sur la fiche client, et **nulle part** sur les 25 champs de date des
+ * questionnaires. Une déclaration, pas une règle recopiée par champ.
+ *
+ * ⚠️ `gerant_entrant.*` est un bloc **dérivé** de `GER_FIELDS` par substitution de préfixe : ses
+ * dates existent sans être écrites nulle part en clair. Elles se déclarent donc ici comme les
+ * autres — la dérivation ne les inscrit pas d'elle-même.
+ */
+export const PAIRES_DATES = [
+    { naissance: 'pp.date_naissance',              delivree: 'pp.piece_delivree_le',              expire: 'pp.piece_expire_le' },
+    { naissance: 'ger.date_naissance',             delivree: 'ger.piece_delivree_le',             expire: 'ger.piece_expire_le' },
+    { naissance: 'acq.date_naissance',             delivree: 'acq.piece_delivree_le',             expire: 'acq.piece_expire_le' },
+    { naissance: 'gerant_entrant.date_naissance',  delivree: 'gerant_entrant.piece_delivree_le',  expire: 'gerant_entrant.piece_expire_le' },
+    // Blocs répétables (associés, gérants, souscripteurs) : champs nommés sans préfixe.
+    { naissance: 'date_naissance',                 delivree: 'piece_delivree_le',                 expire: 'piece_expire_le' },
+    // Le président d'une SASU n'a qu'une date de naissance déclarée.
+    { naissance: 'soc.president_date_naissance',   delivree: null,                                expire: null },
+];
+
+/**
+ * Dates isolées dont on peut affirmer une borne, **et elles seules**.
+ *
+ * ⚠️ Ce qui n'y figure pas est délibéré, pas oublié : `bail.date_prise_effet` et
+ * `modif.augmentation_date_versement` sont légitimement futures ; `dissolution.date_assemblee`,
+ * `hypotheque.date_acte`, `modif.date_cession` et `gerant_sortant.date_cessation` restent libres
+ * parce que je ne sais pas quelle borne leur donner — même doctrine que pour les régimes
+ * matrimoniaux : une contrainte inventée est pire qu'une contrainte absente. Une ligne suffira le
+ * jour où l'étude les arbitrera.
+ */
+export const CONTRAINTES_DATES = [
+    {
+        champ: 'soc.date_constitution',
+        genre: 'passee',
+        message: 'La date de constitution ne peut pas être dans le futur.',
+    },
+    {
+        champ: 'ag.date_effet',
+        genre: 'ordre',
+        apres: 'ag.date',
+        message: "La date d'effet ne peut pas précéder l'assemblée qui l'a décidée.",
+    },
+];
+
 export function roleGeo(fieldId) {
     for (const triplet of TRIPLETS_GEO) {
         if (fieldId === triplet.ville)    return { niveau: 'ville',    parentField: null };

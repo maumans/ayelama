@@ -7,6 +7,7 @@ import { LieuSelect } from '@/components/ui/lieu-select';
 import { Label } from '@/components/ui/label';
 import { PhoneField } from '@/components/ui/phone-field';
 import { DateField } from '@/components/ui/date-field';
+import { frDateToISO, isoDateToFR, isoDateSeule } from '@/lib/dates';
 import { NumberField } from '@/components/ui/number-field';
 import { FORMES_SOCIETE } from '@/data/questionnaires';
 import { toast } from '@/lib/toast';
@@ -26,9 +27,27 @@ const EMPTY_SOCIETE = {
  * validation. Même précaution que `champsFiche()` dans ModalNouveauClient.
  */
 function champsFiche(societe) {
-    return Object.fromEntries(
+    return datesEnISO(Object.fromEntries(
         Object.keys(EMPTY_SOCIETE).map(k => [k, societe?.[k] ?? EMPTY_SOCIETE[k]]),
-    );
+    ));
+}
+
+/**
+ * `date_constitution` alimente une colonne castée `date` : l'état porte donc de l'**ISO**, comme
+ * dans les modales de dépôt, de retour de formalité et de paiement (voir lib/dates.js). Poster du
+ * français y était relu en mois/jour : `01/04/1985` devenait le 4 janvier sans erreur.
+ *
+ * Deux formats se présentent en entrée — l'horodatage de l'API, et le français quand
+ * `initialValues` vient d'un questionnaire.
+ */
+function datesEnISO(valeurs) {
+    if (!valeurs || !('date_constitution' in valeurs)) return valeurs;
+
+    return {
+        ...valeurs,
+        date_constitution: isoDateSeule(valeurs.date_constitution)
+            || frDateToISO(valeurs.date_constitution),
+    };
 }
 
 /**
@@ -46,13 +65,13 @@ function champsFiche(societe) {
  */
 export function ModalNouvelleSociete({ open, onClose, onSaved, initialValues, societe = null }) {
     const estEdition = !!societe?.id;
-    const [form, setForm] = useState({ ...EMPTY_SOCIETE, ...initialValues });
+    const [form, setForm] = useState({ ...EMPTY_SOCIETE, ...datesEnISO(initialValues) });
     const [errors, setErrors] = useState({});
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
         if (!open) return;
-        setForm(estEdition ? champsFiche(societe) : { ...EMPTY_SOCIETE, ...initialValues });
+        setForm(estEdition ? champsFiche(societe) : { ...EMPTY_SOCIETE, ...datesEnISO(initialValues) });
         setErrors({});
     }, [open, societe?.id]);
 
@@ -137,7 +156,7 @@ export function ModalNouvelleSociete({ open, onClose, onSaved, initialValues, so
                             </div>
                             <div className="space-y-1.5">
                                 <Label>Date de constitution</Label>
-                                <DateField value={form.date_constitution} onValueChange={v('date_constitution')} />
+                                <DateField value={isoDateToFR(form.date_constitution)} onValueChange={val => v('date_constitution')(frDateToISO(val))} />
                             </div>
                         </div>
 
