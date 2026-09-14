@@ -10,6 +10,9 @@ use Illuminate\Validation\Rule;
 /**
  * Alimente la cascade ville → commune → quartier des formulaires de saisie.
  *
+ * Le référentiel part **en une seule réponse** (`referentiel()`) et non plus niveau par niveau :
+ * la cascade se résout ensuite de mémoire côté navigateur (voir resources/js/lib/referentielLieux.js).
+ *
  * Les valeurs restent stockées par leur **nom** dans les questionnaires et les fiches (voir la
  * migration `create_lieux_table`) : ce contrôleur ne sert donc qu'à proposer les bonnes options, pas
  * à établir une clé étrangère.
@@ -17,48 +20,36 @@ use Illuminate\Validation\Rule;
 class LieuController extends Controller
 {
     /**
-     * Lieux d'un niveau donné, éventuellement sous un parent désigné par son **nom**.
+     * Le référentiel **entier**, en une seule réponse.
      *
-     * Le parent est passé par son nom et non son identifiant : c'est ce que le formulaire détient
-     * (`soc.siege_ville = "Conakry"`), et cela évite d'imposer aux questionnaires de porter des
-     * identifiants qu'ils n'ont jamais eus.
+     * Remplace un point d'entrée qui servait un niveau à la fois. La cascade l'appelait **par champ
+     * et par changement de parent** : sur le questionnaire de modification, qui porte 18 champs
+     * géographiques, cela faisait jusqu'à 18 requêtes à l'ouverture puis une par choix de ville ou
+     * de commune. C'est cette multiplication que l'étude percevait, et non le volume — le
+     * référentiel entier pèse 5 Ko, moins de 15 Ko compressé même à 2 400 lieux.
+     *
+     * Servi depuis le cache (voir `Lieu::referentielComplet()`, périmé à chaque écriture d'un lieu)
+     * et accompagné d'un `ETag` : un navigateur déjà chaud reçoit un 304 sans corps.
      */
-    public function index(Request $request)
+    public function referentiel(Request $request)
     {
         $this->authorize('viewAny', Lieu::class);
 
-        $data = $request->validate([
-            'niveau' => ['required', Rule::in(array_keys(Lieu::NIVEAU_ENFANT))],
-            'parent' => ['nullable', 'string', 'max:120'],
-        ]);
+        $referentiel = Lieu::referentielComplet();
+        $charge = json_encode($referentiel, JSON_UNESCAPED_UNICODE);
+        $etag = '"' . md5($charge) . '"';
 
-        $niveau = $data['niveau'];
-        $parent = $data['parent'] ?? null;
-
-        // Un niveau qui attend un parent sans en recevoir ne doit **rien** renvoyer plutôt que tout :
-        // proposer les 54 quartiers du pays quand aucune commune n'est choisie recréerait
-        // exactement l'incohérence que la cascade supprime.
-        if ($niveau !== Lieu::NIVEAU_VILLE && blank($parent)) {
-            return response()->json(['lieux' => []]);
+        // 304 avant de composer la réponse : rien à sérialiser, rien à transférer.
+        if (trim((string) $request->header('If-None-Match')) === $etag) {
+            return response('', 304)->header('ETag', $etag);
         }
 
-        $lieux = Lieu::actif()->niveau($niveau)
-            ->when($niveau === Lieu::NIVEAU_VILLE, fn ($q) => $q->whereNull('parent_id'))
-            ->when($parent, fn ($q) => $q->whereHas(
-                'parent',
-                fn ($qq) => $qq->where('nom_normalise', Normalisation::comparable($parent)),
-            ))
-            ->orderBy('nom')
-            ->get(['id', 'nom', 'a_verifier']);
-
-        return response()->json([
-            'lieux' => $lieux->map(fn (Lieu $l) => [
-                'nom'        => $l->nom,
-                // Signalé à l'écran : les quartiers amorcés au seeder ne sont pas garantis
-                // exhaustifs ni à jour, l'étude doit pouvoir les distinguer de ses propres saisies.
-                'a_verifier' => $l->a_verifier,
-            ]),
-        ]);
+        return response($charge, 200)
+            ->header('Content-Type', 'application/json')
+            ->header('ETag', $etag)
+            // `private` : le référentiel n'est servi qu'aux écrans authentifiés, il n'a pas à être
+            // mis en cache par un intermédiaire partagé. `must-revalidate` pour que l'ETag serve.
+            ->header('Cache-Control', 'private, must-revalidate');
     }
 
     /**

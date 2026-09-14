@@ -12,6 +12,7 @@ import {
     FolderOpen, Inbox, Lock, Receipt, Search, UserSquare2, X, ChevronRight, Folder, File, FolderArchive, Layers
 } from 'lucide-react';
 import DocumentPreviewModal from '@/Components/documents/DocumentPreviewModal';
+import { telechargerFichier } from '@/lib/telechargement';
 
 // Une icône par rubrique — valeurs de App\Enums\RubriqueCloture.
 const ICONES_RUBRIQUE = {
@@ -62,9 +63,9 @@ function PieceRow({ piece, activePreviewId, onTogglePreview }) {
                             </Button>
                         )}
                         {piece.url_download && (
-                            <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
-                                <a href={piece.url_download} download><Download className="h-3.5 w-3.5" /></a>
-                            </Button>
+                            <Button variant="ghost" size="icon-sm"  title="Télécharger"
+                                            onClick={() => telechargerFichier(piece.url_download)}
+                                        ><Download className="h-3.5 w-3.5" /></Button>
                         )}
                     </div>
                 )}
@@ -87,9 +88,9 @@ function PieceRow({ piece, activePreviewId, onTogglePreview }) {
                             />
                             <div className="absolute top-2 right-6 flex gap-2">
                                 {piece.url_download && (
-                                    <Button size="sm" variant="secondary" asChild className="shadow-sm">
-                                        <a href={piece.url_download} download><Download className="mr-1.5 h-3.5 w-3.5" /> Télécharger</a>
-                                    </Button>
+                                    <Button size="sm" variant="secondary"  className="shadow-sm"
+                                            onClick={() => telechargerFichier(piece.url_download)}
+                                        ><Download className="mr-1.5 h-3.5 w-3.5" /> Télécharger</Button>
                                 )}
                                 <Button size="icon-sm" variant="secondary" onClick={() => onTogglePreview(pieceKey)} className="shadow-sm" title="Fermer l'aperçu">
                                     <X className="h-4 w-4" />
@@ -427,7 +428,7 @@ export default function GedIndex({ groupes, arborescence = {}, stats = {}, rubri
         <AppLayout breadcrumbs={[{ label: 'GED' }]}>
             <Head title="GED — Ayelema" />
 
-            <div className="mx-auto max-w-[1400px] p-6 h-[calc(100vh-theme(spacing.header))] flex flex-col">
+            <div className="mx-auto max-w-[1400px] p-6 h-[calc(100dvh-theme(spacing.header))] flex flex-col">
                 
                 {/* En-tête */}
                 <div className="mb-5 shrink-0">

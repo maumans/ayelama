@@ -20,8 +20,21 @@
         --topbar-height: 56px;
     }
 
+    /*
+     * ⚠️ `100dvh`, et non `100%` ni `100vh`.
+     *
+     * `height: 100%` se résout sur le bloc conteneur initial, qui vaut sur mobile la hauteur de
+     * l'écran **barre d'adresse masquée** — plus grande que la zone réellement visible, et dont
+     * l'écart varie selon l'appareil et le navigateur. Avec `overflow: hidden` sur le corps, ce qui
+     * dépassait n'était **pas rattrapable par défilement** : l'interface passait sous la barre
+     * d'état, où elle se confondait avec l'heure et la batterie.
+     *
+     * `dvh` suit la zone visible, barre d'adresse affichée ou non. `100vh` reste en repli pour un
+     * navigateur qui ne connaîtrait pas l'unité (iOS < 15.4).
+     */
     html {
-        height: 100%;
+        height: 100vh;
+        height: 100dvh;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
     }
@@ -31,6 +44,29 @@
         overflow: hidden;
         background-color: var(--color-app-bg);
         color: var(--color-text-strong);
+    }
+
+    /*
+     * Sous 16 px, iOS Safari **agrandit la page** à la mise au point d'un champ — et ne la réduit
+     * pas ensuite. D'où le tableau de bord zoomé après une connexion : le champ e-mail était en
+     * `text-sm` (14 px).
+     *
+     * Règle unique plutôt qu'un correctif par composant : l'application porte 53 contrôles de saisie
+     * bruts répartis dans 31 fichiers, en plus des primitives — et un contrôle ajouté demain en
+     * bénéficie sans qu'on y pense.
+     *
+     * Alternative écartée : `maximum-scale=1` dans le viewport. Une ligne, mais elle **désactive le
+     * pincement pour zoomer** sur toute l'application — sur un outil où l'on relit des actes et des
+     * pièces d'identité, c'est une régression d'accessibilité réelle (WCAG 1.4.4).
+     *
+     * Cases à cocher et boutons radio exclus : leur taille vient de `h-4 w-4`, pas de la police.
+     */
+    @media (max-width: 767px) {
+        input:not([type='checkbox']):not([type='radio']),
+        select,
+        textarea {
+            font-size: 16px;
+        }
     }
 
     #app {
@@ -50,7 +86,50 @@
     }
 }
 
+@layer utilities {
+    /*
+     * Marges d'encoche — la zone que le système réserve à la barre d'état, à la barre de gestes ou
+     * à la découpe de l'écran.
+     *
+     * ⚠️ **Sans effet quand l'inset vaut 0**, grâce au repli `0px` : aucun espace n'est ajouté sur
+     * un appareil sans encoche. On les pose donc sans condition sur les barres fixes, ce qui protège
+     * des navigateurs qui dessinent sous la barre d'état — comportement devenu courant sur Android
+     * récent, et cause du menu latéral qui se confondait avec l'heure et la batterie.
+     *
+     * `viewport-fit=cover` n'est **pas** ajouté au viewport : ce serait demander au navigateur de
+     * passer sous les zones système, l'inverse du but.
+     */
+    .pt-encoche { padding-top: env(safe-area-inset-top, 0px); }
+    .pb-encoche { padding-bottom: env(safe-area-inset-bottom, 0px); }
+    .pl-encoche { padding-left: env(safe-area-inset-left, 0px); }
+}
+
 @layer components {
+    /*
+     * Halo posé un instant sur le champ atteint depuis la liste des blocants.
+     *
+     * Defiler jusqu au champ ne suffit pas a dire OU l on a atterri : sur une carte de dix champs,
+     * l oeil doit encore chercher. Le halo dure 1,6 s puis s efface, sans laisser d etat a gerer.
+     *
+     * `box-shadow` plutot qu une bordure : elle ne participe pas au flux, donc rien ne se decale
+     * pendant l animation.
+     */
+    .halo-cible {
+        animation: halo-cible 1.6s ease-out;
+        border-radius: 0.5rem;
+    }
+
+    @keyframes halo-cible {
+        0%   { box-shadow: 0 0 0 0 rgba(232, 165, 32, 0.55); background-color: rgba(232, 165, 32, 0.10); }
+        35%  { box-shadow: 0 0 0 5px rgba(232, 165, 32, 0.28); background-color: rgba(232, 165, 32, 0.10); }
+        100% { box-shadow: 0 0 0 0 rgba(232, 165, 32, 0);     background-color: transparent; }
+    }
+
+    /* Un utilisateur qui a demande moins d animations garde le repere, sans le mouvement. */
+    @media (prefers-reduced-motion: reduce) {
+        .halo-cible { animation: none; box-shadow: 0 0 0 3px rgba(232, 165, 32, 0.45); }
+    }
+
     .font-ref {
         font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
         font-size: 0.8125rem;

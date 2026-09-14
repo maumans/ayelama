@@ -8,7 +8,7 @@ const FEATURES = [
 
 export default function GuestLayout({ children }) {
     return (
-        <div className="flex h-screen overflow-y-auto bg-app-bg">
+        <div className="flex h-dvh overflow-y-auto bg-app-bg">
             {/* Panneau gauche — identité de marque */}
             <div className="hidden lg:flex lg:w-[440px] shrink-0 bg-ink flex-col justify-between p-12 relative overflow-hidden">
                 {/* Trame décorative — grille de points façon filigrane */}

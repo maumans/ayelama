@@ -21,6 +21,17 @@ use ZipArchive;
  * (voir FactureController::assertLignesModifiables) — un fichier stocké deviendrait
  * silencieusement obsolète à la moindre modification de ligne.
  */
+/**
+ * ⚠️ **`genererDocument()` n'a plus d'appelant depuis le 2026-09-10.** Le téléchargement de la note
+ * de frais rend désormais un **PDF** (`FacturePdfService`), calqué sur l'exemplaire fourni par
+ * l'étude : la route produisait un `.docx` alors qu'elle s'appelait `telechargerPdf`, et l'étude
+ * attendait un PDF.
+ *
+ * La classe est **conservée pour deux raisons** : `FacturePdfService` dépend de ses deux libellés
+ * dérivés (`detailPrestations()`, `totalEnLettres()`), qui restent ainsi écrits à un seul endroit ;
+ * et le rendu du gabarit Word reste la seule voie si l'étude redemande un jour un document
+ * retouchable. Ce n'est donc pas du code mort par oubli, mais une capacité en sommeil.
+ */
 class FactureGeneratorService
 {
     private const TEMPLATE = 'modeles/facture-notariale.docx';
@@ -134,7 +145,13 @@ class FactureGeneratorService
      * calculées) — reproduit la ligne d'explication entre parenthèses du modèle original,
      * de façon générique pour n'importe quel type d'acte plutôt que figée sur "SARLU".
      */
-    private function detailPrestations($lignes): string
+    /**
+     * Detail des prestations entre parentheses, tel que le gabarit de l etude l attend.
+     *
+     * Public depuis que FacturePdfService en a besoin : le libelle reste ainsi a un seul endroit,
+     * commun au .docx et au PDF.
+     */
+    public function detailPrestations($lignes): string
     {
         $noms = $lignes->pluck('designation')
             ->map(fn ($d) => Str::before($d, ' ('))
@@ -143,7 +160,8 @@ class FactureGeneratorService
         return $noms !== '' ? "({$noms})" : '';
     }
 
-    private function totalEnLettres(float $total): string
+    /** Total en toutes lettres, suivi du montant en chiffres — partage avec le rendu PDF. */
+    public function totalEnLettres(float $total): string
     {
         $lettres = NombreEnLettres::convertir($total, '');
         $lettres = mb_convert_case(mb_strtolower($lettres, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');

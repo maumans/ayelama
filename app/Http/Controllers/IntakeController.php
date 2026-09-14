@@ -32,15 +32,7 @@ class IntakeController extends Controller
             // ce formulaire n'est pas authentifié, et exposer une route au référentiel de l'étude
             // — a fortiori en écriture — n'aurait aucune justification. Le client choisit dans les
             // listes, sans pouvoir y ajouter quoi que ce soit.
-            'lieux' => \App\Models\Lieu::actif()
-                ->with('parent:id,nom')
-                ->orderBy('nom')
-                ->get(['id', 'parent_id', 'niveau', 'nom'])
-                ->groupBy('niveau')
-                ->map(fn ($groupe) => $groupe->map(fn ($l) => [
-                    'nom'    => $l->nom,
-                    'parent' => $l->parent?->nom,
-                ])->values()),
+            'lieux' => \App\Models\Lieu::referentielComplet(),
         ]);
     }
 

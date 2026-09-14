@@ -1,0 +1,617 @@
+{
+    "source": "geonames GN.zip (CC-BY 4.0) + loi L2024\/003\/CNT du 18\/01\/2024 + fr.wikipedia.org\/wiki\/Subdivision_de_la_Guinée",
+    "genere_le": "2026-09-10",
+    "note": "Les quartiers ne sont renseignés que pour Conakry : aucune source exploitable ne les couvre au niveau national (4 142 districts\/quartiers ; OCHA\/HDX ne descend à ce niveau que pour Conakry, et GeoNames n'a aucun PPLX pour la Guinée). Ailleurs, le référentiel se peuple par l'usage, via le bouton d'ajout de la cascade. ⚠️ La répartition des quartiers de Conakry est celle d'avant le découpage de 2024 : les communes créées (Gbessia, Lambanyi, Sonfonia, Tombolia, Kagbelen, Sanoyah, Manéah, Kassa) n'ont pas encore leurs quartiers, faute de disposer de l'annexe de la loi L2024\/003.",
+    "villes": [
+        {
+            "nom": "Beyla",
+            "communes": [
+                "Beyla",
+                "Diara-Guerela",
+                "Diassodou",
+                "Fouala",
+                "Foumbadou",
+                "Gbakedou",
+                "Gbessoba",
+                "Karala",
+                "Koumandou",
+                "Moussadou",
+                "Nionsomoridou",
+                "Samana",
+                "Sinko",
+                "Sokourala"
+            ]
+        },
+        {
+            "nom": "Boffa",
+            "communes": [
+                "Boffa",
+                "Colia",
+                "Douprou",
+                "Koba-Tatema",
+                "Mankountan",
+                "Tamita",
+                "Tougnifili"
+            ]
+        },
+        {
+            "nom": "Boké",
+            "communes": [
+                "Bintimodiya",
+                "Boké",
+                "Dabiss",
+                "Kamakoulon",
+                "Kanfarandé",
+                "Kolaboui",
+                "Malapouyah",
+                "Sangarédi",
+                "Sansalé",
+                "Tanéné"
+            ]
+        },
+        {
+            "nom": "Conakry",
+            "communes": [
+                "Dixinn",
+                "Gbessia",
+                "Kagbelen",
+                "Kaloum",
+                "Kassa",
+                "Lambanyi",
+                "Manéah",
+                "Matam",
+                "Matoto",
+                "Ratoma",
+                "Sanoyah",
+                "Sonfonia",
+                "Tombolia"
+            ],
+            "quartiers": {
+                "Dixinn": [
+                    "Belle-vue École",
+                    "Bellevue",
+                    "Camayenne",
+                    "Cameroun",
+                    "Dixinn Centre",
+                    "Dixinn Port",
+                    "Hafia",
+                    "Kénien",
+                    "Landreah",
+                    "Minière"
+                ],
+                "Kaloum": [
+                    "Almamya",
+                    "Boulbinet",
+                    "Coronthie",
+                    "Kouléwondy",
+                    "Manquepas",
+                    "Sandervalia",
+                    "Sans-fil",
+                    "Téminétaye",
+                    "Tombo"
+                ],
+                "Matam": [
+                    "Bonfi",
+                    "Boussoura",
+                    "Coléah",
+                    "Hermakonon",
+                    "Madina",
+                    "Mafanco",
+                    "Matam Centre",
+                    "Touguiwondy"
+                ],
+                "Matoto": [
+                    "Béanzin",
+                    "Dabompa",
+                    "Dabondy",
+                    "Kissosso",
+                    "Matoto Centre",
+                    "Sangoyah",
+                    "Simbaya Gare",
+                    "Tanerie",
+                    "Yimbaya"
+                ],
+                "Ratoma": [
+                    "Bambéto",
+                    "Cimenterie",
+                    "Dar-es-Salam",
+                    "Hamdallaye",
+                    "Kaporo",
+                    "Kipé",
+                    "Kobaya",
+                    "Koloma",
+                    "Nongo",
+                    "Ratoma Centre",
+                    "Simbaya",
+                    "Taouyah",
+                    "Wanindara",
+                    "Yattaya"
+                ]
+            }
+        },
+        {
+            "nom": "Coyah",
+            "communes": [
+                "Coyah"
+            ]
+        },
+        {
+            "nom": "Dabola",
+            "communes": [
+                "Arfamoussaya",
+                "Banko",
+                "Bissikrima",
+                "Dabola",
+                "Dogomet",
+                "Kankama",
+                "Kindoye",
+                "Konindou",
+                "N'Déma"
+            ]
+        },
+        {
+            "nom": "Dalaba",
+            "communes": [
+                "Bodié",
+                "Dalaba",
+                "Dalaba-Centre",
+                "Ditinn",
+                "Gongore",
+                "Kaala",
+                "Kankalabé",
+                "Kébali",
+                "Koba",
+                "Mafara",
+                "Mitty",
+                "Mombéyah"
+            ]
+        },
+        {
+            "nom": "Dialakoro",
+            "communes": [
+                "Dialakoro"
+            ]
+        },
+        {
+            "nom": "Dinguiraye",
+            "communes": [
+                "Banora",
+                "Dialakoro",
+                "Diatiféré",
+                "Dinguiraye",
+                "Gagnakali",
+                "Kalinko",
+                "Lansanya",
+                "Selouma"
+            ]
+        },
+        {
+            "nom": "Dubréka",
+            "communes": [
+                "Dubréka",
+                "Falessade",
+                "Khorira",
+                "Kouriah",
+                "Manéah",
+                "Ouassou",
+                "Tanéné",
+                "Tondon",
+                "Wonkifong"
+            ]
+        },
+        {
+            "nom": "Faranah",
+            "communes": [
+                "Banian",
+                "Beindou",
+                "Faranah",
+                "Gnaleah",
+                "Heremakonon",
+                "Kobikoro",
+                "Marela",
+                "Passayah",
+                "Sandeniah",
+                "Songoyah",
+                "Tiro"
+            ]
+        },
+        {
+            "nom": "Forécariah",
+            "communes": [
+                "Alassoya",
+                "Benty",
+                "Forécariah",
+                "Kaback",
+                "Kakossa",
+                "Kallia",
+                "Maférinya",
+                "Moussaya",
+                "Sikhourou"
+            ]
+        },
+        {
+            "nom": "Fria",
+            "communes": [
+                "Badi",
+                "Baguinet",
+                "Fria",
+                "Sogolon",
+                "Tormelin"
+            ]
+        },
+        {
+            "nom": "Gaoual",
+            "communes": [
+                "Foulamory",
+                "Gaoual",
+                "Kakony",
+                "Kollet",
+                "Koumbia",
+                "Kounsitel",
+                "Lafou",
+                "Malanta",
+                "Touba",
+                "Wendou M'Bour"
+            ]
+        },
+        {
+            "nom": "Guéckédou",
+            "communes": [
+                "Bolodou",
+                "Fangamadou",
+                "Guéckédou",
+                "Guendembou",
+                "Kassadou",
+                "Koundou",
+                "Nongoa",
+                "Ouéndé-Kénéma",
+                "Tekoulo",
+                "Termessadou-Dibo"
+            ]
+        },
+        {
+            "nom": "Kamsar",
+            "communes": [
+                "Kamsar"
+            ]
+        },
+        {
+            "nom": "Kankan",
+            "communes": [
+                "Balandougou",
+                "Bate-Nafadji",
+                "Boula",
+                "Gbérédou-Baranama",
+                "Kankan",
+                "Kankan Centre",
+                "Karfamoriah",
+                "Komodou",
+                "Koumban",
+                "Missamana",
+                "Moribayah",
+                "Sabadou-Baranama",
+                "Tinti-Oulen",
+                "Tokounou"
+            ]
+        },
+        {
+            "nom": "Kérouané",
+            "communes": [
+                "Banankoro",
+                "Damaro",
+                "Kérouané",
+                "Kounsankoro",
+                "Linko"
+            ]
+        },
+        {
+            "nom": "Kindia",
+            "communes": [
+                "Bangouyah",
+                "Damankanyah",
+                "Friguiagbé",
+                "Kindia",
+                "Kolenté",
+                "Mambia",
+                "Molota",
+                "Samayah",
+                "Souguéta"
+            ]
+        },
+        {
+            "nom": "Kissidougou",
+            "communes": [
+                "Albadaria",
+                "Banama",
+                "Bardou",
+                "Fermessadou-Pombo",
+                "Firawa-Yomadou",
+                "Gbangbadou",
+                "Kissidougou",
+                "Kissidougou-Centre",
+                "Kondiadou",
+                "Mamouroudou",
+                "Manfran",
+                "Sangarado",
+                "Sibiribaro",
+                "Soromaya",
+                "Yendé-Millimou",
+                "Yombiro"
+            ]
+        },
+        {
+            "nom": "Koubia",
+            "communes": [
+                "Dionfo",
+                "Fafaya",
+                "Koubia",
+                "Missira",
+                "Pilimini"
+            ]
+        },
+        {
+            "nom": "Koundara",
+            "communes": [
+                "Guingan",
+                "Kamaby",
+                "Koundara",
+                "Sambailo",
+                "Saréboido",
+                "Termesse",
+                "Youkounkoun"
+            ]
+        },
+        {
+            "nom": "Kouroussa",
+            "communes": [
+                "Babila",
+                "Balato",
+                "Banfélé",
+                "Baro",
+                "Cisséla",
+                "Douako",
+                "Doura",
+                "Kiniéro",
+                "Komola-Koura",
+                "Koumana",
+                "Kouroussa",
+                "Sanguiana"
+            ]
+        },
+        {
+            "nom": "Labé",
+            "communes": [
+                "Dalein",
+                "Diari",
+                "Garambé",
+                "Hafia",
+                "Kaalan",
+                "Kouramangui",
+                "Labé",
+                "Popodara",
+                "Tountouroun"
+            ]
+        },
+        {
+            "nom": "Lélouma",
+            "communes": [
+                "Balaya",
+                "Djountou",
+                "Hérico",
+                "Korbé",
+                "Lélouma",
+                "Manda",
+                "Parawol",
+                "Sagalé",
+                "Tyanguel-Bori"
+            ]
+        },
+        {
+            "nom": "Lola",
+            "communes": [
+                "Bossou",
+                "Gama",
+                "Guéassou",
+                "Kokota",
+                "Lain",
+                "Lola",
+                "N'Zoo",
+                "Tounkarata"
+            ]
+        },
+        {
+            "nom": "Macenta",
+            "communes": [
+                "Balizia",
+                "Binikala",
+                "Bofossou",
+                "Daro",
+                "Fassankoni",
+                "Kouankan",
+                "Koyamah",
+                "Macenta",
+                "N'Zébéla",
+                "Ourémai",
+                "Panziazou",
+                "Sengbédou",
+                "Sérédou",
+                "Vassérédou",
+                "Watanka"
+            ]
+        },
+        {
+            "nom": "Mali",
+            "communes": [
+                "Balaki",
+                "Donghol-Sigon",
+                "Dougountouny",
+                "Fougou",
+                "Gadha-Woundou",
+                "Gayah",
+                "Hidayatou",
+                "Lébékére",
+                "Linsan",
+                "Madina-Wora",
+                "Mali",
+                "Matakaou",
+                "Salambandé",
+                "Téliré",
+                "Yimbéring"
+            ]
+        },
+        {
+            "nom": "Mamou",
+            "communes": [
+                "Bouliwel",
+                "Dounet",
+                "Gongoret",
+                "Kégnéko",
+                "Kollet",
+                "Konkouré",
+                "Mamou",
+                "Nyagara",
+                "Ouré-Kaba",
+                "Porédaka",
+                "Saramoussaya",
+                "Soyah",
+                "Téguéréya",
+                "Timbo",
+                "Tolo"
+            ]
+        },
+        {
+            "nom": "Mandiana",
+            "communes": [
+                "Balandougouba",
+                "Dialakoro",
+                "Faralako",
+                "Kantoumania",
+                "Kiniéran",
+                "Koundian",
+                "Koundianakoro",
+                "Mandiana",
+                "Morodou",
+                "Niantania",
+                "Saladou",
+                "Sansando"
+            ]
+        },
+        {
+            "nom": "Nzérékoré",
+            "communes": [
+                "Boola",
+                "Bounouma",
+                "Gouécké",
+                "Kobéla",
+                "Koropara",
+                "Nzérékoré",
+                "Palé",
+                "Samoé",
+                "Soulouta",
+                "Womey",
+                "Yalenzou"
+            ]
+        },
+        {
+            "nom": "Pita",
+            "communes": [
+                "Bantignel",
+                "Bourouwal-Tappé",
+                "Dongol-Touma",
+                "Ley-Miro",
+                "Maci",
+                "Ninguélandé",
+                "Noussy",
+                "Pita",
+                "Sangaréah",
+                "Sintali",
+                "Timbi-Madina",
+                "Timbi-Touny"
+            ]
+        },
+        {
+            "nom": "Sabadou Baranama",
+            "communes": [
+                "Sabadou Baranama"
+            ]
+        },
+        {
+            "nom": "Siguiri",
+            "communes": [
+                "Bankon",
+                "Didi",
+                "Diomabana",
+                "Doko",
+                "Fidako",
+                "Franwalia",
+                "Kiniébakoura",
+                "Kintinian",
+                "Koumandjanbougou",
+                "Maléa",
+                "Mignada",
+                "Naboun",
+                "Niagassola",
+                "Niandankoro",
+                "Norassoba",
+                "Siguiri",
+                "Siguiri-Centre",
+                "Siguirini",
+                "Tomba-kanssa"
+            ]
+        },
+        {
+            "nom": "Télimélé",
+            "communes": [
+                "Banguingny",
+                "Daramagnaky",
+                "Gougoudjé",
+                "Koba",
+                "Konsotamy",
+                "Missira",
+                "Santou",
+                "Sarékaly",
+                "Sinta",
+                "Tarihoye",
+                "Télimélé",
+                "Thionthian"
+            ]
+        },
+        {
+            "nom": "Timbo",
+            "communes": [
+                "Timbo"
+            ]
+        },
+        {
+            "nom": "Tokounou",
+            "communes": [
+                "Tokounou"
+            ]
+        },
+        {
+            "nom": "Tougué",
+            "communes": [
+                "Daralabe",
+                "Fatako",
+                "Fello-Koundoua",
+                "Kansangui",
+                "Koin",
+                "Kolangui",
+                "Konah",
+                "Kouratongo",
+                "Tangali",
+                "Tougué"
+            ]
+        },
+        {
+            "nom": "Yomou",
+            "communes": [
+                "Bheeta",
+                "Diéké",
+                "Koulé",
+                "Péla",
+                "Yomou"
+            ]
+        }
+    ]
+}

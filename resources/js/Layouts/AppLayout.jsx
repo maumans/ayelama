@@ -177,7 +177,11 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
 
     return (
         <TooltipProvider delayDuration={300}>
-            <div className="flex h-screen overflow-hidden bg-app-bg">
+            {/* `h-dvh` et non `h-screen` : `100vh` vaut la hauteur de l'écran **barre d'adresse
+                masquée**, plus grande que la zone visible sur un téléphone. Avec `overflow-hidden`,
+                ce qui dépassait n'était pas rattrapable par défilement — l'interface passait sous la
+                barre d'état, où elle se confondait avec l'heure et la batterie. */}
+            <div className="flex h-dvh overflow-hidden bg-app-bg">
 
                 {/* Overlay mobile */}
                 <AnimatePresence>
@@ -198,6 +202,9 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                     transition={{ duration: 0.2, ease: 'easeInOut' }}
                     className={cn(
                         'fixed inset-y-0 left-0 z-50 flex flex-col bg-ink border-r border-ink-medium overflow-hidden',
+                        // Marges d'encoche : nulles sur un écran sans découpe, elles évitent que le
+                        // haut du menu se retrouve sous la barre d'état.
+                        'pt-encoche pb-encoche pl-encoche',
                         'lg:relative lg:translate-x-0',
                         mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
                     )}
@@ -351,7 +358,9 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
                     {/* Topbar */}
-                    <header className="h-14 border-b border-slate-200 bg-white/95 backdrop-blur-sm flex items-center gap-3 px-4 shrink-0 z-30">
+                    {/* `h-auto min-h-14` plutôt que `h-14` : la marge d'encoche s'ajoute à la
+                        hauteur au lieu de rogner le contenu de la barre. */}
+                    <header className="min-h-14 border-b border-slate-200 bg-white/95 backdrop-blur-sm flex items-center gap-3 px-4 shrink-0 z-30 pt-encoche">
                         <button
                             onClick={() => setMobileOpen(!mobileOpen)}
                             className="lg:hidden p-1.5 rounded-md text-slate-500 hover:bg-slate-100 transition-colors"

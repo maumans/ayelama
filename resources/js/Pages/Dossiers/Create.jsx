@@ -1528,7 +1528,7 @@ export default function DossierCreate() {
                                                                 const enDefaut = validationTentee && blocantsParChamp.has(field.id);
 
                                                                 return (
-                                                                    <div key={field.id} className={classesChamp({ field, enDefaut })}>
+                                                                    <div key={field.id} data-champ={field.id} className={classesChamp({ field, enDefaut })}>
                                                                         {/* Moteur unique, partagé avec le modal d'édition et le
                                                                             formulaire public d'intake : c'est ce qui garantit que
                                                                             `readonly`, la cascade géo et la cohérence des dates
@@ -1976,6 +1976,15 @@ export default function DossierCreate() {
                         blocants={blocants}
                         ouvert={blocantsOuverts}
                         onFermer={() => setBlocantsOuverts(false)}
+                        /* Un champ porte par une fiche client ne se remplit pas dans la page : on
+                           ouvre la fiche du role concerne, plutot que de defiler vers une carte ou
+                           le champ ne figure pas. */
+                        onOuvrirFiche={(role) => {
+                            const client = clientLinks[role];
+                            const groupe = groupFieldsBySection(visibleFields).find(g => g.clientRole === role);
+
+                            if (client) setEditingClient({ client, group: groupe ?? null });
+                        }}
                     />
 
                     <div className="flex items-center justify-between gap-3">

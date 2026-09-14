@@ -68,6 +68,20 @@ export default {
                 mono: ['Geist Mono', 'JetBrains Mono', ...defaultTheme.fontFamily.mono],
             },
 
+            spacing: {
+                /*
+                 * Hauteur de la barre supérieure (`h-14`), pour les pages qui doivent en déduire
+                 * leur propre hauteur.
+                 *
+                 * ⚠️ Ce token **manquait** alors que `Ged/Index.jsx` l'employait déjà via
+                 * `h-[calc(100dvh-theme(spacing.header))]` : Tailwind émettait un avertissement et
+                 * **ne générait pas la classe**. La page GED n'avait donc aucune hauteur, et son
+                 * défilement interne n'a jamais fonctionné. Une classe non générée est un défaut
+                 * silencieux — d'où le test de structure qui vérifie désormais ce token.
+                 */
+                header: '3.5rem',
+            },
+
             fontSize: {
                 'display-lg': ['2.25rem', { lineHeight: '2.75rem', letterSpacing: '-0.02em', fontWeight: '600' }],
                 'display': ['1.75rem', { lineHeight: '2.25rem', letterSpacing: '-0.015em', fontWeight: '600' }],

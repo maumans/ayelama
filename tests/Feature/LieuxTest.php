@@ -43,7 +43,352 @@ class LieuxTest extends TestCase
     }
 
 
+
+    // ── Import du découpage administratif réel (2026-09-10) ──────────────────
+
+    /** Écrit un fichier de données minimal, pour ne pas dépendre des 353 communes réelles. */
+    private function fichierDonnees(array $villes): string
+    {
+        $chemin = sys_get_temp_dir() . '/lieux-test-' . uniqid() . '.json';
+
+        file_put_contents($chemin, json_encode([
+            'source'    => 'test',
+            'genere_le' => '2026-09-10',
+            'villes'    => $villes,
+        ], JSON_UNESCAPED_UNICODE));
+
+        return $chemin;
+    }
+
+    public function test_l_import_cree_les_villes_et_leurs_communes(): void
+    {
+        $fichier = $this->fichierDonnees([
+            ['nom' => 'Boké', 'communes' => ['Boké', 'Kolaboui', 'Sangarédi']],
+        ]);
+
+        $this->artisan('ayelema:lieux-importer', ['--appliquer' => true, '--fichier' => $fichier])
+            ->assertSuccessful();
+
+        $ville = Lieu::where('niveau', Lieu::NIVEAU_VILLE)->where('nom', 'Boké')->first();
+
+        $this->assertNotNull($ville);
+        $this->assertSame(
+            ['Boké', 'Kolaboui', 'Sangarédi'],
+            Lieu::where('parent_id', $ville->id)->orderBy('nom')->pluck('nom')->all(),
+        );
+    }
+
+    public function test_l_import_ne_fait_rien_sans_appliquer(): void
+    {
+        // Dry-run par défaut, comme `ayelema:brouillons-purger`. C'est ce mode qui a révélé que
+        // trois préfectures allaient être créées en double (GeoNames les nomme « Préfecture de
+        // Dubréka » au lieu de « Dubréka »).
+        $fichier = $this->fichierDonnees([['nom' => 'Boké', 'communes' => ['Kolaboui']]]);
+
+        $this->artisan('ayelema:lieux-importer', ['--fichier' => $fichier])->assertSuccessful();
+
+        $this->assertSame(0, Lieu::count());
+    }
+
+    public function test_l_import_est_idempotent(): void
+    {
+        $fichier = $this->fichierDonnees([
+            ['nom' => 'Boké', 'communes' => ['Boké', 'Kolaboui']],
+        ]);
+
+        $this->artisan('ayelema:lieux-importer', ['--appliquer' => true, '--fichier' => $fichier]);
+        $apresPremier = Lieu::count();
+
+        $this->artisan('ayelema:lieux-importer', ['--appliquer' => true, '--fichier' => $fichier]);
+
+        $this->assertSame($apresPremier, Lieu::count(), 'Rejouer l\'import ne doit rien dupliquer.');
+    }
+
+    public function test_l_import_ne_cree_pas_de_doublon_sur_un_accent(): void
+    {
+        // Le dédoublonnage passe par `nom_normalise` : « Forecariah » et « Forécariah » désignent
+        // le même endroit. Sans cela l'import aurait doublé une partie du référentiel amorcé.
+        Lieu::create(['niveau' => Lieu::NIVEAU_VILLE, 'nom' => 'Forecariah']);
+
+        $fichier = $this->fichierDonnees([['nom' => 'Forécariah', 'communes' => []]]);
+
+        $this->artisan('ayelema:lieux-importer', ['--appliquer' => true, '--fichier' => $fichier]);
+
+        $this->assertSame(1, Lieu::where('niveau', Lieu::NIVEAU_VILLE)->count());
+        $this->assertSame('Forecariah', Lieu::first()->nom, 'La graphie déjà en base prime.');
+    }
+
+    public function test_l_import_laisse_intact_un_lieu_saisi_par_l_etude(): void
+    {
+        // L'import **complète**, il ne réécrit jamais : c'est l'étude qui connaît le terrain.
+        $admin = $this->utilisateur(RoleUtilisateur::Administrateur);
+
+        $ville = Lieu::create([
+            'niveau'        => Lieu::NIVEAU_VILLE,
+            'nom'           => 'Boké',
+            'a_verifier'    => true,
+            'created_by_id' => $admin->id,
+        ]);
+
+        $fichier = $this->fichierDonnees([['nom' => 'Boké', 'communes' => []]]);
+
+        $this->artisan('ayelema:lieux-importer', ['--appliquer' => true, '--fichier' => $fichier]);
+
+        $frais = $ville->fresh();
+
+        $this->assertTrue($frais->a_verifier, 'Un lieu de l\'étude garde son marqueur.');
+        $this->assertSame($admin->id, $frais->created_by_id);
+        $this->assertNull($frais->source, 'L\'import ne pose pas sa provenance sur un lieu existant.');
+    }
+
+    public function test_les_lieux_importes_arrivent_valides_et_traces(): void
+    {
+        // Décision de l'étude : une donnée venant d'une source documentée est utilisable
+        // immédiatement. « À vérifier » retrouve son sens — ce que l'étude ajoute à la volée.
+        $fichier = $this->fichierDonnees([['nom' => 'Boké', 'communes' => ['Kolaboui']]]);
+
+        $this->artisan('ayelema:lieux-importer', ['--appliquer' => true, '--fichier' => $fichier]);
+
+        foreach (Lieu::all() as $lieu) {
+            $this->assertFalse($lieu->a_verifier, "« {$lieu->nom} » doit arriver validé.");
+            $this->assertSame('import:2026-09-10', $lieu->source);
+            $this->assertNull($lieu->created_by_id, 'Un lieu importé n\'a pas d\'auteur humain.');
+        }
+    }
+
+    public function test_l_import_perime_le_cache_du_referentiel(): void
+    {
+        Lieu::create(['niveau' => Lieu::NIVEAU_VILLE, 'nom' => 'Conakry']);
+        Lieu::referentielComplet();
+
+        $fichier = $this->fichierDonnees([['nom' => 'Boké', 'communes' => []]]);
+        $this->artisan('ayelema:lieux-importer', ['--appliquer' => true, '--fichier' => $fichier]);
+
+        $this->assertContains(
+            'Boké',
+            collect(Lieu::referentielComplet()['ville'])->pluck('nom')->all(),
+        );
+    }
+
+    public function test_l_import_refuse_un_fichier_introuvable(): void
+    {
+        $this->artisan('ayelema:lieux-importer', ['--fichier' => '/introuvable.json'])->assertFailed();
+    }
+
+    public function test_le_fichier_de_donnees_livre_est_coherent(): void
+    {
+        // Garde-fou sur la donnée elle-même : le fichier versionné doit rester lisible, porter sa
+        // provenance, et refléter la réforme de 2024 sur Conakry (13 communes, dont Lambanyi —
+        // celle de l'étude, qui manquait au référentiel amorcé).
+        $donnees = json_decode(file_get_contents(database_path('data/lieux-guinee.json')), true);
+
+        $this->assertIsArray($donnees, 'database/data/lieux-guinee.json doit être lisible.');
+        $this->assertNotEmpty($donnees['source'] ?? null, 'La provenance doit être écrite dans le fichier.');
+        $this->assertGreaterThanOrEqual(39, count($donnees['villes']));
+
+        $conakry = collect($donnees['villes'])->firstWhere('nom', 'Conakry');
+
+        $this->assertNotNull($conakry, 'Conakry doit figurer au fichier.');
+        $this->assertCount(13, $conakry['communes'], 'Conakry compte 13 communes depuis la loi L2024/003.');
+        $this->assertContains('Lambanyi', $conakry['communes']);
+
+        // ── Les quartiers : Conakry seulement ────────────────────────────────
+        //
+        // Aucune source n'expose les 4 142 districts du pays ; le fichier n'en déclare donc que
+        // pour Conakry, et le référentiel se peuple par l'usage ailleurs.
+        foreach ($donnees['villes'] as $ville) {
+            if ($ville['nom'] === 'Conakry') {
+                $this->assertNotEmpty($ville['quartiers'] ?? [], 'Conakry doit déclarer ses quartiers.');
+                continue;
+            }
+
+            $this->assertArrayNotHasKey(
+                'quartiers',
+                $ville,
+                "« {$ville['nom']} » ne doit pas déclarer de quartiers : aucune source ne les couvre.",
+            );
+        }
+
+        // ⚠️ **Le garde-fou qui aurait attrapé le défaut du jour** : « Lambanyi » et « Sonfonia »
+        // figuraient à la fois comme communes de Conakry et comme quartiers de Ratoma. Un nom ne
+        // peut pas désigner deux niveaux du même endroit.
+        $communes = array_map(fn (string $c) => mb_strtolower($c), $conakry['communes']);
+
+        foreach ($conakry['quartiers'] as $commune => $quartiers) {
+            $this->assertContains(
+                $commune,
+                $conakry['communes'],
+                "Les quartiers sont déclarés sous « {$commune} », qui n'est pas une commune de Conakry.",
+            );
+
+            foreach ($quartiers as $quartier) {
+                $this->assertNotContains(
+                    mb_strtolower($quartier),
+                    $communes,
+                    "« {$quartier} » est une commune de Conakry : il ne peut pas être aussi un quartier.",
+                );
+            }
+        }
+    }
+
+
+    // ── Correction des quartiers restés sur l'ancien découpage (2026-09-10) ──
+
+    /**
+     * Un référentiel de Conakry reproduisant le désordre signalé : la réforme de 2024 a découpé
+     * Ratoma en Ratoma + Lambanyi + Sonfonia, mais les quartiers pendaient toujours de Ratoma.
+     */
+    private function conakryApresReforme(): array
+    {
+        $ville   = Lieu::create(['niveau' => Lieu::NIVEAU_VILLE, 'nom' => 'Conakry']);
+        $ratoma  = Lieu::create(['parent_id' => $ville->id, 'niveau' => Lieu::NIVEAU_COMMUNE, 'nom' => 'Ratoma']);
+        Lieu::create(['parent_id' => $ville->id, 'niveau' => Lieu::NIVEAU_COMMUNE, 'nom' => 'Lambanyi']);
+
+        return [$ville, $ratoma];
+    }
+
+    private function fichierConakry(array $quartiersDeRatoma): string
+    {
+        return $this->fichierDonnees([[
+            'nom'       => 'Conakry',
+            'communes'  => ['Ratoma', 'Lambanyi'],
+            'quartiers' => ['Ratoma' => $quartiersDeRatoma],
+        ]]);
+    }
+
+    public function test_un_quartier_qui_est_devenu_une_commune_est_retire(): void
+    {
+        // Le cœur du défaut : « Lambanyi » est une commune depuis 2024, il ne peut plus être un
+        // quartier de Ratoma — un nom ne désigne pas deux niveaux du même endroit.
+        [, $ratoma] = $this->conakryApresReforme();
+        Lieu::create(['parent_id' => $ratoma->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Nongo']);
+        Lieu::create(['parent_id' => $ratoma->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Lambanyi']);
+
+        $this->artisan('ayelema:lieux-importer', [
+            '--appliquer' => true,
+            '--corriger'  => true,
+            '--fichier'   => $this->fichierConakry(['Nongo']),
+        ])->assertSuccessful();
+
+        $this->assertDatabaseMissing('lieux', ['nom' => 'Lambanyi', 'niveau' => Lieu::NIVEAU_QUARTIER]);
+        $this->assertDatabaseHas('lieux', ['nom' => 'Lambanyi', 'niveau' => Lieu::NIVEAU_COMMUNE]);
+        $this->assertDatabaseHas('lieux', ['nom' => 'Nongo', 'actif' => true]);
+    }
+
+    public function test_un_quartier_employe_est_desactive_et_non_supprime(): void
+    {
+        // Son nom figure peut-être déjà dans un acte produit, et le référentiel ne porte aucune clé
+        // étrangère vers eux : c'est la règle de `estSupprimable()`, on ne la contourne pas.
+        [, $ratoma] = $this->conakryApresReforme();
+        $intrus = Lieu::create(['parent_id' => $ratoma->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Sonfonia']);
+
+        Client::create([
+            'type' => 'physique', 'nom_famille' => 'DIALLO',
+            'demeurant_ville' => 'Conakry', 'commune' => 'Ratoma', 'quartier' => 'Sonfonia',
+        ]);
+
+        $this->artisan('ayelema:lieux-importer', [
+            '--appliquer' => true,
+            '--corriger'  => true,
+            '--fichier'   => $this->fichierConakry(['Nongo']),
+        ])->assertSuccessful();
+
+        $frais = $intrus->fresh();
+
+        $this->assertNotNull($frais, 'Un quartier employé ne doit pas être supprimé.');
+        $this->assertFalse($frais->actif, 'Il doit sortir des listes proposées.');
+    }
+
+    public function test_la_correction_ne_touche_pas_un_quartier_saisi_par_l_etude(): void
+    {
+        // C'est l'étude qui connaît le terrain, pas un fichier de données. Le cas s'est présenté
+        // réellement : « Dapompa » avait été saisi à la main, et la correction l'a préservé.
+        $admin = $this->utilisateur(RoleUtilisateur::Administrateur);
+        [, $ratoma] = $this->conakryApresReforme();
+
+        $sien = Lieu::create([
+            'parent_id'     => $ratoma->id,
+            'niveau'        => Lieu::NIVEAU_QUARTIER,
+            'nom'           => 'Quartier du clerc',
+            'created_by_id' => $admin->id,
+        ]);
+
+        $this->artisan('ayelema:lieux-importer', [
+            '--appliquer' => true,
+            '--corriger'  => true,
+            '--fichier'   => $this->fichierConakry(['Nongo']),
+        ])->assertSuccessful();
+
+        $this->assertNotNull($sien->fresh());
+        $this->assertTrue($sien->fresh()->actif);
+    }
+
+    public function test_la_correction_ne_deplace_aucun_quartier(): void
+    {
+        // Répartir les quartiers entre les communes issues du découpage exige l'annexe de la loi
+        // L2024/003 : rattacher au hasard mettrait une fausse adresse dans un acte authentique.
+        [, $ratoma] = $this->conakryApresReforme();
+        $nongo = Lieu::create(['parent_id' => $ratoma->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Nongo']);
+
+        $this->artisan('ayelema:lieux-importer', [
+            '--appliquer' => true,
+            '--corriger'  => true,
+            '--fichier'   => $this->fichierConakry(['Nongo']),
+        ]);
+
+        $this->assertSame($ratoma->id, $nongo->fresh()->parent_id);
+    }
+
+    public function test_la_correction_ne_fait_rien_sans_appliquer(): void
+    {
+        [, $ratoma] = $this->conakryApresReforme();
+        Lieu::create(['parent_id' => $ratoma->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Lambanyi']);
+
+        $this->artisan('ayelema:lieux-importer', [
+            '--corriger' => true,
+            '--fichier'  => $this->fichierConakry(['Nongo']),
+        ])->assertSuccessful();
+
+        $this->assertDatabaseHas('lieux', ['nom' => 'Lambanyi', 'niveau' => Lieu::NIVEAU_QUARTIER]);
+    }
+
+    public function test_la_correction_est_idempotente(): void
+    {
+        [, $ratoma] = $this->conakryApresReforme();
+        Lieu::create(['parent_id' => $ratoma->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Nongo']);
+        Lieu::create(['parent_id' => $ratoma->id, 'niveau' => Lieu::NIVEAU_QUARTIER, 'nom' => 'Lambanyi']);
+
+        $fichier = $this->fichierConakry(['Nongo']);
+        $options = ['--appliquer' => true, '--corriger' => true, '--fichier' => $fichier];
+
+        $this->artisan('ayelema:lieux-importer', $options);
+        $apres = Lieu::count();
+
+        $this->artisan('ayelema:lieux-importer', $options);
+
+        $this->assertSame($apres, Lieu::count());
+    }
+
+    public function test_l_import_cree_les_quartiers_declares(): void
+    {
+        $this->artisan('ayelema:lieux-importer', [
+            '--appliquer' => true,
+            '--fichier'   => $this->fichierConakry(['Nongo', 'Kipé', 'Taouyah']),
+        ])->assertSuccessful();
+
+        $ratoma = Lieu::where('nom', 'Ratoma')->where('niveau', Lieu::NIVEAU_COMMUNE)->first();
+
+        $this->assertSame(
+            ['Kipé', 'Nongo', 'Taouyah'],
+            Lieu::where('parent_id', $ratoma->id)->orderBy('nom')->pluck('nom')->all(),
+        );
+    }
+
+    // ── Correction des quartiers : fin ──────────────────────────────────────
+
     // ── Valider un lieu : un geste à part entière (2026-09-09) ───────────────
+
+
 
     public function test_un_lieu_se_valide_sans_etre_renomme(): void
     {
@@ -186,30 +531,43 @@ class LieuxTest extends TestCase
     }
 
     // ── La cascade ───────────────────────────────────────────────────────────
+    //
+    // ⚠️ **Le filtrage par parent a changé de côté le 2026-09-10.** Le serveur servait un niveau à
+    // la fois (`GET /lieux?niveau=commune&parent=Conakry`), ce qui coûtait jusqu'à 18 requêtes sur
+    // un questionnaire de modification. Il sert désormais le référentiel **entier** une fois, et la
+    // cascade se résout de mémoire (`resources/js/lib/referentielLieux.js`). Ces tests vérifient
+    // donc que le contrat rend le filtrage **possible** — le parent porté par chaque lieu — et
+    // `ReferentielLieuxTest` couvre le point d'entrée lui-même.
 
-    public function test_la_cascade_ne_rend_que_les_enfants_du_parent_demande(): void
+    public function test_chaque_lieu_porte_son_parent_pour_permettre_le_filtrage(): void
     {
         $this->conakry();
         $kindia = Lieu::create(['niveau' => Lieu::NIVEAU_VILLE, 'nom' => 'Kindia']);
         Lieu::create(['parent_id' => $kindia->id, 'niveau' => Lieu::NIVEAU_COMMUNE, 'nom' => 'Kindia']);
 
-        $reponse = $this->actingAs($this->utilisateur(RoleUtilisateur::Clerc))
-            ->getJson('/lieux?niveau=commune&parent=Conakry')
-            ->assertOk();
+        $communes = collect(Lieu::referentielComplet()['commune']);
 
-        $this->assertSame(['Ratoma'], array_column($reponse->json('lieux'), 'nom'));
+        // Deux communes homonymes de leur ville : c'est le parent qui les distingue, pas le nom.
+        $this->assertSame(
+            ['Ratoma'],
+            $communes->where('parent', 'Conakry')->pluck('nom')->values()->all(),
+        );
+        $this->assertSame(
+            ['Kindia'],
+            $communes->where('parent', 'Kindia')->pluck('nom')->values()->all(),
+        );
     }
 
-    public function test_sans_parent_un_niveau_qui_en_attend_un_ne_rend_rien(): void
+    public function test_un_quartier_est_rattache_a_sa_commune_et_non_a_sa_ville(): void
     {
         // Proposer tous les quartiers du pays avant de connaître la commune recréerait exactement
-        // l'incohérence que la cascade supprime.
+        // l'incohérence que la cascade supprime. Le rattachement rend ce filtrage possible.
         $this->conakry();
 
-        $this->actingAs($this->utilisateur(RoleUtilisateur::Clerc))
-            ->getJson('/lieux?niveau=quartier')
-            ->assertOk()
-            ->assertJsonCount(0, 'lieux');
+        $quartiers = collect(Lieu::referentielComplet()['quartier']);
+
+        $this->assertSame(['Nongo'], $quartiers->where('parent', 'Ratoma')->pluck('nom')->all());
+        $this->assertCount(0, $quartiers->where('parent', 'Conakry'));
     }
 
     public function test_un_lieu_desactive_nest_plus_propose(): void
@@ -217,10 +575,7 @@ class LieuxTest extends TestCase
         $conakry = $this->conakry();
         Lieu::parNom('Ratoma', Lieu::NIVEAU_COMMUNE, $conakry->id)->update(['actif' => false]);
 
-        $this->actingAs($this->utilisateur(RoleUtilisateur::Clerc))
-            ->getJson('/lieux?niveau=commune&parent=Conakry')
-            ->assertOk()
-            ->assertJsonCount(0, 'lieux');
+        $this->assertCount(0, Lieu::referentielComplet()['commune']);
     }
 
     // ── Ajout et autorisations ───────────────────────────────────────────────
@@ -257,7 +612,7 @@ class LieuxTest extends TestCase
     {
         // Le formulaire public d'intake reçoit le référentiel dans ses props : aucune écriture ne
         // doit être exposée à un tiers.
-        $this->getJson('/lieux?niveau=ville')->assertUnauthorized();
+        $this->getJson('/lieux/referentiel')->assertUnauthorized();
         $this->postJson('/lieux', ['niveau' => 'ville', 'nom' => 'Intrus'])->assertUnauthorized();
 
         $this->assertDatabaseMissing('lieux', ['nom' => 'Intrus']);

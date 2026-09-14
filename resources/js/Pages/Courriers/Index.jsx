@@ -23,6 +23,7 @@ import {
     Search, Send, Trash2, X,
 } from 'lucide-react';
 import DocumentPreviewModal from '@/Components/documents/DocumentPreviewModal';
+import { telechargerFichier } from '@/lib/telechargement';
 
 /* ─── constants ─────────────────────────────────────────── */
 
@@ -312,13 +313,12 @@ function CourrierRow({ c, onEdit, onPreview, idx }) {
                                     </Tooltip>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <Button variant="ghost" size="icon-sm" asChild
+                                            <Button variant="ghost" size="icon-sm" 
                                                 className="h-7 w-7 text-slate-400 hover:text-ink"
-                                            >
-                                                <a href={c.url_download} download>
+                                            onClick={() => telechargerFichier(c.url_download)}
+                                        >
                                                     <Download className="h-3.5 w-3.5" />
-                                                </a>
-                                            </Button>
+                                                </Button>
                                         </TooltipTrigger>
                                         <TooltipContent><p className="text-xs">Télécharger</p></TooltipContent>
                                     </Tooltip>

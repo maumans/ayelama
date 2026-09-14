@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, ArrowRight, CheckCircle2, ChevronDown } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, ChevronDown, UserPen } from 'lucide-react';
 import { allerAuBlocant, blocantsParSection } from '@/lib/blocantsEtape';
 import { cn } from '@/lib/utils';
 
@@ -10,8 +10,20 @@ import { cn } from '@/lib/utils';
  * dans la barre de navigation, et se déroule sur clic — ou automatiquement quand on tente d'avancer
  * alors qu'il manque quelque chose.
  *
- * Chaque ligne fait défiler jusqu'au champ concerné : sur un questionnaire de modification à dix
- * sections, savoir *qu'il* manque quelque chose ne suffit pas, il faut y être emmené.
+ * Chaque ligne emmène là où l'on peut agir : sur un questionnaire de modification à dix sections,
+ * savoir *qu'il* manque quelque chose ne suffit pas.
+ *
+ * ⚠️ **Deux défauts corrigés le 2026-09-10**, signalés à l'usage :
+ *
+ * 1. Le panneau **restait ouvert** et recouvrait le champ vers lequel il venait de faire défiler :
+ *    il fallait le refermer à la main pour voir où l'on avait atterri. Il se replie désormais, et le
+ *    défilement attend la fin du repli — sans quoi il viserait une position que le retrait du
+ *    panneau décale.
+ * 2. Un champ porté par une **fiche client** ne se remplit pas dans la page : il vit dans la modale
+ *    de la fiche. Défiler jusqu'à la carte de la section n'y menait pas ; la ligne propose
+ *    maintenant « Ouvrir la fiche » et ouvre la bonne.
+ *
+ * Le halo posé par `allerAuBlocant` complète le geste : il dit *où* l'on vient d'arriver.
  */
 export function CompteurBlocants({ blocants, ouvert, onBasculer }) {
     const nb = blocants.length;
@@ -39,8 +51,36 @@ export function CompteurBlocants({ blocants, ouvert, onBasculer }) {
     );
 }
 
-export function BlocantsPanel({ blocants, ouvert, onFermer }) {
+/** Durée du repli du panneau, en millisecondes — doit suivre la transition ci-dessous. */
+const DUREE_REPLI = 240;
+
+export function BlocantsPanel({ blocants, ouvert, onFermer, onOuvrirFiche = null }) {
     const groupes = blocantsParSection(blocants);
+
+    /**
+     * Va au champ **après** avoir replié le panneau.
+     *
+     * ⚠️ Le défaut corrigé : le panneau restait ouvert et **recouvrait le champ** vers lequel il
+     * venait de faire défiler. L'étude devait le refermer à la main pour voir où elle avait atterri
+     * — le geste « Aller » ne menait donc nulle part de visible.
+     *
+     * Le délai attend la fin du repli : défiler avant viserait une position que le retrait du
+     * panneau va décaler de toute sa hauteur.
+     */
+    const allerEtFermer = (ancre) => {
+        onFermer();
+        window.setTimeout(() => allerAuBlocant(ancre), DUREE_REPLI);
+    };
+
+    /**
+     * Un champ porté par une fiche client ne se remplit pas dans la page : il vit **dans la modale
+     * de la fiche**. Défiler jusqu'à la carte de la section n'y menait pas — on ouvre donc la bonne
+     * fiche directement.
+     */
+    const ouvrirFiche = (roleClient) => {
+        onFermer();
+        window.setTimeout(() => onOuvrirFiche(roleClient), DUREE_REPLI);
+    };
 
     return (
         <AnimatePresence initial={false}>
@@ -76,23 +116,40 @@ export function BlocantsPanel({ blocants, ouvert, onFermer }) {
                                     <ul className="mt-0.5 divide-y divide-amber-200/50">
                                         {groupe.lignes.map(ligne => (
                                             <li key={ligne.cle}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => allerAuBlocant(ligne.ancre)}
-                                                    disabled={!ligne.ancre}
-                                                    className={cn(
-                                                        'group flex w-full items-baseline gap-2 py-1 text-left text-xs',
-                                                        ligne.ancre ? 'cursor-pointer' : 'cursor-default',
-                                                    )}
-                                                >
-                                                    <span className="font-medium text-slate-700">{ligne.label}</span>
-                                                    <span className="text-slate-500">— {ligne.raison}</span>
-                                                    {ligne.ancre && (
-                                                        <span className="ml-auto flex shrink-0 items-center gap-1 text-seal-hover opacity-0 transition-opacity group-hover:opacity-100">
-                                                            Aller <ArrowRight className="h-3 w-3" />
-                                                        </span>
-                                                    )}
-                                                </button>
+                                                {(() => {
+                                                    // Trois cas, trois actions : ouvrir la fiche du
+                                                    // client qui porte le champ, aller au champ dans
+                                                    // la page, ou rien quand il n'y a nulle part où
+                                                    // aller (choix d'une catégorie, par exemple).
+                                                    const versFiche = !!ligne.roleClient && !!onOuvrirFiche;
+                                                    const cliquable = versFiche || !!ligne.ancre;
+
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            onClick={versFiche
+                                                                ? () => ouvrirFiche(ligne.roleClient)
+                                                                : () => allerEtFermer(ligne.ancre)}
+                                                            disabled={!cliquable}
+                                                            className={cn(
+                                                                'group flex w-full items-baseline gap-2 py-1 text-left text-xs',
+                                                                cliquable ? 'cursor-pointer' : 'cursor-default',
+                                                            )}
+                                                        >
+                                                            <span className="font-medium text-slate-700">{ligne.label}</span>
+                                                            <span className="text-slate-500">— {ligne.raison}</span>
+                                                            {cliquable && (
+                                                                <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-seal-hover opacity-60 transition-opacity group-hover:opacity-100">
+                                                                    {versFiche ? (
+                                                                        <>Ouvrir la fiche <UserPen className="h-3 w-3" /></>
+                                                                    ) : (
+                                                                        <>Aller <ArrowRight className="h-3 w-3" /></>
+                                                                    )}
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })()}
                                             </li>
                                         ))}
                                     </ul>

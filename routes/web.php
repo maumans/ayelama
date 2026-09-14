@@ -125,6 +125,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/paiements/{paiement}/recu', [FactureController::class, 'genererRecu'])->name('paiements.recu.generer');
     Route::get('/recus/{recu}/telecharger', [FactureController::class, 'telechargerRecu'])->name('recus.telecharger');
     Route::get('/recus/{recu}/apercu', [FactureController::class, 'apercuRecu'])->name('recus.apercu');
+    // La note de frais en PDF, rendue en mémoire — voir FacturePdfService.
     Route::get('/factures/{facture}/telecharger', [FactureController::class, 'telechargerPdf'])->name('factures.telecharger');
     Route::post('/factures/{facture}/lignes', [FactureController::class, 'storeLigne'])->name('factures.lignes.store');
     Route::patch('/lignes/{ligne}', [FactureController::class, 'updateLigne'])->name('lignes.update');
@@ -168,7 +169,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Référentiel des lieux — alimente la cascade ville → commune → quartier des formulaires.
     // Sous authentification : le formulaire public d'intake reçoit le référentiel dans ses props,
     // pour qu'aucune écriture ne soit atteignable sans être connecté.
-    Route::get('/lieux', [LieuController::class, 'index'])->name('lieux.index');
+    // Le référentiel **entier** en une réponse : la cascade se résolvait auparavant par un
+    // appel par niveau et par champ — jusqu'à 18 requêtes sur un questionnaire de modification.
+    Route::get('/lieux/referentiel', [LieuController::class, 'referentiel'])->name('lieux.referentiel');
     Route::post('/lieux', [LieuController::class, 'store'])->name('lieux.store');
 
     Route::get('/societes/autocomplete', [SocieteController::class, 'autocomplete'])->name('societes.autocomplete');

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { AlertCircle, Check, Loader2, MapPin, Plus } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/Components/ui/input';
+import { chargerReferentiel, invaliderReferentiel, lieuxDe } from '@/lib/referentielLieux';
 import { cn } from '@/lib/utils';
 
 /**
@@ -49,6 +50,8 @@ export function LieuSelect({
     const nbInitiaux = horsLigne ? lieuxInitiaux.length : 0;
 
     const [lieux, setLieux] = useState(horsLigne ? lieuxInitiaux : []);
+    // Incrémenté après l'ajout d'un lieu : relance l'effet, qui relit le référentiel rechargé.
+    const [version, setVersion] = useState(0);
     const [chargement, setChargement] = useState(false);
     const [ajoutOuvert, setAjoutOuvert] = useState(false);
     const [nouveauNom, setNouveauNom] = useState('');
@@ -69,23 +72,40 @@ export function LieuSelect({
             return;
         }
 
-        const controleur = new AbortController();
+        // Le référentiel **entier** est chargé une seule fois pour la page, par le premier champ
+        // monté ; tous les autres attendent la même promesse. La cascade se résout ensuite de
+        // mémoire, sans réseau — c'est ce qui supprime la latence ressentie, qui venait du nombre
+        // de requêtes (jusqu'à 18 sur un questionnaire de modification) et non de leur taille.
+        let vivant = true;
+
+        const deja = lieuxDe(niveau, parentNom);
+        if (deja !== null) {
+            setLieux(deja);
+            rapporter.current?.(deja.length);
+            setChargement(false);
+            return;
+        }
+
         setChargement(true);
 
-        axios
-            .get('/lieux', { params: { niveau, parent: parentNom }, signal: controleur.signal })
-            .then(({ data }) => {
-                const recus = data.lieux ?? [];
+        chargerReferentiel()
+            .then(() => {
+                if (!vivant) return;
+                const recus = lieuxDe(niveau, parentNom) ?? [];
                 setLieux(recus);
                 rapporter.current?.(recus.length);
             })
-            .catch((err) => { if (!axios.isCancel(err)) { setLieux([]); rapporter.current?.(0); } })
-            .finally(() => setChargement(false));
+            .catch(() => {
+                if (!vivant) return;
+                setLieux([]);
+                rapporter.current?.(0);
+            })
+            .finally(() => { if (vivant) setChargement(false); });
 
-        return () => controleur.abort();
+        return () => { vivant = false; };
     // `nbInitiaux` plutôt que `lieuxInitiaux` : un tableau est une référence neuve à chaque rendu du
-    // parent, et l'effet se relancerait sans fin.
-    }, [niveau, parentNom, horsLigne, parentManquant, nbInitiaux]);
+    // parent, et l'effet se relancerait sans fin. `version` force la relecture après un ajout.
+    }, [niveau, parentNom, horsLigne, parentManquant, nbInitiaux, version]);
 
     useEffect(() => {
         if (ajoutOuvert) inputAjout.current?.focus();
@@ -98,10 +118,17 @@ export function LieuSelect({
         setErreurAjout(null);
         try {
             const { data } = await axios.post('/lieux', { niveau, nom, parent: parentNom });
+
+            // ⚠️ Périmer le référentiel **partagé**, pas seulement la liste locale : un quartier
+            // ajouté ici n'apparaissait que dans ce champ, les dix-sept autres du même formulaire
+            // continuant de servir la liste d'avant.
+            invaliderReferentiel();
+
             setLieux(l => [...l, data].sort((a, b) => a.nom.localeCompare(b.nom, 'fr')));
             onChange(data.nom);
             setAjoutOuvert(false);
             setNouveauNom('');
+            setVersion(v => v + 1);
         } catch (err) {
             setErreurAjout(
                 err.response?.status === 403

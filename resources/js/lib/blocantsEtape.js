@@ -205,9 +205,18 @@ export function blocantsEtape({ step, categorie, typeActe, visibleFields = [], f
                     section,
                     label: field.label,
                     raison: masque
-                        ? 'Absent de la fiche liée — complétez la fiche, ou détachez-la pour saisir ici'
+                        ? 'Absent de la fiche liée — à compléter sur la fiche du client'
                         : raisonChampVide(field, optionsGeo[field.id]),
                     ancre: masque ? ancreSection(groupe.name) : field.id,
+                    /*
+                     * Rôle de la fiche qui porte ce champ, quand il est masqué.
+                     *
+                     * ⚠️ Sans lui, la seule action possible était de défiler jusqu'à la carte de la
+                     * section — or le champ n'y est pas : il vit **dans la modale de la fiche
+                     * client**. L'étude devait deviner qu'il fallait ouvrir la fiche, puis y trouver
+                     * le champ. Le panneau peut désormais ouvrir la bonne fiche directement.
+                     */
+                    roleClient: masque ? (groupe.clientRole ?? null) : null,
                 });
             }
         }
@@ -311,6 +320,18 @@ export function allerAuBlocant(ancre) {
     if (!cible) return;
 
     cible.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    /*
+     * Halo temporaire sur le champ atteint.
+     *
+     * Défiler ne suffit pas à dire *où* l'on a atterri : sur une carte de dix champs, l'œil doit
+     * encore chercher. Le halo dure le temps d'être vu puis s'effface, sans laisser d'état à gérer.
+     * La classe est portée par l'enveloppe du champ quand elle existe — c'est elle qui a la taille
+     * du bloc, libellé compris — sinon par le contrôle lui-même.
+     */
+    const halo = cible.closest('[data-champ]') ?? cible;
+    halo.classList.add('halo-cible');
+    window.setTimeout(() => halo.classList.remove('halo-cible'), 1600);
 
     // Le focus après le défilement : le donner avant ferait sauter la page au lieu de l'animer.
     window.setTimeout(() => {

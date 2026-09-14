@@ -18,7 +18,7 @@ function FieldGroup({ fields, formValues, setFormValues, lieux, blocantsParChamp
     return (
         <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
             {fields.map(field => (
-                <div key={field.id} className={classesChamp({ field, enDefaut: blocantsParChamp.has(field.id) })}>
+                <div key={field.id} data-champ={field.id} className={classesChamp({ field, enDefaut: blocantsParChamp.has(field.id) })}>
                     <ChampQuestionnaire
                         field={field}
                         valeurs={formValues}

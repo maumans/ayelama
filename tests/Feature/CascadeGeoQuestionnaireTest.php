@@ -49,11 +49,16 @@ class CascadeGeoQuestionnaireTest extends TestCase
         $this->referentiel();
         $clerc = $this->clerc();
 
-        $ratoma = $this->actingAs($clerc)->getJson('/lieux?niveau=quartier&parent=Ratoma')->assertOk();
-        $kaloum = $this->actingAs($clerc)->getJson('/lieux?niveau=quartier&parent=Kaloum')->assertOk();
+        // ⚠️ Le filtrage par parent a changé de côté le 2026-09-10 : le serveur envoie le
+        // référentiel **entier** une fois (il servait un niveau par requête, jusqu'à 18 par
+        // formulaire) et la cascade filtre de mémoire. La garantie de fond est inchangée — elle
+        // repose maintenant sur le parent porté par chaque quartier.
+        $quartiers = collect(
+            $this->actingAs($clerc)->getJson('/lieux/referentiel')->assertOk()->json('quartier'),
+        );
 
-        $this->assertSame(['Nongo'],   array_column($ratoma->json('lieux'), 'nom'));
-        $this->assertSame(['Almamya'], array_column($kaloum->json('lieux'), 'nom'));
+        $this->assertSame(['Nongo'],   $quartiers->where('parent', 'Ratoma')->pluck('nom')->all());
+        $this->assertSame(['Almamya'], $quartiers->where('parent', 'Kaloum')->pluck('nom')->all());
     }
 
     public function test_un_lieu_ajoute_sert_immediatement_aux_dossiers_suivants(): void
@@ -67,13 +72,13 @@ class CascadeGeoQuestionnaireTest extends TestCase
             ->postJson('/lieux', ['niveau' => 'quartier', 'nom' => 'Kipé', 'parent' => 'Ratoma'])
             ->assertCreated();
 
-        $this->assertContains(
-            'Kipé',
-            array_column(
-                $this->actingAs($clerc)->getJson('/lieux?niveau=quartier&parent=Ratoma')->json('lieux'),
-                'nom',
-            ),
-        );
+        $quartiers = collect(
+            $this->actingAs($clerc)->getJson('/lieux/referentiel')->json('quartier'),
+        )->where('parent', 'Ratoma')->pluck('nom');
+
+        // Le cache du référentiel doit avoir été périmé par la création, sinon le lieu resterait
+        // invisible — donc inutilisable — jusqu'au prochain vidage.
+        $this->assertContains('Kipé', $quartiers->all());
     }
 
     public function test_le_formulaire_public_recoit_le_referentiel_sans_pouvoir_lecrire(): void
@@ -82,7 +87,7 @@ class CascadeGeoQuestionnaireTest extends TestCase
         // et un tiers ne doit pas pouvoir peupler le référentiel de l'étude.
         $this->referentiel();
 
-        $this->getJson('/lieux?niveau=ville')->assertUnauthorized();
+        $this->getJson('/lieux/referentiel')->assertUnauthorized();
         $this->postJson('/lieux', ['niveau' => 'quartier', 'nom' => 'Intrus', 'parent' => 'Ratoma'])
             ->assertUnauthorized();
 
@@ -93,9 +98,15 @@ class CascadeGeoQuestionnaireTest extends TestCase
     {
         // La cascade n'a que trois étages : accepter un niveau arbitraire laisserait créer des
         // lieux que personne ne proposerait jamais.
+        //
+        // Le contrôle ne portait ici que sur la **lecture** d'un niveau, point d'entrée supprimé
+        // depuis que le référentiel part en une seule réponse. Il reste sur l'**écriture**, où il
+        // compte réellement : c'est elle qui pourrait polluer le référentiel.
         $this->actingAs($this->clerc())
-            ->getJson('/lieux?niveau=departement')
+            ->postJson('/lieux', ['niveau' => 'departement', 'nom' => 'Nzérékoré'])
             ->assertStatus(422);
+
+        $this->assertDatabaseMissing('lieux', ['niveau' => 'departement']);
     }
 
     public function test_le_seeder_amorce_conakry_et_les_prefectures(): void
@@ -178,11 +189,69 @@ class CascadeGeoQuestionnaireTest extends TestCase
         $ratoma = Lieu::parNom('Ratoma', Lieu::NIVEAU_COMMUNE);
         $ratoma->update(['actif' => false]);
 
-        $this->actingAs($this->clerc())
-            ->getJson('/lieux?niveau=commune&parent=Conakry')
-            ->assertJsonCount(1, 'lieux');
+        // Sort des listes proposees...
+        $communes = $this->actingAs($this->clerc())
+            ->getJson('/lieux/referentiel')
+            ->assertOk()
+            ->json('commune');
 
+        $this->assertNotContains('Ratoma', array_column($communes, 'nom'));
+
+        // ...sans disparaitre de la base : son nom figure peut-etre deja dans un acte produit.
         $this->assertDatabaseHas('lieux', ['id' => $ratoma->id]);
+    }
+
+    // ── L'ordre d'affichage du triplet (2026-09-10) ─────────────────────────
+
+    public function test_chaque_triplet_est_declare_dans_l_ordre_de_la_cascade(): void
+    {
+        // 🐛 **Les 26 triplets étaient déclarés à l'envers** — quartier, commune, ville — donc
+        // affichés dans cet ordre par la grille. On lisait « Quartier du siège social » avant
+        // « Ville du siège social », alors que la saisie **exige** de commencer par la ville : les
+        // niveaux inférieurs restent désactivés tant que le parent n'est pas choisi. L'étude devait
+        // donc remonter le formulaire à l'envers.
+        //
+        // Aucun test ne pouvait le voir : l'ordre de déclaration ne change aucune valeur, seulement
+        // ce que l'œil rencontre. D'où ce garde-fou.
+        $source = file_get_contents(resource_path('js/data/questionnaires.js'));
+
+        // Un « quartier » suivi d'une « commune » puis d'une « ville » est la signature de
+        // l'ordre inversé.
+        $inverses = preg_match_all(
+            // ⚠️ `(?:(?!id: ').)*?` interdit toute autre déclaration entre les trois : sans
+            // cette borne, le motif enjambait deux triplets voisins et signalait 7 faux
+            // positifs sur un fichier pourtant correct.
+            "/id: '[a-z_.]*quartier'(?:(?!id: ').)*?id: '[a-z_.]*commune'(?:(?!id: ').)*?id: '[a-z_.]*(?:demeurant_ville|siege_ville|siege_nouveau_ville)'/s",
+            $source,
+        );
+
+        $this->assertSame(
+            0,
+            $inverses,
+            "{$inverses} triplet(s) géographique(s) déclaré(s) à l'envers : la cascade se saisit "
+            . "ville → commune → quartier, elle doit s'afficher dans cet ordre.",
+        );
+    }
+
+    public function test_un_champ_geo_qui_ouvre_une_section_est_le_niveau_ville(): void
+    {
+        // ⚠️ Le piège du réordonnancement : dans `questionnaires.js`, **seul le premier champ d'une
+        // section porte `section`**, les suivants l'héritent (voir `groupFieldsBySection`). Déplacer
+        // un triplet sans déplacer ce marqueur aurait rangé la section sous un champ du milieu.
+        $source = file_get_contents(resource_path('js/data/questionnaires.js'));
+
+        $this->assertSame(
+            0,
+            preg_match("/id: '[a-z_.]*quartier',[^\n]*section: '/", $source),
+            'Un champ « quartier » ne peut plus ouvrir une section : il est le dernier du triplet, '
+            . 'et le marqueur doit vivre sur le champ « ville ».',
+        );
+
+        // Le cas réel : le transfert de siège s'ouvre bien sur la ville.
+        $this->assertMatchesRegularExpression(
+            "/id: 'modif\.siege_nouveau_ville',[^\n]*section: 'Transfert du siège social'/",
+            $source,
+        );
     }
 
     // ── Ajout depuis l'écran du référentiel ─────────────────────────────────

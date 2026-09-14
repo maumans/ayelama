@@ -49,6 +49,7 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { notifyValidationError } from '@/lib/toast';
+import { telechargerFichier } from '@/lib/telechargement';
 import { ApercuSousLigne, useApercuEnLigne } from '@/Components/documents/ApercuSousLigne';
 
 const docStatutConfig = {
@@ -394,6 +395,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                 {champsAffichables(group).map(field => (
                                     <div
                                         key={field.id}
+                                        data-champ={`qedit-${field.id}`}
                                         className={classesChamp({
                                             field,
                                             enDefaut: blocantsParChamp.has(field.id),
@@ -1313,9 +1315,9 @@ function DocumentHistoryDialog({ doc, onClose }) {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1 shrink-0">
-                                    <Button variant="ghost" size="icon-sm" asChild title="Télécharger cette version">
-                                        <a href={v.url_download} download><Download className="h-3.5 w-3.5" /></a>
-                                    </Button>
+                                    <Button variant="ghost" size="icon-sm"  title="Télécharger cette version"
+                                            onClick={() => telechargerFichier(v.url_download)}
+                                        ><Download className="h-3.5 w-3.5" /></Button>
                                     {!v.est_actuelle && (
                                         <Button variant="ghost" size="icon-sm" title="Restaurer cette version" onClick={() => restaurer(v)}>
                                             <RefreshCw className="h-3.5 w-3.5" />
@@ -1569,10 +1571,13 @@ function DocumentsTab({ dossier, reference, etape, can, avancing, onSubmitRevisi
                                                             onClick={() => apercu.basculer(`doc-${doc.id}`)}>
                                                             <Eye className="h-3.5 w-3.5" />
                                                         </Button>
-                                                        <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
-                                                            <a href={`/documents/${doc.id}/download`} download>
-                                                                <Download className="h-3.5 w-3.5" />
-                                                            </a>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon-sm"
+                                                            title="Télécharger"
+                                                            onClick={() => telechargerFichier(`/documents/${doc.id}/download`)}
+                                                        >
+                                                            <Download className="h-3.5 w-3.5" />
                                                         </Button>
                                                         <Button variant="ghost" size="icon-sm" title="Historique des versions"
                                                             onClick={() => setHistoryDoc(doc)}>
@@ -2040,11 +2045,11 @@ function ExpeditionTab({ dossier, reference, can }) {
                                                 >
                                                     <Eye className={cn('h-3.5 w-3.5', apercu.estOuvert(cleApercu) && 'text-seal')} />
                                                 </Button>
-                                                <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
-                                                    <a href={genere.url_download} download>
+                                                <Button variant="ghost" size="icon-sm"  title="Télécharger"
+                                            onClick={() => telechargerFichier(genere.url_download)}
+                                        >
                                                         <Download className="h-3.5 w-3.5" />
-                                                    </a>
-                                                </Button>
+                                                    </Button>
                                             </>
                                         )}
                                         {genere && peutGerer && genere.statut !== 'envoye' && (
@@ -2120,11 +2125,11 @@ function ExpeditionTab({ dossier, reference, can }) {
                                             >
                                                 <Eye className={cn('h-3.5 w-3.5', apercu.estOuvert(`courrier-${c.id}`) && 'text-seal')} />
                                             </Button>
-                                            <Button variant="ghost" size="icon-sm" asChild title="Télécharger">
-                                                <a href={c.url_download} download>
+                                            <Button variant="ghost" size="icon-sm"  title="Télécharger"
+                                            onClick={() => telechargerFichier(c.url_download)}
+                                        >
                                                     <Download className="h-3.5 w-3.5" />
-                                                </a>
-                                            </Button>
+                                                </Button>
                                         </>
                                     )}
                                     {peutGerer && c.statut !== 'envoye' && (
@@ -2405,11 +2410,20 @@ function FacturationTab({ dossier, can }) {
                                 <Wallet className="h-3.5 w-3.5" /> Enregistrer paiement
                             </Button>
                         )}
-                        <a href={`/factures/${facture.id}/telecharger`} download>
-                            <Button variant="outline" size="sm" className="h-8 gap-1">
-                                <Download className="h-3.5 w-3.5" /> Télécharger
-                            </Button>
-                        </a>
+                        {/* ⚠️ Plus d'attribut `download` sur un lien nu. C'est lui qui rendait le
+                            défaut silencieux : quand la réponse était une page HTML — erreur
+                            serveur, redirection de session — le navigateur l'enregistrait quand même,
+                            sous le nom du dernier segment d'URL, d'où le « telecharger.htm »
+                            inexploitable. `telechargerFichier` vérifie le type reçu et **le dit**
+                            plutôt que de déposer une page web déguisée en facture. */}
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1"
+                            onClick={() => telechargerFichier(`/factures/${facture.id}/telecharger`)}
+                        >
+                            <Download className="h-3.5 w-3.5" /> Télécharger
+                        </Button>
                     </div>
                 </CardHeader>
                 <CardContent className="pt-5 space-y-6">

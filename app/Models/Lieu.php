@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Support\Normalisation;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -31,7 +32,10 @@ class Lieu extends Model
         self::NIVEAU_QUARTIER => null,
     ];
 
-    protected $fillable = ['parent_id', 'niveau', 'nom', 'nom_normalise', 'a_verifier', 'actif', 'created_by_id'];
+    /** Clé du référentiel complet en cache — voir `referentielComplet()`. */
+    public const CLE_CACHE_REFERENTIEL = 'lieux.referentiel';
+
+    protected $fillable = ['parent_id', 'niveau', 'nom', 'nom_normalise', 'a_verifier', 'actif', 'created_by_id', 'source'];
 
     protected function casts(): array
     {
@@ -49,6 +53,54 @@ class Lieu extends Model
         static::saving(function (self $lieu) {
             $lieu->nom_normalise = Normalisation::comparable($lieu->nom);
         });
+
+        // Le référentiel complet est servi depuis le cache : toute écriture doit l'y périmer,
+        // sinon un lieu ajouté en pleine saisie resterait invisible jusqu'au prochain vidage.
+        // `saved` **et** `deleted` : la désactivation passe par une mise à jour, la suppression non.
+        static::saved(fn () => static::oublierReferentiel());
+        static::deleted(fn () => static::oublierReferentiel());
+    }
+
+    public static function oublierReferentiel(): void
+    {
+        Cache::forget(self::CLE_CACHE_REFERENTIEL);
+    }
+
+    /**
+     * Le référentiel **entier**, groupé par niveau, le parent désigné par son nom.
+     *
+     * ⚠️ Servait deux fois : cette requête vivait dans `IntakeController` et la cascade interrogeait
+     * par ailleurs un point d'entrée **par niveau et par champ**. Sur le questionnaire de
+     * modification, qui porte 18 champs géographiques, cela faisait jusqu'à 18 requêtes à
+     * l'ouverture, puis une par changement de ville ou de commune — c'est cette multiplication que
+     * l'étude percevait comme une lenteur, pas le poids des données : le référentiel entier pèse
+     * 5 Ko, et moins de 15 Ko compressé même à 2 400 lieux.
+     *
+     * Le parent est donné par son **nom** et non par son identifiant : c'est ce que les fiches et
+     * les questionnaires détiennent (`soc.siege_ville = "Conakry"`), et ce que les actes reprennent.
+     *
+     * @return array<string, list<array{nom: string, parent: ?string}>>
+     */
+    public static function referentielComplet(): array
+    {
+        return Cache::rememberForever(self::CLE_CACHE_REFERENTIEL, fn () => [
+            // Les trois niveaux sont **toujours** présents, même vides : sans ce socle,
+            // `groupBy` n omet les niveaux sans lieu et un appelant lisant $ref['ville'] casse sur
+            // un référentiel neuf. La forme du contrat ne doit pas dépendre du contenu.
+            self::NIVEAU_VILLE    => [],
+            self::NIVEAU_COMMUNE  => [],
+            self::NIVEAU_QUARTIER => [],
+            ...self::actif()
+            ->with('parent:id,nom')
+            ->orderBy('nom')
+            ->get(['id', 'parent_id', 'niveau', 'nom'])
+            ->groupBy('niveau')
+            ->map(fn ($groupe) => $groupe->map(fn (self $l) => [
+                'nom'    => $l->nom,
+                'parent' => $l->parent?->nom,
+            ])->values())
+            ->toArray(),
+        ]);
     }
 
     public function parent()

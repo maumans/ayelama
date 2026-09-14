@@ -111,16 +111,42 @@ resources/js/
 ├── app.jsx                         # Entrée Inertia
 ├── bootstrap.js                    # Axios global
 ├── lib/
-│   └── utils.js                    # cn() = clsx + tailwind-merge
+│   ├── utils.js                    # cn() = clsx + tailwind-merge
+│   ├── dates.js                    # (2026-09-09) **le contrat des deux formats** : JJ/MM/AAAA dans
+│   │                               #   donnees, ISO dans les colonnes castées. frDateToISO(),
+│   │                               #   isoDateToFR() (tolère l horodatage de l API), isoDateSeule()
+│   ├── coherenceDates.js           # (2026-09-10) incoherencesTriplet(), incoherencePassee(),
+│   │                               #   incoherenceOrdre() — accepte les deux formats, partagé par la
+│   │                               #   fiche client et les questionnaires
+│   ├── referentielLieux.js        # (2026-09-10) le référentiel des lieux, chargé UNE fois et
+│   │                               #   partagé : une promesse au niveau du module. La cascade
+│   │                               #   interrogeait le serveur par champ (jusqu'à 18 requêtes par
+│   │                               #   formulaire) — c'était la latence ressentie, pas le volume
+│   │                               #   (16,5 Ko / 3,1 Ko gzip pour 447 lieux)
+│   └── blocantsEtape.js            # (2026-08-12) Ce qui manque pour avancer — énuméré, jamais
+│                                   #   résumé en un booléen. blocantsEtape(), blocantsParSection(),
+│                                   #   compterParSection(), motifsParChamp(), allerAuBlocant().
+│                                   #   Porte aussi la cohérence des dates et le cas « référentiel
+│                                   #   vide » (2026-09-10). Employé par Create **et** le modal de Show
+│                                   #   ⚠️ passe par groupFieldsBySection : seul le 1er champ d une
+│                                   #      section porte `section`, les autres l héritent
 ├── data/
-│   └── questionnaires.js           # Config partagée : QUESTIONNAIRES + TYPE_ACTE_CODE_MAP
-├── lib/
-│   └── blocantsEtape.js           # (2026-08-12) Ce qui manque pour avancer dans l'assistant —
-│                                   #   énuméré, jamais résumé en un booléen. blocantsEtape(),
-│                                   #   blocantsParSection(), compterParSection(), allerAuBlocant()
-│                                   #   ⚠️ passe par groupFieldsBySection : seul le 1er champ
-│                                   #      d'une section porte `section`, les autres l'héritent
+│   └── questionnaires.js           # Config partagée : QUESTIONNAIRES + TYPE_ACTE_CODE_MAP,
+│                                   #   TRIPLETS_GEO (cascade des lieux), PAIRES_DATES et
+│                                   #   CONTRAINTES_DATES (2026-09-10), REGIMES/SITUATIONS_MATRIMONIAUX
+│                                   #   ⚠️ ces constantes sont déclarées **avant** les schémas qui les
+│                                   #      consomment — sinon zone morte temporelle, page blanche
 ├── Components/                     # (capital C — Windows insensible à la casse)
+│   ├── Questionnaire/
+│   │   └── ChampQuestionnaire.jsx   # (2026-09-10) **moteur unique** de rendu d un champ, pour les
+│   │                               #   TROIS écrans : Dossiers/Create, le modal de Dossiers/Show et
+│   │                               #   Intake/Show. Le rendu était recopié 3 fois et 4 comportements
+│   │                               #   n avaient été faits que d un côté (checkbox_group, cascade géo,
+│   │                               #   readonly, cohérence des dates). classesChamp() pour la mise en
+│   │                               #   page ; repeatable et checkbox_group restés **délégués**
+│   │                               #   (câblage propre à chaque écran)
+│   │                               #   ⚠️ PariteRenduQuestionnaireTest interdit qu un écran redéclare
+│   │                               #      un field.type === — c est la règle qui manquait
 │   ├── GlobalSearch.jsx            # Palette ⌘K (fetch JSON /search)
 │   ├── PasswordRequirements.jsx    # Checklist live (12 car., maj/min, chiffre, spécial) — Register/Reset/Profil/Utilisateurs
 │   ├── NotificationDropdown.jsx    # Vraie liste de notifications (remplace l'ancien Tooltip de la cloche)
@@ -253,12 +279,23 @@ app/
 │   │                               #   (siège, capital, parts, objet, gérance) — appelé à l'entrée en Expédition,
 │   │                               #   quand les retours de formalités RCCM rendent la modification opposable.
 │   │                               #   Un JournalActivite par application, détaillant chaque champ modifié
+│   ├── CoherenceDonneesService.php  # (2026-09-10) cohérence des dates de questionnaire côté serveur
+│   │                               #   — donnees n était validé que dans sa forme (array). Descend dans
+│   │                               #   les blocs répétables, lit explicitement d/m/Y (Carbon::parse y est
+│   │                               #   proscrit). Miroir de PAIRES_DATES/CONTRAINTES_DATES (JS),
+│   │                               #   verrouillé par un test de parité. Ne vaut PAS pour les brouillons
 │   ├── DossierStepService.php      # avancer(), reculer(), verifierPrerequis() — adapté aux 6 étapes
 │   ├── ActesGeneratorService.php   # genererDocument() — PhpWord TemplateProcessor, moteur générique clé/valeur (gère déjà bien./bq./bail. sans code dédié)
 │   ├── FacturationService.php      # genererFacture(), simuler() — génère Facture+LigneFacture depuis les Bareme actifs du type d'acte, deduireAssiette()
 │   ├── NombreEnLettres.php         # convertir(float, devise) → majuscules FR (milliers, millions, milliards)
 │   └── TwoFactorAuthenticationService.php  # generateAndSend(), verify(), resend(), rememberDevice(), isDeviceTrusted()
 ├── Console/Commands/
+│   ├── ImporterLieux.php           # (2026-09-10) ayelema:lieux-importer — aligne le référentiel sur
+│   │                               #   le découpage réel (39 préfectures, 353 communes, Conakry à 13
+│   │                               #   depuis la loi L2024/003). Dry-run par défaut ; complète sans
+│   │                               #   jamais réécrire un lieu saisi par l'étude.
+│   │                               #   Données : database/data/lieux-guinee.json (versionné, non
+│   │                               #   téléchargé à l'exécution) + generer-lieux.py pour le régénérer
 │   ├── AlerterEcheances.php        # ayelema:alerter-echeances — hourly, anti-doublon 12h
 │   ├── AlerterFormalites.php       # ayelema:alerter-formalites — hourly, même logique anti-doublon
 │   ├── NotificationsDiagnostic.php # (2026-08-03) ayelema:notifications-diagnostic [--mail=adresse]
@@ -1898,6 +1935,325 @@ pourtant affiché juste au-dessus, dans « Personnes connues de cette société 
   SARLU, président d'une SAS, PCA prioritaire sur le DG, `direction` prioritaire sur le dossier
   d'origine, société hors registre à `null`, projection, exposition par l'API
 
+### 🗂️ Listes matrimoniales fermées, déclarées une fois (2026-08-12)
+
+Le **régime matrimonial** était en saisie libre alors que c'est une liste juridique fermée. Mesuré en
+base : **quatre orthographes pour deux régimes**, dont « Communaté de bien » (deux fautes) — que les
+modèles Word reprenaient **telle quelle dans les actes authentiques**.
+
+Ce n'était pas un oubli de conception mais un oubli d'application : `situation_matrimoniale` était
+**déjà** un `select` à dix endroits. Seul le régime était resté en `type: 'text'`, dans ses huit
+déclarations. Et les dix déclarations de situation recopiaient chacune leurs options — le défaut déjà
+corrigé sur `FORMES_SOCIETE`.
+
+- [x] `Client::REGIMES_MATRIMONIAUX` (4 valeurs du socle civiliste) et `SITUATIONS_MATRIMONIALES`,
+  miroirs dans `questionnaires.js` — **8 régimes** passés en `select`, **10 situations**
+  dé-dupliquées
+- [x] Régime **obligatoire pour une personne mariée** et **interdit sinon** : `required_if` +
+  `prohibited_unless` + `Rule::in` — c'est leur conjonction qui décrit un état civil réel
+- [x] Migration `normaliser_regimes_matrimoniaux_clients` — les orthographes **sans ambiguïté**
+  seulement, le reste journalisé et laissé intact. Nécessaire et pas cosmétique : sans elle, la
+  nouvelle règle `Rule::in` rendait la fiche du client #14 **inenregistrable**, même pour un simple
+  changement de téléphone
+- [x] ⚠️ **Les questionnaires ne sont pas réécrits** — ils alimentent des actes déjà produits. Le
+  `select` affiche une valeur hors liste **sélectionnée et signalée**, comme `LieuSelect` le fait
+  pour un lieu hors référentiel
+- [x] `ListesMatrimonialesTest` — **8 tests**, dont le garde-fou de parité PHP↔JS et l'interdiction
+  d'une constante utilisée avant sa déclaration (voir « zone morte temporelle » en §9)
+
+> ⚠️ **Ce qui n'est pas garanti** : que ces quatre régimes soient tous praticables en Guinée, ni
+> lequel s'applique à défaut de contrat de mariage. La liste est donc à **un seul endroit**,
+> corrigeable en une ligne.
+
+---
+
+### 🗺️ Le référentiel des lieux devient utilisable (2026-08-12 → 2026-09-10)
+
+Le référentiel existait depuis le 2026-08-12 — table `lieux` auto-référençante, cascade
+ville → commune → quartier, écran *Paramètres > Lieux* — mais **on ne pouvait qu'y renommer**.
+Signalé à l'usage, en trois temps.
+
+#### Ajouter, puis retirer
+
+- [x] **Ajout depuis l'écran du référentiel** aux trois niveaux, par le **même point d'entrée** que
+  la cascade des formulaires (`POST /lieux`) : la validation des niveaux et le rattachement au parent
+  n'ont ainsi qu'une implémentation
+- [x] **Suppression** d'un lieu **non référencé** (`Lieu::estSupprimable()`), avec un refus explicite
+  qui distingue ses deux causes — vider un lieu de ses enfants, ou se rabattre sur la désactivation
+  quand son nom figure déjà dans une fiche, donc possiblement dans un acte produit
+- [x] Le champ **Pays** est verrouillé (`ChampVerrouille`) : il vaut « République de Guinée » sur la
+  quasi-totalité des fiches et n'a pas à être modifiable par inadvertance. **Déverrouillable** d'un
+  clic délibéré — un client peut résider à l'étranger
+
+#### Valider un lieu, et le dire quand la liste est vide (2026-09-10)
+
+Deux défauts distincts, longtemps confondus par le symptôme (« je ne peux pas passer »).
+
+- [x] **`a_verifier` n'a jamais rien bloqué** — ni côté serveur, ni dans les formulaires. Le vrai
+  défaut : **seul un renommage levait le marqueur**, ce qui faisait du renommage le seul chemin de
+  validation. L'étude se retrouvait devant **53 quartiers marqués sur 55** sans aucun moyen de les
+  confirmer. Le badge est désormais **cliquable** = valider, plus un bouton *Valider N quartiers* par
+  parent (`PATCH /parametres/lieux/valider`, borné aux **enfants directs**, jamais récursif). Et
+  renommer ne vaut plus validation : corriger une orthographe n'est pas confirmer qu'un lieu existe
+- [x] **Le blocage réel était le référentiel vide** : **33 des 39 communes n'ont aucun quartier**
+  (seule Conakry est peuplée) alors que le quartier est **obligatoire dans 11 déclarations**. Le champ
+  affichait « — Choisir — » devant une liste vide et le blocant répondait « Choisissez une valeur ».
+  `LieuSelect` remonte désormais son nombre d'options à `blocantsEtape`, qui distingue *rien à
+  choisir* de *rien de choisi*, et le bouton *Ajouter* passe en évidence à ce moment-là
+- [x] `LieuxTest` — **20 tests**, dont l'unicité relative au parent, la translittération
+  (« Forécariah » = « Forecariah »), le seuil de Levenshtein relatif à la longueur
+  (« Kountia » ≠ « Koubia »), et la non-récursivité de la validation en lot
+
+> ⚠️ **Rien n'est amorcé comme donnée** pour les 33 communes vides : les listes de quartiers
+> guinéens ne sont pas garanties, le référentiel se peuple par l'usage réel de l'étude.
+
+---
+
+### 📅 Le format des dates : cinq défauts, une seule cause (2026-09-09)
+
+Signalé comme « une pièce annoncée expirée alors qu'elle est valable jusqu'en 2027, et une date de
+naissance refusée ». Ce n'était pas un défaut de contrôle mais **une date écrite dans un format et
+relue dans un autre**. Deux conventions légitimes coexistent — `JJ/MM/AAAA` dans `donnees` (le modèle
+Word la reçoit telle quelle), ISO dans les colonnes castées — et **cinq endroits** ne les
+respectaient pas.
+
+Le mécanisme, vérifié bout en bout : PHP lit `JJ/MM/AAAA` comme du **mois/jour américain**.
+
+| Saisie | Ce qui se passait |
+|---|---|
+| `13/05/1985` | `strtotime` échoue → la règle `date` **refuse une date valide** (l'erreur signalée) |
+| `01/04/1985` | enregistré **04/01/1985** — jour et mois inversés, **sans aucune erreur** |
+
+- [x] **Le contrat énoncé une fois**, en tête de `resources/js/lib/dates.js` : quel format va où, et
+  pourquoi. `isoDateToFR` tolère désormais l'horodatage complet de l'API — sans quoi une fiche relue
+  affichait ses trois champs de date **vides** alors qu'elle portait des valeurs
+- [x] **Deux modales alignées** sur les trois qui faisaient déjà le bon geste (`ModalDepotFormalite`,
+  retour de formalité, paiement) : l'état porte l'ISO, le champ affiche le français. Le correctif est
+  un alignement, pas une invention
+- [x] **Défense en profondeur serveur** — `Normalisation::datesEnISO()`, appelé avant validation sur
+  le modèle de `normaliserIdentite()`. On **convertit plutôt qu'on refuse** : un import historique
+  reste servi, et c'est le silence qui était grave, pas le format
+- [x] **Les actes imprimaient `1970-02-05T00:00:00.000000Z`** — défaut invisible jusque-là. La
+  projection déposait un horodatage brut dans `donnees`, et `${..._jma}` / `${..._lettres}` n'étaient
+  alors **pas dérivées du tout**. Corrigé dans les **deux sens** et pour les **deux entités** :
+  `clientFields.js` / `ClientProjectionService`, `societeFields.js` / `Societe::versQuestionnaire()`
+  et `depuisQuestionnaire()`
+- [x] **Reprise des données** — 3 fiches, 7 dates réinversées, **jour ≤ 12 seulement** (au-delà
+  l'inversion était impossible, corriger aurait inventé une date). Témoin `dates_a_confirmer` hors
+  `$fillable`, affiché par `avertissements()` avec **les deux lectures**, levé au premier
+  enregistrement de la fiche. 6 clés de questionnaire normalisées **de forme, jamais de fond**
+- [x] `FormatsDatesTest` — **19 tests**, écrits **au format que l'interface envoie**. C'est
+  précisément ce qui manquait : `ControlesClientTest` était en ISO — il éprouvait les règles, jamais
+  le format réel — et `ClientProjectionTest` **verrouillait** l'ISO dans `donnees`
+
+---
+
+### 🧩 Un seul moteur de champ de questionnaire (2026-09-10)
+
+Signalé ainsi : « les mêmes règles que le modal ne sont pas sur la page de création ». La mesure a
+donné pire — le rendu des champs était **recopié dans trois écrans** (~380 lignes) et **quatre
+comportements de suite** n'avaient été implémentés que d'un côté.
+
+| Comportement | Où il manquait |
+|---|---|
+| `checkbox_group` | absent de deux écrans sur trois |
+| cascade géo | assistant de création seul |
+| `readonly` | **modifiable dans l'assistant**, verrouillé dans le modal et sur l'intake |
+| cohérence des dates | **nulle part**, alors que la fiche client la contrôlait |
+
+Aucun test ne pouvait l'attraper : il n'y avait pas de règle à vérifier, mais trois implémentations
+toutes « justes » chez elles.
+
+- [x] **`Components/Questionnaire/ChampQuestionnaire.jsx`** (313 lignes) — moteur unique des trois
+  écrans, tiré de `Intake/Show.jsx` qui l'avait déjà presque isolé. `repeatable` et `checkbox_group`
+  restent **délégués** (`rendreRepeatable` / `rendreChoixMultiple`) : leur câblage est réellement
+  propre à chaque écran, et les uniformiser aurait produit une abstraction mensongère
+- [x] **`PAIRES_DATES` / `CONTRAINTES_DATES`** dans `questionnaires.js` et `lib/coherenceDates.js` —
+  les contrôles de la fiche client, appliqués aux **25** champs de date des questionnaires, dans les
+  trois écrans
+- [x] **Le modal d'édition reçoit les blocants énumérés** (`blocantsEtape`), qu'il n'avait pas : on
+  y enregistrait un questionnaire incohérent sans le savoir
+- [x] **`CoherenceDonneesService`** — le serveur cesse de tout accepter (`donnees` était
+  `['required','array']`). Sur la **cohérence entre dates seulement**, pas sur les champs
+  obligatoires : leur visibilité dépend des `showIf` du schéma, qui vit en JavaScript (décision #33),
+  et l'exiger côté serveur imposerait de dupliquer ce schéma. Descend dans les blocs répétables, lit
+  explicitement `d/m/Y`, et **ne s'applique pas aux brouillons** (décision #34)
+- [x] **`CLAUDE.md`** — la règle de travail demandée par l'étude : chercher les autres détenteurs
+  d'une règle, les **mesurer**, et les traiter dans la même passe. Avec le tableau des points de
+  contrôle du dépôt
+- [x] `PariteRenduQuestionnaireTest` (**6 tests**) et `CoherenceDonneesTest` (**20 tests**) — le
+  premier **crée la règle** qui manquait : aucun écran ne peut redéclarer un `field.type ===`, et
+  tout type déclaré dans `questionnaires.js` doit être traité par le moteur (un type inconnu sortait
+  en champ texte, silencieusement)
+
+#### Deux défauts trouvés **par** la règle, invisibles autrement
+
+- [x] 🐛 **`gerant_entrant.*` n'avait aucune cascade géo.** Ce bloc est *dérivé* de `GER_FIELDS` par
+  substitution de préfixe : ses trois champs géo existaient sans être écrits nulle part, donc absents
+  de `TRIPLETS_GEO`. On y saisissait une commune en texte libre pendant que le bloc « gérant » voisin
+  proposait le référentiel
+- [x] 🐛 **Tout enregistrement du questionnaire renvoyait 500.** `updateQuestionnaire` ne capturait
+  pas `$projection` dans sa closure de transaction : `ErrorException`, transaction annulée, **saisie
+  perdue**. Exposé par le premier test HTTP écrit sur cette route
+
+---
+
+### 🌍 Le référentiel chargé une fois, et conforme au découpage réel (2026-09-10)
+
+Deux signalements dans la même capture : la cascade **se faisait sentir**, et le référentiel ne
+correspondait pas au pays.
+
+#### La latence était une multiplication, pas un volume
+
+`LieuSelect` interrogeait le serveur **par champ et par changement de parent**. Mesuré :
+
+| Constat | Chiffre |
+|---|---|
+| Champs géographiques du questionnaire de **modification** | **18** |
+| Requêtes à l'ouverture de ce questionnaire | **jusqu'à 18**, puis 1 par choix de ville ou de commune |
+| Poids du référentiel **entier** après import (447 lieux) | **16,5 Ko** — 3,1 Ko compressé |
+
+Transférer tout le référentiel une fois coûte donc moins que dix-huit allers-retours — et le gain
+sera **plus** net en production, où c'est la latence par requête qui domine.
+
+- [x] **`Lieu::referentielComplet()`** — le constructeur vivait déjà dans `IntakeController` (le
+  formulaire public reçoit le référentiel dans ses props, faute de point d'entrée exposé) : il est
+  extrait sur le modèle et **partagé par ses deux appelants**. Les trois niveaux sont toujours
+  présents, même vides — sans ce socle, `groupBy` omet un niveau sans lieu et un appelant lisant
+  `$ref['ville']` casse sur un référentiel neuf
+- [x] **`GET /lieux/referentiel`** remplace le point d'entrée par niveau (un seul consommateur) :
+  cache serveur périmé à chaque écriture **et suppression** d'un lieu, plus un `ETag` — un
+  navigateur déjà chaud reçoit un 304 sans corps
+- [x] **`resources/js/lib/referentielLieux.js`** — **une promesse au niveau du module** : le premier
+  champ monté déclenche l'appel, les dix-sept autres attendent la même. Vérifié : 18 montages
+  simultanés → **1 requête**. La cascade se résout ensuite de mémoire, synchronement
+- [x] 🐛 **Un lieu ajouté n'apparaissait que dans le champ qui l'avait créé** — les autres champs du
+  même formulaire continuaient de servir la liste d'avant. `invaliderReferentiel()` corrige le
+  référentiel partagé, plus seulement l'état local
+
+#### Le découpage réel de la Guinée
+
+| Niveau | Avant | Après | Source |
+|---|---|---|---|
+| « Villes » (préfectures) | 34 | **39** | GeoNames + préfectures créées depuis |
+| Communes | 39 | **353** | GeoNames ADM3 + loi L2024/003 |
+| Communes de **Conakry** | 6 | **13** | loi L2024/003/CNT du 18 janvier 2024 |
+| Quartiers | 55 | 55 (inchangés) | — |
+
+**Le constat qui touchait l'étude directement** : **Lambanyi** ne figurait pas au référentiel, alors
+que l'adresse de l'office s'imprime « Commune de Ratoma/**Lambanyi** ». Et Boké n'avait qu'une seule
+commune — la sienne — au lieu de dix.
+
+- [x] **`php artisan ayelema:lieux-importer`**, **dry-run par défaut** comme
+  `ayelema:brouillons-purger`. Rapproche par `nom_normalise` (« Forécariah » ne double pas
+  « Forecariah »), **ne réécrit jamais** un lieu saisi ou corrigé par l'étude, et journalise ce
+  qu'il ne sait pas rattacher
+- [x] **`database/data/lieux-guinee.json`**, versionné et **non téléchargé à l'exécution** : un
+  import doit être reproductible et ne pas dépendre du réseau au déploiement. Le générateur
+  (`database/data/generer-lieux.py`) est livré avec, et la procédure figure dans le docblock de la
+  commande
+- [x] Colonne **`source`** sur `lieux` : `import:2026-09-10` ou `null` (amorçage). Sans elle, un
+  ré-import ne saurait plus distinguer ce qu'il a écrit de ce qu'un clerc a corrigé
+- [x] Les lieux importés arrivent **validés** (décision de l'étude) : « à vérifier » retrouve son
+  sens d'origine — ce que l'étude ajoute à la volée
+- [x] 🐛 **Le dry-run a évité trois doublons** : GeoNames nomme trois préfectures
+  « Préfecture de Dubréka » quand les autres portent un suffixe anglais (« Boke Prefecture »), et le
+  nettoyage ne traitait que les suffixes. C'est exactement la raison d'être du mode simulation
+
+> ⚠️ **Ce qui n'est pas livré, et pourquoi.** Les **4 142 quartiers/districts** du pays. Aucune
+> source exploitable ne les couvre : les données administratives officielles (OCHA/HDX COD-AB) ne
+> descendent au niveau quartier que **pour Conakry**, GeoNames n'a **aucun** `PPLX` pour la Guinée,
+> et ses 57 localités de Conakry sont bruitées et sans rattachement à une commune. En inventer
+> aurait mis des noms faux dans des actes authentiques. Le référentiel se peuple par l'usage, et le
+> message « aucun quartier au référentiel » posé la veille nomme le recours.
+
+- [x] `ReferentielLieuxTest` (**11 tests**) et `LieuxTest` porté à **40** : contenu et parent par
+  nom, invalidation du cache à l'écriture / suppression / désactivation, `ETag` et 304, idempotence
+  de l'import, respect d'un lieu de l'étude, provenance, et cohérence du fichier livré (Conakry à 13
+  communes dont Lambanyi). Plus un **garde-fou de structure** : `LieuSelect` ne doit plus contenir
+  d'appel réseau par niveau — un retour en arrière redonnerait 18 requêtes sans que rien ne le dise
+
+---
+
+### 📱 Tenable sur téléphone, et Conakry remis d'aplomb (2026-09-10, soir)
+
+Trois signalements, trois causes distinctes.
+
+#### Les quartiers étaient restés accrochés à l'ancien découpage
+
+La réforme de 2024 a découpé **Ratoma en Ratoma + Lambanyi + Sonfonia** et **Matoto en Matoto +
+Gbessia + Tombolia**, mais les 55 quartiers amorcés pendaient toujours des six communes d'avant.
+Résultat mesuré : **« Lambanyi » et « Sonfonia » existaient à la fois comme communes de Conakry et
+comme quartiers de Ratoma** — un même nom désignant deux niveaux du même endroit. Idem pour
+« Gbessia » et « Tombolia » sous Matoto.
+
+- [x] Le fichier versionné déclare désormais les **quartiers de Conakry** (50, sur 5 communes), et
+  l'import connaît le troisième niveau
+- [x] **`--corriger`**, geste **distinct de l'import** parce qu'il *modifie* des lignes existantes,
+  ce que l'import s'interdit. Le fichier fait autorité pour une ville qui déclare ses quartiers :
+  tout quartier absent de la liste de sa commune est un résidu du découpage
+- [x] **Retiré s'il n'est employé nulle part, seulement désactivé s'il l'est** — son nom figure
+  peut-être déjà dans un acte produit, et le référentiel ne porte aucune clé étrangère vers eux
+  (règle de `Lieu::estSupprimable()`). Appliqué : Lambanyi et Sonfonia **retirés**, Gbessia et
+  Tombolia **désactivés**
+- [x] ⚠️ **Rien n'est déplacé d'une commune à l'autre.** Répartir les quartiers entre les six
+  communes issues du découpage exige l'annexe de la loi L2024/003, que je n'ai pas pu obtenir.
+  Rattacher au hasard mettrait une fausse adresse dans un acte authentique
+- [x] 🔍 **Ce que le dry-run a révélé** : « Dapompa » (sous Tombolia), que je prenais pour la graphie
+  fautive de « Dabompa », avait été **saisi par l'étude**. La commande le préserve donc et le
+  signale — c'est l'étude qui connaît le terrain, pas un fichier de données
+
+#### `h-screen` n'est pas la hauteur visible d'un téléphone
+
+`100vh` vaut la hauteur de l'écran **barre d'adresse masquée** ; la zone réellement visible est plus
+petite, et l'écart varie selon l'appareil — d'où « sur certains écrans ça loge, sur d'autres non ».
+Aggravant : la racine portait `overflow-hidden`, si bien que ce qui dépassait n'était **pas
+rattrapable par défilement** et passait sous la barre d'état, où il se confondait avec l'heure et la
+batterie.
+
+- [x] **`h-dvh`** dans les trois layouts, et `height: 100dvh` sur `html` — corriger les layouts sans
+  corriger le socle CSS aurait laissé le défaut entier, `height: 100%` s'y résolvant sur la grande
+  fenêtre. Repli `100vh` conservé pour iOS < 15.4
+- [x] **Marges d'encoche** (`pt-encoche`, `pb-encoche`, `pl-encoche`) déclarées **une fois** dans
+  `app.css`, posées sur la barre supérieure et le menu latéral. Le repli `env(…, 0px)` les rend
+  **sans effet sur un écran sans découpe** : aucune régression, et une protection contre les
+  navigateurs qui dessinent d'eux-mêmes sous la barre d'état — courant sur Android récent
+- [x] `viewport-fit=cover` **délibérément non ajouté** : ce serait demander au navigateur de passer
+  sous les zones système, l'inverse du but
+
+#### La page zoomait après la connexion
+
+Sous 16 px, iOS Safari agrandit la page à la mise au point d'un champ **et ne la réduit pas
+ensuite** : d'où le tableau de bord agrandi juste après. La primitive `Input` était en `text-sm`,
+soit 14 px.
+
+- [x] **Une seule règle** dans `app.css`, sous `@media (max-width: 767px)` : les contrôles de saisie
+  passent à 16 px. Un correctif par composant aurait manqué l'essentiel — l'application porte
+  **53 contrôles bruts répartis dans 31 fichiers** en plus des primitives, et un contrôle ajouté
+  demain en bénéficie sans qu'on y pense
+- [x] Cases à cocher et boutons radio exclus : leur taille vient de `h-4 w-4`, pas de la police
+- [x] ⚠️ **`maximum-scale=1` écarté** : une ligne, mais elle désactive le **pincement pour zoomer**
+  sur toute l'application. Sur un outil où l'on relit des actes et des pièces d'identité, et pour un
+  utilisateur presbyte, c'est une régression d'accessibilité réelle (WCAG 1.4.4)
+
+#### Deux défauts adjacents, trouvés en mesurant
+
+- [x] 🐛 **La page GED n'avait aucune hauteur.** Elle employait
+  `h-[calc(100vh-theme(spacing.header))]`, or **le token `spacing.header` n'existait pas** :
+  Tailwind émettait un avertissement et **ne générait pas la classe**. Son défilement interne n'a
+  donc jamais fonctionné. Token déclaré, calcul passé en `dvh`
+- [x] **`AuthenticatedLayout.jsx` supprimé** — plus aucune page ne l'importait depuis la
+  [décision #4](#8-décisions-techniques). Le laisser, c'était offrir un modèle périmé à la prochaine
+  page créée
+
+- [x] `AdaptationMobileTest` (**10 tests**) et `LieuxTest` porté à **47**. Les garde-fous ont été
+  **éprouvés en réintroduisant chaque défaut** : `h-screen` dans un layout, 14 px sur les champs,
+  `height: 100%` sur `html`, marge d'encoche retirée — les quatre sont détectés. Une classe Tailwind
+  non générée et un zoom iOS sont invisibles pour `vite build` comme pour la suite : c'est
+  exactement ce que la règle 2 de `CLAUDE.md` demande de rendre bruyant
+
+---
+
 ### ⚙️ Changement de workflow (2026-07-03)
 
 - [x] `EtapeDossier` réduit de 8 à 6 cas : `Signature client` et `Signature notaire` supprimées
@@ -1925,10 +2281,25 @@ pourtant affiché juste au-dessus, dans « Personnes connues de cette société 
 - [ ] Unifier `Formalite::calculerMontant()` et `Bareme::calculerMontant()` (deux mécanismes de calcul de montant coexistent aujourd'hui)
 - [ ] Génération des bordereaux de paiement
 
+#### Dette technique nommée (2026-09-10)
+- [ ] **Normaliser les 227 imports `@/components/*` en `@/Components/*`** — le dossier réel porte un
+  C majuscule. Windows masque l'écart, mais Vite tient deux identités de module pour le même fichier
+  (deux invalidations HMR manquées déjà constatées) et **le déploiement Linux échouera**. Touche
+  presque tous les fichiers : à faire en une passe dédiée, pas au fil de l'eau
+- [ ] **Arbitrer les bornes des dates d'acte laissées libres** — `dissolution.date_assemblee`,
+  `hypotheque.date_acte`, `modif.date_cession`, `gerant_sortant.date_cessation` ne sont
+  volontairement pas contraintes (`CONTRAINTES_DATES` et `CoherenceDonneesService::CONTRAINTES`) :
+  une contrainte inventée serait pire qu'absente. Une ligne dans chacune des deux déclarations
+  suffira, une fois la règle métier connue
+- [ ] **Peupler les quartiers des 33 communes qui n'en ont aucun** — le référentiel se remplit par
+  l'usage (bouton *Ajouter* dans la cascade), mais l'étude peut vouloir amorcer les principales
+  villes. Aucune liste n'est fiable côté développement : toute donnée amorcée doit rester marquée
+  `a_verifier`
+
 #### Fonctionnalités transverses
 - [x] ~~Upload pièces jointes (CNI, photos parties)~~ — fait le 2026-07-24 via le module GED unifié (`PartieController::uploaderPhoto/uploaderPiece`)
 - [ ] Export PDF d'un dossier
-- [ ] CRUD HTTP pour `BienImmobilier` et `Banque` (alimentés seulement via le questionnaire, sans écran dédié ni seeder). `Client` (2026-08-03) et `Societe` (2026-08-11) sont couverts — reste à ajouter un écran d'édition dans `Repertoire/Index.jsx`, qui n'expose encore que la consultation alors que `ModalNouveauClient` sait modifier une fiche, et à y exposer le **registre des sociétés**, aujourd'hui atteignable seulement depuis l'assistant de dossier
+- [ ] CRUD HTTP pour `Banque`, et **décider du sort de `BienImmobilier`** — ⚠️ ligne corrigée le 2026-09-10 : elle affirmait que les deux étaient « alimentés via le questionnaire ». Mesuré, la table `bien_immobiliers` **n'existe pas** : le modèle et ses casts vivent sans migration, rien n'écrit dedans, et les données de bien ne sont que des clés `bien.*` / `bail.*` de `donnees`. Deux voies : lui donner sa table et son écran, ou supprimer le modèle mort. `Client` (2026-08-03) et `Societe` (2026-08-11) sont couverts — reste à ajouter un écran d'édition dans `Repertoire/Index.jsx`, qui n'expose encore que la consultation alors que `ModalNouveauClient` sait modifier une fiche, et à y exposer le **registre des sociétés**, aujourd'hui atteignable seulement depuis l'assistant de dossier
 - [ ] Page `Parametres/Apparence` — routes présentes dans `web.php` (`GET/POST /parametres/apparence`, upload logo), à vérifier si l'UI React existe et est branchée à `Setting`
 
 ---
@@ -2036,13 +2407,40 @@ courriers — id, reference, dossier_id, redacteur_id, destinataire, adresse, ob
 baremes — id, type_acte_id, organisme, libelle, taux, montant_fixe,
           base_calcul(valeur_acte/montant_fixe), description, actif, ordre, timestamps
 
-clients — id, type(physique/morale), civilite, prenom_nom, ne_a, date_naissance, nationalite,
-          piece_type, piece_numero, piece_delivree_le, piece_delivree_a, piece_expire_le,
-          situation_matrimoniale, regime_matrimonial, denomination, forme, rccm,
-          representant_legal, representant_qualite, demeurant_ville, quartier, commune,
-          pays, telephone, email, siege, statut, timestamps
-          -- representant_qualite ajoutée le 2026-08-03 : seul champ d'identité attendu
+clients — id, type(physique/morale), civilite, nom_famille, prenoms, ne_a, date_naissance,
+          nationalite, piece_type, piece_numero, piece_delivree_le, piece_delivree_a,
+          piece_expire_le, dates_a_confirmer(json, nullable), situation_matrimoniale,
+          regime_matrimonial, denomination, forme, rccm, representant_legal,
+          representant_qualite, demeurant_ville, quartier, commune, pays,
+          telephone, email, siege, statut, timestamps
+          -- representant_qualite ajoutée le 2026-08-03 : seul champ d identité attendu
           -- par les modèles Word (${bq.representant_qualite}) qui manquait à la fiche.
+          -- ⚠️ prenom_nom n est PLUS une colonne (2026-08-05, règle 4 / décision #38) : scindée en
+          -- nom_famille + prenoms pour la mise en capitales exigée par les actes. Conservée en
+          -- accessor + mutateur + $appends, les 63 modèles Word et l intake l employant encore.
+          -- dates_a_confirmer (2026-09-09) : témoin de la reprise des dates jour/mois inversées.
+          -- Hors $fillable — aucune requête ne doit l écrire ; lu par avertissements(), levé au
+          -- premier enregistrement de la fiche (décision #40).
+
+lieux — id, parent_id(nullable, self), niveau(ville/commune/quartier), nom, nom_normalise(index),
+        a_verifier, source(nullable), actif, created_by_id, timestamps
+        -- (2026-08-12) Référentiel auto-référençant de la cascade ville → commune → quartier.
+        -- Unicité relative au **parent et au niveau** : « Matam » est une commune de Conakry ET
+        -- une préfecture. nom_normalise dérivé par Normalisation::comparable() (accents retirés).
+        -- ⚠️ AUCUNE clé étrangère depuis les fiches ni les questionnaires : la valeur stockée y
+        -- est le **nom**, celui que les actes reprennent. D où la désactivation plutôt que la
+        -- suppression pour un lieu déjà employé (Lieu::estSupprimable(), nomsEmployes()).
+        -- a_verifier est **informatif, jamais bloquant** (décision #42) : les quartiers amorcés au
+        -- seeder ne sont pas garantis exhaustifs.
+        -- source (2026-09-10) : provenance d'un lieu — `import:<date>` ou null (amorçage). Sans
+        -- elle, un ré-import ne distinguerait plus ce qu'il a écrit de ce qu'un clerc a corrigé.
+        -- État mesuré après l'import du 2026-09-10 : **39 villes, 353 communes, 51 quartiers actifs**
+        -- (Conakry à 13 communes, loi L2024/003). Les quartiers ne couvrent que Conakry : aucune
+        -- source n'expose les 4 142 districts du pays (décision #44).
+        -- ⚠️ La répartition des quartiers de Conakry est celle **d'avant** le découpage de 2024 :
+        -- les 8 communes créées n'ont pas encore les leurs, faute de l'annexe de la loi. Les noms
+        -- devenus des communes ont été retirés du niveau quartier, ou désactivés quand une fiche
+        -- les emploie (`ayelema:lieux-importer --corriger`, décision #45).
 
 societes — id, dossier_id(nullable, cascadeOnDelete /* dossier de CONSTITUTION */),
            denomination(index), forme, sigle,
@@ -2208,6 +2606,10 @@ registre) et `modif.*` l'état **après**. Les statuts mis à jour doivent porte
 | 41 | **Un seul moteur de rendu de champ de questionnaire** (`ChampQuestionnaire.jsx`), et un `CLAUDE.md` qui impose de chercher les autres détenteurs d'une règle avant d'implémenter | Le rendu était recopié dans trois écrans — assistant de création, modal « Modifier le questionnaire », formulaire public d'intake — et **quatre comportements de suite** n'ont été implémentés que d'un côté : `checkbox_group` (absent de deux écrans sur trois), la cascade géo (assistant seul), `readonly` (le champ « Pays » restait modifiable dans l'assistant alors qu'il était verrouillé ailleurs), et la cohérence des dates (nulle part, alors que la fiche client la contrôlait). Aucun test ne pouvait l'attraper : il n'y avait pas de règle à vérifier, mais trois implémentations toutes « justes » chez elles. `PariteRenduQuestionnaireTest` crée la règle — il interdit qu'un écran redéclare un `field.type ===`, et vérifie que tout type déclaré dans `questionnaires.js` est traité par le moteur (un type inconnu sortait en champ texte, silencieusement). **Ce qui reste délégué** : `repeatable` et `checkbox_group` portent un câblage propre à chaque écran (pool de clients, pièces en attente, exclusions de modification, aplatissement d'un rôle à l'intake) — ils passent par `rendreRepeatable`/`rendreChoixMultiple` plutôt que par une abstraction qui mentirait sur son contenu. La recherche imposée par la règle a immédiatement trouvé deux défauts de plus, invisibles autrement : `gerant_entrant.*` est un bloc **dérivé** de `GER_FIELDS` par substitution de préfixe, ses trois champs géo n'étaient donc dans aucun triplet et n'avaient aucune cascade ; et `updateQuestionnaire` ne capturait pas `$projection` dans sa closure de transaction, ce qui faisait échouer **tout enregistrement du questionnaire** par une ErrorException — transaction annulée, saisie perdue, 500 à l'écran |
 | 42 | Le marqueur `a_verifier` d'un lieu est **informatif**, jamais bloquant ; il se lève par une action dédiée (et en lot par parent), et **plus par un renommage** | L'étude se retrouvait devant 53 quartiers marqués sans aucun moyen de les confirmer : seul un renommage levait le drapeau, ce qui faisait du renommage le seul chemin de validation — un accident, pas une décision. Renommer corrige une orthographe, valider confirme que le lieu existe et qu'il est bien placé. Le lot est borné aux **enfants directs** et jamais récursif : valider une ville ne doit pas confirmer en silence des dizaines de quartiers que personne n'a lus. Le blocage réellement rencontré n'était d'ailleurs pas le marqueur mais le **référentiel vide** — 33 des 39 communes n'ont aucun quartier (seule Conakry est peuplée) alors que le quartier est obligatoire dans 11 déclarations : le champ affichait « — Choisir — » devant une liste vide et le blocant répondait « Choisissez une valeur », sans nommer le seul recours. `LieuSelect` remonte désormais le nombre d'options à `blocantsEtape`, qui distingue « rien à choisir » de « rien de choisi ». Rien n'est amorcé comme donnée : les listes de quartiers guinéens ne sont pas garanties, le référentiel se peuple par l'usage réel |
 | 43 | `questionnaires.donnees` est validé côté serveur sur la **cohérence des dates seulement**, pas sur les champs obligatoires | `donnees` était `['required', 'array']` : toute la validation du questionnaire vivait dans le navigateur, et les 25 champs de date n'étaient contrôlés nulle part — un acte authentique pouvait porter une pièce expirant avant d'avoir été délivrée. La distinction est de nature, pas de commodité : la visibilité d'un champ dépend des `showIf` du schéma, qui vit en JavaScript (décision #33), donc l'exiger côté serveur imposerait de dupliquer ce schéma et de le faire diverger ; la cohérence **entre deux dates** ne demande aucune connaissance du schéma. `CoherenceDonneesService` descend dans les blocs répétables (les associés portent leurs champs sans préfixe) et lit explicitement `d/m/Y` — `Carbon::parse` y est proscrit, c'est lui qui a inversé sept dates en base. Ne s'applique **pas aux brouillons** : un brouillon est une saisie en cours (décision #34). Les bornes non arbitrées restent absentes — `bail.date_prise_effet` est légitimement future, et je ne sais pas quelle borne donner à `hypotheque.date_acte` : une contrainte inventée est pire qu'une absente |
+| 44 | Le référentiel des lieux part **en une seule réponse** et se filtre côté navigateur ; son contenu vient d'un **import versionné et traçable**, mais **sans les quartiers hors Conakry** | La cascade interrogeait un point d'entrée par niveau **et par champ** : 18 requêtes à l'ouverture d'un questionnaire de modification, puis une par choix de ville ou de commune. C'est cette multiplication que l'étude percevait comme une lenteur — le référentiel entier ne pèse que 16,5 Ko (3,1 Ko compressé) pour 447 lieux, soit moins que dix-huit allers-retours, et l'écart se creuse en production où la latence par requête domine. Le motif n'est pas inventé : le formulaire public d'intake recevait déjà le référentiel complet dans ses props, faute de point d'entrée exposable à un tiers ; `Lieu::referentielComplet()` devient le détenteur unique de cette requête, et une **promesse au niveau du module** (`referentielLieux.js`) fait que le premier champ monté charge pour les dix-sept autres — vérifié à 1 requête pour 18 montages. Corollaire trouvé au passage : un lieu ajouté n'apparaissait que dans le champ qui l'avait créé, les autres servant la liste d'avant. **Côté données**, l'import (`ayelema:lieux-importer`, dry-run par défaut) porte les 39 préfectures et 353 communes réelles, dont les **13 communes de Conakry** de la loi L2024/003/CNT du 18 janvier 2024 — dont **Lambanyi**, celle de l'office, qui manquait alors que l'adresse de l'étude l'imprime. Le fichier de données est **versionné et non téléchargé à l'exécution** (un import doit être reproductible sans réseau), une colonne `source` rend chaque lieu auditable, et l'import **complète sans jamais réécrire** un lieu que l'étude a saisi ou corrigé — c'est elle qui connaît le terrain, pas un dump. Le dry-run a d'ailleurs évité trois doublons de préfecture, GeoNames nommant trois ADM2 « Préfecture de Dubréka » quand les autres portent un suffixe anglais. **Ce qui est délibérément absent : les 4 142 quartiers du pays.** Aucune source exploitable ne les couvre — OCHA/HDX ne descend à ce niveau que pour Conakry, GeoNames n'a aucun `PPLX` pour la Guinée — et un quartier inventé partirait dans un acte authentique. Même doctrine que pour les régimes matrimoniaux : une donnée fausse est pire qu'une donnée absente, et le message « aucun quartier au référentiel » nomme le recours |
+| 45 | La hauteur de fenêtre s'exprime en **`dvh`**, les barres portent des **marges d'encoche**, et les contrôles de saisie font **16 px sur petit écran** | Trois défauts d'usage sur téléphone, tous invisibles pour `vite build` et pour la suite de tests. (1) `h-screen` vaut `100vh`, la hauteur de l'écran **barre d'adresse masquée** : la zone réellement visible est plus petite, d'un écart qui varie selon l'appareil et le navigateur — d'où « sur certains écrans ça loge, sur d'autres non ». Avec `overflow-hidden` sur la racine, ce qui dépassait n'était même pas rattrapable par défilement, et le menu passait sous la barre d'état. Corriger les layouts ne suffisait pas : `html { height: 100% }` se résout lui aussi sur la grande fenêtre, le socle CSS devait suivre. (2) L'encoche n'était prise en compte nulle part ; les utilitaires `pt-encoche`/`pb-encoche`/`pl-encoche` sont déclarés **une fois** et leur repli `env(…, 0px)` les rend inoffensifs sur un écran sans découpe — on les pose donc sans condition. `viewport-fit=cover` est **délibérément écarté** : il demanderait au navigateur de passer sous les zones système, l'inverse du but. (3) Sous 16 px, iOS agrandit la page à la mise au point d'un champ et **ne la réduit pas ensuite** — d'où le tableau de bord zoomé après une connexion, le champ e-mail étant en `text-sm`. Une règle CSS unique sous `@media (max-width: 767px)` plutôt qu'un correctif par composant : l'application porte 53 contrôles bruts dans 31 fichiers en plus des primitives. `maximum-scale=1` est écarté — une ligne, mais elle désactive le pincement pour zoomer sur un outil où l'on relit des actes et des pièces d'identité (WCAG 1.4.4). Trouvé en mesurant : `Ged/Index.jsx` employait `theme(spacing.header)` sans que le token existe, donc **Tailwind ne générait pas la classe** et la page n'avait aucune hauteur — une classe non générée est un défaut silencieux, d'où le test qui vérifie désormais le token. `AdaptationMobileTest` verrouille les trois règles, et chaque garde-fou a été éprouvé en réintroduisant le défaut qu'il surveille |
+| 46 | Un `DialogContent` **ne se ferme pas** sur une interaction née d'un calque flottant Radix (`Select`, `Popover`, `DropdownMenu`) | Choisir un moyen de paiement fermait le dialogue et perdait la saisie. Cause : le menu d'un `Select` est **portalé** hors du dialogue — dans le DOM il en est frère, pas descendant — si bien que le clic sur une option était pris pour un clic « dehors ». Le défaut n'apparaissait que là où un `Select` **Radix** cohabite avec un dialogue : les modales à `<select>` natif ne l'ont jamais montré, d'où son passage inaperçu ; six écrans étaient concernés, pas seulement celui signalé. La garde vit dans la **primitive**, une fois pour toutes les modales, et elle est juste en elle-même indépendamment des rouages de Radix : **cliquer dans le menu d'un champ du dialogue n'est pas cliquer dehors**. Le voile, la touche Échap et le bouton de fermeture continuent d'agir. ⚠️ **Quatre hypothèses ont été falsifiées par la mesure avant celle-là**, et il faut le savoir pour ne pas les reprendre : `onOpenChange={onClose}` n'est pas fautif (`useControllableState` n'émet `onChange` que si la valeur diffère du prop, donc jamais `true` sur un dialogue contrôlé) ; le `SelectTrigger` ne soumet pas le formulaire (Radix lui pose `type="button"`) ; `react-select` **désactive** bien les événements extérieurs, donc l'imbrication des couches est correcte ; et les deux copies de `react-dismissable-layer` présentes dans le bundle séparent `{toast, tooltip}` de `{dialog, select}`, qui partagent donc leur registre. Les attributs surveillés sont ceux que Radix **émet réellement**, relevés dans les paquets installés — un sélecteur inventé ne filtrerait rien en silence, d'où le test qui vérifie leur existence dans `node_modules` |
+| 47 | La note de frais sort en **PDF rendu en mémoire** (dompdf + vue Blade, comme les reçus), et **aucun téléchargement ne passe plus par un `<a download>` nu** | Deux défauts sous un seul symptôme : l'étude recevait un `telecharger.htm` inexploitable. (1) La route s'appelait `telechargerPdf` mais produisait un **`.docx`** — le gabarit Word rendu dans un fichier temporaire, expédié avec `deleteFileAfterSend`. Le nom de la méthode mentait sur ce qu'elle faisait, et aucun PDF n'a jamais été produit pour une facture. (2) Le bouton était un lien nu portant `download` : quand la réponse n'était pas le fichier attendu — erreur serveur, redirection parce que la session avait expiré — le navigateur l'enregistrait **quand même**, sous le nom du dernier segment d'URL. Un échec déguisé en succès, sans le moindre message. Le rendu réutilise le procédé de `RecuPdfService`, déjà en production : dompdf était **déjà une dépendance**. Écartée : la conversion du `.docx` en PDF, fidèle au pixel mais exigeant LibreOffice sur le serveur — dépendance système lourde, lente, panne de plus, et que le devbook signalait déjà comme non résolue. La mise en page suit **Facture_MAB_SARLU_v2 (1).docx**, l'exemplaire fourni par l'étude, relevé paragraphe par paragraphe et en-tête compris : papier à lettre, titre, numéro « … / MAB / 26 », date, n° de compte, objet suivi de sa parenthèse récapitulative, tableau dont chaque désignation porte sa précision sur une seconde ligne (les désignations la portent en base : « Insertion JAL (Journal Annonces Légales) », convention que `detailPrestations()` exploitait déjà), les deux lignes à montant variable « Timbres fiscaux » et « Rôles » marquées d'un tiret, total, arrêté en toutes lettres, courtoisie, signature. Palette reprise du document : #1A3A6B, #1A1A1A, #666666, trame #F5F5F5. ⚠️ Les pictogrammes du papier à lettre Word ne sont pas repris — dompdf n'embarque que DejaVu Sans, qui ne les contient pas, et ils sortiraient en carrés vides ; le PDF du reçu les emploie encore, même défaut à traiter. **Aucun téléchargement Word n'est offert** : un seul format, celui attendu — `FactureGeneratorService::genererDocument()` devient dormant et son docblock le dit. **Rendu en mémoire, jamais persisté** : décision reprise du contrôleur d'origine (le projet traîne 117 orphelins hors GED), et c'est ce qui supprime le fichier temporaire d'où venait la fragilité. Enfin `lib/telechargement.js` vérifie le type reçu et **le dit** ; les **7 autres liens nus** de l'application — documents, versions, courriers, GED — sont passés par lui dans la même manœuvre, au titre de la règle 1 de `CLAUDE.md` |
 
 ---
 
@@ -2239,6 +2641,13 @@ registre) et `modif.*` l'état **après**. Les statuts mis à jour doivent porte
 | `TemplateProcessor` "File not found" | Modèle cherché dans `public/` au lieu de `storage/app/private/` — corrigé avec `Storage::disk('local')->path($storagePath)` |
 | Variables `${soc.denomination}` non remplacées | Champs questionnaire utilisaient des IDs courts (`denomination`) sans préfixe (`soc.denomination`) — mis à jour dans `questionnaires.js` |
 | `${date_acte_lettres}` non remplacée dans les modèles | Variable non générée dans `ActesGeneratorService` — ajout de `datEnLettres()` private method + appel dans `remplirInfosDossier()` |
+| **Toute date française à jour > 12 refusée, et jour ≤ 12 inversé en silence** (2026-09-09) | Deux modales postaient `JJ/MM/AAAA` vers des colonnes castées `date`, où PHP lit du **mois/jour américain** : `strtotime('13/05/1985')` échoue (la règle `date` refusait donc une date valide), et `01/04/1985` devenait le **4 janvier**, enregistré sans la moindre erreur. 7 dates de 3 fiches réinversées par migration, avec témoin `dates_a_confirmer` affichant les deux lectures. Voir décision #40 |
+| **Un acte imprimait `1970-02-05T00:00:00.000000Z`** (2026-09-09) | La projection déposait l'horodatage de l'API dans `donnees`, où la convention est `JJ/MM/AAAA` — et les variantes `_jma` / `_lettres` n'étaient alors **pas dérivées du tout**, faute de reconnaître le format. Corrigé dans les deux sens et pour les deux entités (client et société). `FormatsDatesTest` interdit désormais toute date ISO dans `donnees` |
+| **Une fiche client relue affichait ses trois dates vides** (2026-09-09) | `isoDateToFR` exigeait exactement `AAAA-MM-JJ` et rendait une chaîne vide sur l'horodatage que Laravel sérialise pour une colonne castée. La valeur était bien en base, invisible à l'écran |
+| **Page blanche : constante utilisée avant sa déclaration** (2026-09-09) | `SITUATIONS_MATRIMONIALES` était déclarée **sous** les littéraux de schéma qui la consomment — or ils s'évaluent à l'initialisation du module : zone morte temporelle, « Cannot access before initialization ». ⚠️ **`vite build` ne l'attrape pas** (erreur d'exécution, pas de compilation) : un test de `ListesMatrimonialesTest` scanne désormais le fichier |
+| **Tout enregistrement du questionnaire renvoyait 500** (2026-09-10) | `DossierController::updateQuestionnaire` ne capturait pas `$projection` dans sa closure `DB::transaction` : `ErrorException`, transaction annulée, **saisie perdue**. Aucun test HTTP ne couvrait cette route — le premier écrit l'a exposé immédiatement |
+| **`gerant_entrant.*` sans cascade géo** (2026-09-10) | Bloc **dérivé** de `GER_FIELDS` par substitution de préfixe : ses champs géo existaient sans être écrits nulle part, donc absents de `TRIPLETS_GEO`. On y saisissait une commune en texte libre à côté d'un bloc qui proposait le référentiel. Une dérivation n'inscrit pas ses champs d'elle-même |
+| **504 sur toutes les dépendances Vite** (2026-09-09) | `node_modules/.vite` supprimé **pendant** que le serveur de développement tournait : il ne recrée son cache qu'au démarrage, donc tout répond « Outdated Optimize Dep » jusqu'au redémarrage, et aucun rechargement de page n'y remédie. Consigné dans `CLAUDE.md` |
 | Sections Société/Associé/Gérant absentes dans Create.jsx | Boucle `.map((field) =>` sans gestion du prop `section` — corrigé avec `React.Fragment` + détection `field.section` par comparaison d'index |
 
 ### ⚠️ À surveiller
@@ -2251,11 +2660,11 @@ registre) et `modif.*` l'état **après**. Les statuts mis à jour doivent porte
 | `DEFAULT_GROUPES` dans Revision | 3 groupes statiques utilisés si pas de `RevisionGrille` en DB pour le type d'acte. Normal pour l'instant |
 | Pages Auth (Login/Register) | Utilisent encore `GuestLayout` de Breeze — design non unifié, fonctionnel |
 | `recharts` installé | Non encore utilisé — prévu pour graphiques dashboard (module futur) |
-| Importation `@/components/*` vs `@/Components/*` | Windows insensible à la casse : les deux fonctionnent. Sur Linux (déploiement) : vérifier la cohérence de la casse |
-| PDF preview non implémentée | Génération `.docx` OK, mais pas de prévisualisation navigateur. Nécessite LibreOffice headless ou service tiers |
+| Importation `@/components/*` vs `@/Components/*` | **227 imports en minuscules** face au dossier réel `Components/`. Windows étant insensible à la casse les deux fonctionnent, mais Vite tient alors **deux identités de module** pour le même fichier — ce qui a déjà provoqué deux invalidations HMR manquées (export `DialogBody` introuvable, régime matrimonial rendu depuis l'ancien module). **Sur Linux, le déploiement échouera.** Chantier non entrepris : normaliser 227 imports touche presque tous les fichiers. Les fichiers créés ou refondus depuis le 2026-09-10 emploient `@/Components/*` |
+| Aperçu PDF d'un `.docx` non implémenté | ⚠️ **Ligne précisée le 2026-09-10** : elle laissait croire qu'aucun PDF n'était produit. Deux documents **sont** rendus en PDF par dompdf — le reçu de paiement (`RecuPdfService`), la fiche de recueil (`FicheRecueilPdfService`) et depuis ce jour la note de frais (`FacturePdfService`). Ce qui manque est la **conversion d'un `.docx` en PDF** (actes générés depuis les gabarits Word), qui exigerait LibreOffice headless ou un service tiers. L'aperçu `.docx` dans le navigateur, lui, fonctionne côté client depuis le 2026-07-24 (`docx-preview`) |
 | 63 modèles `.docx`/`.doc` bruts dans `Documents reçus/` | Non normalisés (pointillés/MAJUSCULES) — inutilisables tels quels par `ActesGeneratorService`. Un seul fichier de référence normalisé (`STATUTS_SARLU_balises.docx`). Voir `Analyse_et_Prompt_Generation_Modeles_Ayelema.md` |
 | Blocs `cr.*` / `fac.*` absents de `questionnaires.js` | Documentés dans l'analyse mais pas de formulaire frontend — les courriers de transmission et factures détaillées ne peuvent pas encore être générés depuis un questionnaire dédié |
-| `BienImmobilier`/`Banque` sans CRUD ni seeder | Tables et modèles existent, alimentés uniquement en creux via le questionnaire du dossier — pas d'écran de gestion, pas de données de démo. **`Client` (2026-08-03) et `Societe` (2026-08-11) sont sortis de cette liste** |
+| `BienImmobilier` n'a **aucune table**, `Banque` en a une mais sans CRUD | ⚠️ **Ligne corrigée le 2026-09-10** : elle affirmait que les deux tables existaient. `bien_immobiliers` est **absente de la base** — le modèle et ses casts (`tf_date`, `date_prise_effet`) existent sans migration, et rien n'écrit dedans : les données de bien vivent uniquement dans `questionnaires.donnees` (`bien.*`, `bail.*`), consommées directement par `ActesGeneratorService`. `banques` existe mais n'est alimentée qu'en creux par le questionnaire. **`Client` (2026-08-03) et `Societe` (2026-08-11) sont sortis de cette liste** |
 | Le registre des sociétés n'a pas d'écran dédié | `SocieteController` n'est atteignable que depuis l'assistant de dossier (autocomplétion + modale). Consulter ou corriger une fiche hors création d'un dossier n'est pas possible — à exposer dans `Repertoire/Index.jsx`, au même titre que les clients |
 | Les 6 modèles d'actes de `SOC-MOD` sont inactifs | Les gabarits `.docx` (acte de cession, PV d'AGE, statuts mis à jour, DNSV, déclaration RCCM, page de garde) ne figurent pas dans `Documents reçus/` — seules les 2 lettres de transmission existent. Les entrées sont seedées `est_actif = false`, prêtes à recevoir leur fichier depuis *Modèles d'actes*. **Exception depuis le 2026-08-11** : `statuts_maj` est produit malgré son modèle inactif dès que la société a déposé ses statuts en `.docx` (gabarit hérité) |
 | Les pièces de société sont à cocher dans chaque dossier | Conséquence assumée du choix de les inventorier : la vérification de clôture est par dossier, donc les mêmes statuts se recochent à chaque modification de la société. Correct sur le fond (chaque clôture atteste que *ce* dossier a été contrôlé) mais répétitif — à revoir si l'étude enchaîne beaucoup de modifications sur une même société |
@@ -2273,6 +2682,12 @@ registre) et `modif.*` l'état **après**. Les statuts mis à jour doivent porte
 
 ---
 
-*Dernière mise à jour : 05/08/2026 — **Intégration des règles de gestion notariales** (`Regles_Gestion_Plateforme_Notariale.docx`, CR juillet 2026). Onze jeux de règles légales et tarifaires, dont aucune n'était appliquée : `soc.forme` n'était qu'une liste de sept choix sans conséquence. Capital minimum, formes unipersonnelles, classification capitaux/personnes, unicité de dénomination, commissaire aux comptes, PV d'assemblée, capacité juridique des mineurs, impact et documents des modifications statutaires, tarifs DGI et greffe — toutes appliquées, les six premières de façon **bloquante** (décision #39). Deux constats ont changé la conception : la forme juridique se déduit du **code du type d'acte** et non du questionnaire (les 10 dossiers réels n'ont pas de `soc.forme` — ma première version les bloquait tous), et le PV d'assemblée était **facultatif de fait**, la pièce s'appelant « Déclaration RCCM *ou* PV ». `clients.prenom_nom` scindé en nom de famille et prénoms pour la mise en capitales exigée, avec accessor et mutateur de compatibilité (décision #38). 25 tests, un par règle. Précédemment — **réintroduction de l'étape Initialisation.** La création déposait le dossier directement en Édition, où `verifierEdition()` cumulait « constituer le dossier » (objet, intervenants, pièces des personnes, accord signé du client) et « produire les actes » — et les actes étaient générés dès la création, donc sur un questionnaire que le client n'avait pas validé. Le workflow compte désormais **7 étapes** : on atterrit sur l'onglet Informations d'un dossier en Initialisation, et les actes sont produits au passage en Édition, sans jamais écraser un acte corrigé à la main. Le questionnaire, les parties et l'accord ne se modifient plus qu'en Initialisation. Double contrôle conservé à la sortie d'Édition pour les 3 dossiers antérieurs qui y sont déjà — vérifiés bloquants sur la base réelle. 4 tests ajoutés, 3 réécrits. Précédemment — **francisation de l'interface** : l'application n'avait aucun dossier `lang/` et tournait en locale `en` — l'écran de connexion affichait « The email field is required. » Paquet `lang/fr` complet (validation avec les ~110 libellés métier des champs, auth, mots de passe, pagination, `fr.json` pour les e-mails), locale et fallback en `fr` jusque dans les défauts de `config/app.php`, et pages d'erreur 403/404/419/429/500/503 traduites et contextualisées. Carbon suit la locale, ce qui francise les alertes d'échéance. 6 tests, dont la non-divulgation de l'existence d'un compte. Et **statut du dossier plus visible** : étiquette avec pastille et position dans le workflow (« Formalités 4 / 6 »), présente aussi dans la carte d'en-tête ; **Clôture passe en dernier onglet** après Facturation, et son badge — qui lisait encore `est_requis`, colonne vidée par la refonte, et affichait donc toujours 0 — compte désormais les pièces restant à vérifier. Précédemment — **correctif d'un 500 en production** : 14 formalités portaient encore `statut = 'cloture'`, valeur retirée de `StatutFormalite` sans migration de données — le cast Eloquent levait un `ValueError` et la fiche de 4 dossiers était inaccessible. Détecté en testant les pages sur la base réelle, pas par les tests (base neuve). Et **audit des restrictions d'étape, toutes étapes.** Le défaut était systémique : plusieurs abilities encodaient *qui* peut agir mais pas *quand*. Le plus grave : `updateQuestionnaire` n'était gardé que par `update`, donc le questionnaire restait modifiable jusqu'à l'Expédition **et l'action régénère les actes** — une certification validée pouvait porter sur un contenu réécrit après coup. Deux abilities nouvelles (`modifierQuestionnaire`, Édition seule ; `enregistrerSignatures`, étape Signature seule, avec action et route dédiées après extraction des dates de `UpdateDossierRequest` où elles étaient effaçables à toute étape). Ordre d'évaluation uniformisé — gel → étape → rôle (décision #38) — sans uniformiser mécaniquement : `update` reste légitime à toutes les étapes ouvertes. Trois manques adjacents comblés : `ClientPolicy` (aucune autorisation n'existait sur des actions qui régénèrent les actes de tous les dossiers liés), cloisonnement de la liste des courriers et de ses compteurs, parties non modifiables après certification. 16 tests, dont un garde-fou de structure vérifiant que chaque étape est refusée par au moins une ability. Précédemment — **la clôture passe de la configuration à l'inventaire.** L'approche « documents obligatoires déclarés par type d'acte » (`obligatoire_cloture`, page `Paramètres > Clôture`) est **abandonnée** : elle dupliquait une vérité que le workflow produit déjà, et pouvait la contredire. L'onglet Clôture affiche désormais l'**inventaire complet** du dossier — toutes les pièces de toutes les étapes, rangées en six rubriques canoniques dérivées de leur origine — que le notaire ou le formaliste vérifie pièce par pièce avant de clôturer (table polymorphe `cloture_verifications`, décision #36). Sur `SOC-2026-0009`, l'ancien écran montrait 5 éléments là où le dossier compte 19 pièces. La GED adopte le même rangement (dossier > rubrique), ce qui y fait entrer courriers et reçus, jusqu'ici absents. Point délicat traité : `est_requis` est une colonne surchargée — notion morte sur les actes et courriers, vivante sur les pièces de parties et de formalités où elle signifie « pièce à fournir » ; la migration de nettoyage filtre sur `documentable_type`. 19 nouveaux tests, 3 tests d'avancement réécrits. **Audit des restrictions de l'étape** dans la même passe : rien ne figeait un dossier clôturé — un administrateur pouvait le modifier, régénérer ses actes ou le supprimer, un comptable y enregistrer un paiement (`gererFacturation` n'avait aucun contrôle d'étape), et l'inventaire d'un dossier clos restait décochable. `DossierPolicy::estFige()` (décision #37) refuse désormais toute modification de contenu, **avant** le raccourci administrateur, puisqu'il s'agit de l'état du dossier et non d'une permission. Précédemment — **visibilité des conditions bloquantes** : la carte « Accord client », prérequis obligatoire pour quitter l'Édition, était reléguée en bas de l'onglet Informations ; extraite en composant dédié (`AccordClientCard`), placée **en tête** de l'onglet, rendue autonome (imprimer la fiche + téléverser l'accord depuis la carte) et signalée comme bloquante quand elle est en attente. Les blocages listés dans l'en-tête sont désormais **cliquables** et mènent à la section où agir. Précédemment — **audit des prérequis d'étape** : 3 divergences trouvées entre le serveur et les deux miroirs frontend (bouton « Avancer » actif à tort en Expédition, deux prérequis d'Édition omis sur la fiche, ancienne règle d'Expédition restée en place). Les `match` PHP sont désormais exhaustifs, `revisionValidee()` compare un cas d'enum, 9 tests verrouillent la cohérence. Le point faible restant est documenté : la règle vit en 3 endroits, dont un en JavaScript sans filet. Précédemment — **correctif : l'étape Formalités était un cul-de-sac.** La suppression du statut `Cloture` par formalité avait laissé un `!== 'cloture'` dans `DossierStepService` : aucune formalité ne pouvant plus porter ce statut, le passage à l'Expédition était définitivement bloqué, silencieusement. L'état terminal est désormais défini par un `match` exhaustif dans `StatutFormalite::estTerminee()` (décision #35) — un nouveau statut ne peut plus passer inaperçu — et le message d'erreur distingue un rejet à corriger d'une attente de retour. 7 tests. Et **brouillons de création de dossier** : l'assistant peut être enregistré en cours de saisie (table dédiée `dossier_brouillons`, et non un `Dossier` en étape brouillon qui consommerait une référence notariale — décision #34). Les pièces déjà téléversées sont conservées sur le disque privé et rattachées aux parties à la finalisation ; contrepartie outillée par `ayelema:brouillons-purger` en dry-run. Enregistrement explicite, bandeau de reprise, cloisonnement par auteur. 10 tests. Et **la fiche Client devient la source de vérité de l'identité** : les sections de rôle (associé unique, gérant, vendeur…) ne resaisissent plus 18 champs, elles **désignent** une fiche ; `donnees` devient une projection dérivée, recalculée côté serveur par `ClientProjectionService` grâce à un lien auto-descriptif porté par la `Partie` (`donnees_prefixe`/`donnees_bloc`/`donnees_index`) — ce qui évite de dupliquer en PHP le schéma des questionnaires, qui vit en JS. Corriger une fiche réaligne les dossiers non clôturés et régénère leurs actes non signés, avec trace au journal. Un seul champ manquait réellement à la fiche (`representant_qualite`) : l'écart était dans le flux, pas dans le schéma. Décision #33, 10 tests dont un test de dérive PHP↔JS. Et **plafonnement des paiements** : la somme des paiements d'une facture ne peut plus dépasser son total (contrôle serveur sous verrou de ligne, plafond dur dans le modal, trop-perçu antérieur signalé en anomalie sans migration corrective — décision #32, 11 tests). Et **fiabilisation des notifications** : deux causes distinctes traitées. (1) Livraison — le canal `broadcast` était queué alors qu'aucune notification ne l'est (`onConnection('sync')`, décision #31), le scheduler n'était jamais lancé en dev (donc zéro alerte d'échéance), le hook Echo perdait les événements à chaque navigation Inertia, et un `notify()` non protégé pouvait renvoyer un 500 après une action réussie. (2) Destinataires — `NotificationService` remplace l'usage systématique de `ayantsDroit()` par un ciblage par rôle avec repli sur le pool ; 4 événements sans aucune notification sont couverts (assignation, renvoi en correction, certification validée, **passage aux formalités** — le formaliste n'était averti par rien). Ajout de `ayelema:notifications-diagnostic` et de 8 tests de routage. Corrections de fond du devbook lui-même : workflow réel (plus d'`Initialisation`, étape `Signature` unique réintroduite), rôles multiples via `role_user`, décision #28 réécrite (aucune notification n'est `ShouldQueue`), ligne « worker de queue requis » périmée.*
+*Dernière mise à jour : 10/09/2026 (nuit) — **Tenable sur téléphone, et Conakry remis d'aplomb.** Trois signalements. (1) Les quartiers étaient restés accrochés à l'ancien découpage : la réforme de 2024 a scindé Ratoma en Ratoma + Lambanyi + Sonfonia et Matoto en Matoto + Gbessia + Tombolia, si bien que **« Lambanyi » et « Sonfonia » existaient à la fois comme communes de Conakry et comme quartiers de Ratoma** — un même nom pour deux niveaux du même endroit. Le fichier versionné déclare désormais les 50 quartiers de Conakry, et `--corriger` réconcilie : **retiré si le nom n'est employé nulle part, seulement désactivé s'il l'est** (il figure peut-être déjà dans un acte, et le référentiel ne porte aucune clé étrangère vers eux). ⚠️ **Rien n'est déplacé d'une commune à l'autre** : répartir les quartiers entre les six communes issues du découpage exige l'annexe de la loi L2024/003, et rattacher au hasard mettrait une fausse adresse dans un acte authentique. Le dry-run a par ailleurs révélé que « Dapompa », que je prenais pour une faute de frappe, avait été **saisi par l'étude** : la commande le préserve et le signale. (2) `h-screen` vaut `100vh`, la hauteur de l'écran barre d'adresse masquée — plus grande que la zone visible, d'un écart variable selon l'appareil, d'où « sur certains écrans ça loge, sur d'autres non ». Avec `overflow-hidden` sur la racine, ce qui dépassait n'était pas rattrapable par défilement et passait sous la barre d'état. Passage en **`dvh`**, socle CSS compris — `html { height: 100% }` se résolvait lui aussi sur la grande fenêtre — et **marges d'encoche** déclarées une fois, inoffensives sur un écran sans découpe grâce au repli `env(…, 0px)`. (3) Sous 16 px, iOS agrandit la page à la mise au point d'un champ **et ne la réduit pas ensuite** : d'où le tableau de bord zoomé après connexion. Une règle CSS unique porte les contrôles à 16 px sur petit écran — un correctif par composant aurait manqué les 53 contrôles bruts répartis dans 31 fichiers. `maximum-scale=1` est écarté : il désactiverait le pincement pour zoomer sur un outil où l'on relit des actes. Trouvé en mesurant : **la page GED n'avait aucune hauteur**, `theme(spacing.header)` étant employé sans que le token existe — Tailwind ne générait pas la classe, en silence. Décision #45, 17 tests, chaque garde-fou éprouvé en réintroduisant le défaut qu'il surveille. **Suite complète : 493 tests, 485 passent** — les 8 échecs restants sont antérieurs et documentés en §9.*
+
+*Mise à jour précédente : 10/09/2026 (après-midi) — **Le référentiel des lieux : chargé une fois, et conforme au découpage réel de la Guinée.** Deux signalements dans la même capture. (1) La cascade se faisait sentir : `LieuSelect` interrogeait le serveur **par champ et par changement de parent**, soit jusqu'à **18 requêtes** à l'ouverture d'un questionnaire de modification. C'était une multiplication, pas un volume — le référentiel entier ne pèse que **16,5 Ko** (3,1 Ko compressé) pour 447 lieux. Il part désormais en une seule réponse, mise en cache avec un `ETag`, et une **promesse au niveau du module** fait que le premier champ monté charge pour les dix-sept autres — vérifié à 1 requête pour 18 montages. Le motif n'est pas inventé : le formulaire public d'intake recevait déjà le référentiel dans ses props, faute de point d'entrée exposable à un tiers. Corollaire trouvé au passage : un lieu ajouté n'apparaissait que dans le champ qui l'avait créé, les autres servant la liste d'avant. (2) Le référentiel était en retard d'une réforme : **39 préfectures et 353 communes** remplacent 34 et 39, dont les **13 communes de Conakry** de la loi L2024/003/CNT du 18 janvier 2024 — **Lambanyi**, la commune de l'office, ne figurait pas au référentiel alors que l'adresse de l'étude l'imprime, et Boké n'avait qu'une commune au lieu de dix. L'import (`ayelema:lieux-importer`, dry-run par défaut) travaille sur un fichier **versionné et non téléchargé à l'exécution**, trace la provenance de chaque lieu (colonne `source`), et **complète sans jamais réécrire** ce que l'étude a saisi ou corrigé. Le dry-run a évité trois doublons de préfecture, GeoNames nommant trois ADM2 « Préfecture de Dubréka » quand les autres portent un suffixe anglais. ⚠️ **Les 4 142 quartiers du pays ne sont pas livrés** : aucune source exploitable ne les couvre — OCHA/HDX ne descend à ce niveau que pour Conakry, GeoNames n'a aucun `PPLX` pour la Guinée — et un quartier inventé partirait dans un acte authentique. Même doctrine que pour les régimes matrimoniaux. Décision #44, 51 tests entre `ReferentielLieuxTest` et `LieuxTest`. **Suite complète : 476 tests, 468 passent** — les 8 échecs restants sont antérieurs et documentés en §9.*
+
+*Mise à jour précédente : 10/09/2026 — **Un seul moteur de champ de questionnaire, et une règle de travail pour ne plus le refaire.** Le rendu des champs était recopié dans trois écrans (assistant de création, modal « Modifier le questionnaire », intake public) et **quatre comportements de suite** n'avaient été implémentés que d'un côté : `checkbox_group`, la cascade géo, `readonly` (le champ « Pays » restait modifiable dans l'assistant alors qu'il était verrouillé ailleurs), puis la cohérence des dates — absente partout. Aucun test ne pouvait l'attraper : il n'y avait pas de règle à vérifier, mais trois implémentations toutes « justes » chez elles. `ChampQuestionnaire.jsx` devient le détenteur unique (313 lignes contre ~380 triplées), `PariteRenduQuestionnaireTest` **crée la règle** manquante — aucun écran ne peut redéclarer un `field.type ===`, et tout type déclaré doit être traité par le moteur — et `CLAUDE.md` porte la consigne demandée par l'étude : chercher les autres détenteurs d'une règle, les **mesurer**, et les traiter dans la même passe. Cette recherche a immédiatement rapporté deux défauts invisibles autrement : `gerant_entrant.*`, bloc dérivé de `GER_FIELDS` par substitution de préfixe, n'était dans aucun triplet géo et n'avait donc **aucune cascade** ; et `updateQuestionnaire` ne capturait pas `$projection` dans sa closure de transaction, ce qui faisait échouer **tout enregistrement du questionnaire** — transaction annulée, saisie perdue, 500 à l'écran. Le serveur cesse par ailleurs de tout accepter (`CoherenceDonneesService`), sur la cohérence entre dates **seulement** : la visibilité d'un champ dépend des `showIf` du schéma, qui vit en JavaScript, et l'exiger côté serveur imposerait de dupliquer ce schéma. Décisions #41 à #43, 26 tests. Précédemment (09/09) — **le format des dates : cinq défauts, une seule cause.** Signalé comme « une pièce annoncée expirée alors qu'elle est valable jusqu'en 2027 ». PHP lit `JJ/MM/AAAA` comme du mois/jour américain : `13/05/1985` faisait échouer `strtotime` et la règle `date` **refusait une date valide**, tandis que `01/04/1985` devenait le 4 janvier, enregistré sans erreur. Trois défauts adjacents, non signalés et plus graves : les actes imprimaient `1970-02-05T00:00:00.000000Z` (la projection déposait l'horodatage de l'API dans `donnees`, et les variantes `_jma`/`_lettres` n'étaient alors pas produites), une fiche relue affichait ses trois dates **vides**, et une constante déclarée sous son usage rendait la page blanche — que `vite build` ne signale pas. Le contrat des deux formats est désormais énoncé en tête de `lib/dates.js` et **exécutable** : `FormatsDatesTest` interdit toute date ISO dans `donnees`. Reprise mesurée : 3 fiches, 7 dates réinversées (jour ≤ 12 seulement — au-delà l'inversion était impossible), témoin `dates_a_confirmer` donnant les **deux lectures** et levé au premier enregistrement. Décision #40, 19 tests écrits au format que l'interface envoie réellement — ce qui manquait aux tests existants, écrits en ISO. Précédemment (12/08) — **référentiel des lieux et listes matrimoniales fermées.** Le régime matrimonial était en saisie libre : quatre orthographes pour deux régimes, dont « Communaté de bien » que les modèles Word reprenaient dans les actes. La cascade ville → commune → quartier remplace la saisie libre à dix endroits (table `lieux` auto-référençante, unicité relative au parent). Complété le 10/09 par ce qui manquait à l'usage : **valider** un lieu est devenu un geste à part entière — seul un renommage levait `a_verifier`, laissant l'étude devant 53 quartiers marqués sans recours — et surtout le vrai blocage a été nommé : **33 des 39 communes n'ont aucun quartier** alors que le quartier est obligatoire dans 11 déclarations, ce que le champ et le blocant disent désormais explicitement au lieu de proposer une liste vide. Décision #42, 28 tests. **Suite complète : 456 tests, 448 passent** — les 8 échecs restants sont antérieurs et documentés en §9.*
+
+*Mise à jour précédente : 05/08/2026 — **Intégration des règles de gestion notariales** (`Regles_Gestion_Plateforme_Notariale.docx`, CR juillet 2026). Onze jeux de règles légales et tarifaires, dont aucune n'était appliquée : `soc.forme` n'était qu'une liste de sept choix sans conséquence. Capital minimum, formes unipersonnelles, classification capitaux/personnes, unicité de dénomination, commissaire aux comptes, PV d'assemblée, capacité juridique des mineurs, impact et documents des modifications statutaires, tarifs DGI et greffe — toutes appliquées, les six premières de façon **bloquante** (décision #39). Deux constats ont changé la conception : la forme juridique se déduit du **code du type d'acte** et non du questionnaire (les 10 dossiers réels n'ont pas de `soc.forme` — ma première version les bloquait tous), et le PV d'assemblée était **facultatif de fait**, la pièce s'appelant « Déclaration RCCM *ou* PV ». `clients.prenom_nom` scindé en nom de famille et prénoms pour la mise en capitales exigée, avec accessor et mutateur de compatibilité (décision #38). 25 tests, un par règle. Précédemment — **réintroduction de l'étape Initialisation.** La création déposait le dossier directement en Édition, où `verifierEdition()` cumulait « constituer le dossier » (objet, intervenants, pièces des personnes, accord signé du client) et « produire les actes » — et les actes étaient générés dès la création, donc sur un questionnaire que le client n'avait pas validé. Le workflow compte désormais **7 étapes** : on atterrit sur l'onglet Informations d'un dossier en Initialisation, et les actes sont produits au passage en Édition, sans jamais écraser un acte corrigé à la main. Le questionnaire, les parties et l'accord ne se modifient plus qu'en Initialisation. Double contrôle conservé à la sortie d'Édition pour les 3 dossiers antérieurs qui y sont déjà — vérifiés bloquants sur la base réelle. 4 tests ajoutés, 3 réécrits. Précédemment — **francisation de l'interface** : l'application n'avait aucun dossier `lang/` et tournait en locale `en` — l'écran de connexion affichait « The email field is required. » Paquet `lang/fr` complet (validation avec les ~110 libellés métier des champs, auth, mots de passe, pagination, `fr.json` pour les e-mails), locale et fallback en `fr` jusque dans les défauts de `config/app.php`, et pages d'erreur 403/404/419/429/500/503 traduites et contextualisées. Carbon suit la locale, ce qui francise les alertes d'échéance. 6 tests, dont la non-divulgation de l'existence d'un compte. Et **statut du dossier plus visible** : étiquette avec pastille et position dans le workflow (« Formalités 4 / 6 »), présente aussi dans la carte d'en-tête ; **Clôture passe en dernier onglet** après Facturation, et son badge — qui lisait encore `est_requis`, colonne vidée par la refonte, et affichait donc toujours 0 — compte désormais les pièces restant à vérifier. Précédemment — **correctif d'un 500 en production** : 14 formalités portaient encore `statut = 'cloture'`, valeur retirée de `StatutFormalite` sans migration de données — le cast Eloquent levait un `ValueError` et la fiche de 4 dossiers était inaccessible. Détecté en testant les pages sur la base réelle, pas par les tests (base neuve). Et **audit des restrictions d'étape, toutes étapes.** Le défaut était systémique : plusieurs abilities encodaient *qui* peut agir mais pas *quand*. Le plus grave : `updateQuestionnaire` n'était gardé que par `update`, donc le questionnaire restait modifiable jusqu'à l'Expédition **et l'action régénère les actes** — une certification validée pouvait porter sur un contenu réécrit après coup. Deux abilities nouvelles (`modifierQuestionnaire`, Édition seule ; `enregistrerSignatures`, étape Signature seule, avec action et route dédiées après extraction des dates de `UpdateDossierRequest` où elles étaient effaçables à toute étape). Ordre d'évaluation uniformisé — gel → étape → rôle (décision #38) — sans uniformiser mécaniquement : `update` reste légitime à toutes les étapes ouvertes. Trois manques adjacents comblés : `ClientPolicy` (aucune autorisation n'existait sur des actions qui régénèrent les actes de tous les dossiers liés), cloisonnement de la liste des courriers et de ses compteurs, parties non modifiables après certification. 16 tests, dont un garde-fou de structure vérifiant que chaque étape est refusée par au moins une ability. Précédemment — **la clôture passe de la configuration à l'inventaire.** L'approche « documents obligatoires déclarés par type d'acte » (`obligatoire_cloture`, page `Paramètres > Clôture`) est **abandonnée** : elle dupliquait une vérité que le workflow produit déjà, et pouvait la contredire. L'onglet Clôture affiche désormais l'**inventaire complet** du dossier — toutes les pièces de toutes les étapes, rangées en six rubriques canoniques dérivées de leur origine — que le notaire ou le formaliste vérifie pièce par pièce avant de clôturer (table polymorphe `cloture_verifications`, décision #36). Sur `SOC-2026-0009`, l'ancien écran montrait 5 éléments là où le dossier compte 19 pièces. La GED adopte le même rangement (dossier > rubrique), ce qui y fait entrer courriers et reçus, jusqu'ici absents. Point délicat traité : `est_requis` est une colonne surchargée — notion morte sur les actes et courriers, vivante sur les pièces de parties et de formalités où elle signifie « pièce à fournir » ; la migration de nettoyage filtre sur `documentable_type`. 19 nouveaux tests, 3 tests d'avancement réécrits. **Audit des restrictions de l'étape** dans la même passe : rien ne figeait un dossier clôturé — un administrateur pouvait le modifier, régénérer ses actes ou le supprimer, un comptable y enregistrer un paiement (`gererFacturation` n'avait aucun contrôle d'étape), et l'inventaire d'un dossier clos restait décochable. `DossierPolicy::estFige()` (décision #37) refuse désormais toute modification de contenu, **avant** le raccourci administrateur, puisqu'il s'agit de l'état du dossier et non d'une permission. Précédemment — **visibilité des conditions bloquantes** : la carte « Accord client », prérequis obligatoire pour quitter l'Édition, était reléguée en bas de l'onglet Informations ; extraite en composant dédié (`AccordClientCard`), placée **en tête** de l'onglet, rendue autonome (imprimer la fiche + téléverser l'accord depuis la carte) et signalée comme bloquante quand elle est en attente. Les blocages listés dans l'en-tête sont désormais **cliquables** et mènent à la section où agir. Précédemment — **audit des prérequis d'étape** : 3 divergences trouvées entre le serveur et les deux miroirs frontend (bouton « Avancer » actif à tort en Expédition, deux prérequis d'Édition omis sur la fiche, ancienne règle d'Expédition restée en place). Les `match` PHP sont désormais exhaustifs, `revisionValidee()` compare un cas d'enum, 9 tests verrouillent la cohérence. Le point faible restant est documenté : la règle vit en 3 endroits, dont un en JavaScript sans filet. Précédemment — **correctif : l'étape Formalités était un cul-de-sac.** La suppression du statut `Cloture` par formalité avait laissé un `!== 'cloture'` dans `DossierStepService` : aucune formalité ne pouvant plus porter ce statut, le passage à l'Expédition était définitivement bloqué, silencieusement. L'état terminal est désormais défini par un `match` exhaustif dans `StatutFormalite::estTerminee()` (décision #35) — un nouveau statut ne peut plus passer inaperçu — et le message d'erreur distingue un rejet à corriger d'une attente de retour. 7 tests. Et **brouillons de création de dossier** : l'assistant peut être enregistré en cours de saisie (table dédiée `dossier_brouillons`, et non un `Dossier` en étape brouillon qui consommerait une référence notariale — décision #34). Les pièces déjà téléversées sont conservées sur le disque privé et rattachées aux parties à la finalisation ; contrepartie outillée par `ayelema:brouillons-purger` en dry-run. Enregistrement explicite, bandeau de reprise, cloisonnement par auteur. 10 tests. Et **la fiche Client devient la source de vérité de l'identité** : les sections de rôle (associé unique, gérant, vendeur…) ne resaisissent plus 18 champs, elles **désignent** une fiche ; `donnees` devient une projection dérivée, recalculée côté serveur par `ClientProjectionService` grâce à un lien auto-descriptif porté par la `Partie` (`donnees_prefixe`/`donnees_bloc`/`donnees_index`) — ce qui évite de dupliquer en PHP le schéma des questionnaires, qui vit en JS. Corriger une fiche réaligne les dossiers non clôturés et régénère leurs actes non signés, avec trace au journal. Un seul champ manquait réellement à la fiche (`representant_qualite`) : l'écart était dans le flux, pas dans le schéma. Décision #33, 10 tests dont un test de dérive PHP↔JS. Et **plafonnement des paiements** : la somme des paiements d'une facture ne peut plus dépasser son total (contrôle serveur sous verrou de ligne, plafond dur dans le modal, trop-perçu antérieur signalé en anomalie sans migration corrective — décision #32, 11 tests). Et **fiabilisation des notifications** : deux causes distinctes traitées. (1) Livraison — le canal `broadcast` était queué alors qu'aucune notification ne l'est (`onConnection('sync')`, décision #31), le scheduler n'était jamais lancé en dev (donc zéro alerte d'échéance), le hook Echo perdait les événements à chaque navigation Inertia, et un `notify()` non protégé pouvait renvoyer un 500 après une action réussie. (2) Destinataires — `NotificationService` remplace l'usage systématique de `ayantsDroit()` par un ciblage par rôle avec repli sur le pool ; 4 événements sans aucune notification sont couverts (assignation, renvoi en correction, certification validée, **passage aux formalités** — le formaliste n'était averti par rien). Ajout de `ayelema:notifications-diagnostic` et de 8 tests de routage. Corrections de fond du devbook lui-même : workflow réel (plus d'`Initialisation`, étape `Signature` unique réintroduite), rôles multiples via `role_user`, décision #28 réécrite (aucune notification n'est `ShouldQueue`), ligne « worker de queue requis » périmée.*
 
 *Mise à jour précédente : 24/07/2026 — Module GED unifié : `documents`/`formalite_pieces`/`Partie.photo_chemin`+`pieces` remplacés par un modèle polymorphe unique (`DocumentFichier`/`DocumentVersion`) avec vrai historique de versions (restauration non destructive), upload photo/pièces de partie ajouté, convention de stockage unifiée, ancien tables supprimées après backfill vérifié. Correction d'une ligne obsolète du backlog (prévisualisation PDF déjà faite côté client). Voir décisions #30 et section « Module GED unifié » (§5).*

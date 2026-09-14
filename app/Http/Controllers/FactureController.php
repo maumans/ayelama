@@ -8,7 +8,7 @@ use App\Models\JournalActivite;
 use App\Models\LigneFacture;
 use App\Models\Paiement;
 use App\Models\Recu;
-use App\Services\FactureGeneratorService;
+use App\Services\FacturePdfService;
 use App\Services\RecuPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -250,20 +250,27 @@ class FactureController extends Controller
         return back()->with('success', "Reçu {$recu->numero} généré.");
     }
 
-    public function telechargerPdf(Facture $facture, FactureGeneratorService $generatorService)
+    /**
+     * La note de frais en **PDF**.
+     *
+     * ⚠️ Cette méthode s'appelait déjà `telechargerPdf` mais renvoyait un **`.docx`** : elle rendait
+     * le gabarit Word dans un fichier temporaire, puis l'expédiait avec `deleteFileAfterSend`.
+     * L'étude attendait un PDF — et recevait par intermittence un `telecharger.htm`, la page HTML
+     * d'erreur enregistrée par l'attribut `download` du lien sous le nom du dernier segment d'URL.
+     *
+     * Le PDF est désormais rendu **en mémoire** (voir FacturePdfService), ce qui supprime au passage
+     * le fichier temporaire d'où venait cette fragilité.
+     */
+    public function telechargerPdf(Facture $facture, FacturePdfService $pdfService)
     {
         $this->authorize('view', $facture->dossier);
 
-        // Rendu à la demande, jamais persisté (voir FactureGeneratorService) — le fichier
-        // est donc supprimé une fois le téléchargement envoyé, pour ne pas accumuler de
-        // nouveaux fichiers orphelins hors GED à chaque clic (voir ayelema:ged-lister-orphelins).
-        $chemin = $generatorService->genererDocument($facture);
-        $cheminAbsolu = Storage::disk('public')->path($chemin);
-
-        // note_numero contient des "/" (ex. "001/MAB/26") — invalide dans un nom de fichier.
-        $nomFichier = 'facture-' . str_replace('/', '-', $facture->note_numero) . '.docx';
-
-        return response()->download($cheminAbsolu, $nomFichier)->deleteFileAfterSend(true);
+        return response($pdfService->rendre($facture), 200, [
+            'Content-Type'        => 'application/pdf',
+            // `attachment` et non `inline` : le bouton dit « Télécharger ». L'aperçu dans le
+            // navigateur passe par la GED, qui a son propre écran.
+            'Content-Disposition' => 'attachment; filename="' . $pdfService->nomFichier($facture) . '"',
+        ]);
     }
 
     /**
