@@ -16,6 +16,7 @@ import { allerAuBlocant, ancreSection, blocantsEtape, compterParSection, motifsP
 import { ChampQuestionnaire, classesChamp } from '@/Components/Questionnaire/ChampQuestionnaire';
 import { BadgeSection, BlocantsPanel, CompteurBlocants } from '@/Components/Dossiers/BlocantsPanel';
 import { notifyValidationError, toast } from '@/lib/toast';
+import { anneePremierExercice } from '@/lib/dates';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import axios from 'axios';
 import { Head, Link, router, usePage } from '@inertiajs/react';
@@ -613,7 +614,11 @@ export default function DossierCreate() {
         setTypeActe(type);
         const key = TYPE_ACTE_CODE_MAP[type.code];
         const q = (key && QUESTIONNAIRES[key]) || [];
-        setFormValues(initRepeatableFields(q));
+        const initVals = initRepeatableFields(q);
+        if (type.code?.startsWith('SOC-') && type.code !== 'SOC-MOD' && type.code !== 'SOC-DIS') {
+            initVals['soc.premier_exercice_annee'] = String(anneePremierExercice());
+        }
+        setFormValues(initVals);
         setClientLinks({});
         setSaisieLibreRoles({});
         // Changer de type d'acte remet à zéro le questionnaire : garder la société

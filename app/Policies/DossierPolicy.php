@@ -188,7 +188,7 @@ class DossierPolicy
     public function modifierQuestionnaire(User $user, Dossier $dossier): bool
     {
         if (!$user->actif) return false;
-        if ($dossier->etape !== EtapeDossier::Initialisation) return false;
+        if (!in_array($dossier->etape, [EtapeDossier::Initialisation, EtapeDossier::Edition])) return false;
         if ($user->hasRole(RoleUtilisateur::Administrateur)) return true;
 
         return $dossier->redacteur_id === $user->id

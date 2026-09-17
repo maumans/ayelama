@@ -648,6 +648,27 @@ function ModalAjouterPiecePartie({ partie, onClose }) {
     const [nom, setNom] = useState('');
     const [fichier, setFichier] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [fichierErreur, setFichierErreur] = useState(null);
+
+    const ALLOWED_EXTS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+    const MAX_SIZE_MB = 20;
+
+    const handleFichierChange = (file) => {
+        setFichierErreur(null);
+        if (!file) { setFichier(null); return; }
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        if (!ALLOWED_EXTS.includes(ext)) {
+            setFichierErreur(`Format non autorisé. Formats acceptés : PDF, JPG, PNG, DOC, DOCX.`);
+            setFichier(null);
+            return;
+        }
+        if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+            setFichierErreur(`Fichier trop volumineux (${(file.size / (1024 * 1024)).toFixed(1)} Mo). Max : ${MAX_SIZE_MB} Mo.`);
+            setFichier(null);
+            return;
+        }
+        setFichier(file);
+    };
 
     useEffect(() => {
         if (partie) { setNom(''); setFichier(null); }
@@ -676,7 +697,8 @@ function ModalAjouterPiecePartie({ partie, onClose }) {
                     </div>
                     <div className="space-y-1.5">
                         <Label>Fichier</Label>
-                        <Input type="file" onChange={e => setFichier(e.target.files?.[0] ?? null)} />
+                        <Input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={e => handleFichierChange(e.target.files?.[0] ?? null)} />
+                        {fichierErreur && <p className="text-xs text-danger-text">{fichierErreur}</p>}
                     </div>
                 </div>
                 <DialogFooter>
@@ -989,7 +1011,7 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                             </a>
                         </Button>
                         {/* `modifierQuestionnaire` et non `update` : le questionnaire n'est
-                            modifiable qu'à l'Édition — le modifier plus tard régénérerait les
+                            modifiable qu'à l'Initialisation et l'Édition — le modifier plus tard régénérerait les
                             actes sur un contenu que la certification n'a pas vu. La raison est
                             affichée plutôt que le bouton simplement absent. */}
                         {can?.modifierQuestionnaire ? (
@@ -999,7 +1021,7 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                             </Button>
                         ) : can?.update && (
                             <span className="text-xs text-slate-400 max-w-[260px] text-right leading-snug">
-                                Questionnaire modifiable uniquement à l'étape Édition — passez par
+                                Questionnaire modifiable uniquement aux étapes Initialisation et Édition — passez par
                                 le renvoi en correction.
                             </span>
                         )}
@@ -1339,6 +1361,22 @@ function UploadSigneButton({ doc }) {
 
     const handleFile = (file) => {
         if (!file) return;
+
+        const ALLOWED_EXTS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+        const MAX_SIZE_MB = 20;
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+
+        if (!ALLOWED_EXTS.includes(ext)) {
+            alert(`Le format du fichier "${file.name}" n'est pas autorisé.\nFormats acceptés : PDF, JPG, PNG, DOC, DOCX.`);
+            if (inputRef.current) inputRef.current.value = '';
+            return;
+        }
+        if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+            alert(`Le fichier "${file.name}" est trop volumineux (${(file.size / (1024 * 1024)).toFixed(1)} Mo). Max : ${MAX_SIZE_MB} Mo.`);
+            if (inputRef.current) inputRef.current.value = '';
+            return;
+        }
+
         setUploading(true);
         router.post(doc.url_televerser_signe, { fichier: file }, {
             forceFormData: true,
@@ -1351,7 +1389,7 @@ function UploadSigneButton({ doc }) {
 
     return (
         <>
-            <input ref={inputRef} type="file" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+            <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
             <Button
                 variant="outline" size="sm" className="h-7 gap-1 text-xs"
                 onClick={() => inputRef.current?.click()}

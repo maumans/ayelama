@@ -186,6 +186,7 @@ class ReglesSocieteTest extends TestCase
     public function test_regle4_une_denomination_deja_utilisee_est_refusee(): void
     {
         $premier = $this->dossier('SOC-SARLU', ['soc.denomination' => "Bureau d'architecture"]);
+        $premier->update(['etape' => EtapeDossier::Expedition]);
         $this->associe($premier);
 
         // Casse et espaces différents : la comparaison doit rester normalisée.
@@ -196,6 +197,20 @@ class ReglesSocieteTest extends TestCase
 
         $this->assertArrayHasKey('soc_denomination', $anomalies);
         $this->assertStringContainsString($premier->reference, $anomalies['soc_denomination'][0]);
+    }
+
+    public function test_regle4_aucune_erreur_si_denomination_meme_nom_pas_encore_creee(): void
+    {
+        $premier = $this->dossier('SOC-SARLU', ['soc.denomination' => "Bureau d'architecture"]);
+        // Le dossier 1 reste à l'étape Initialisation
+        $this->associe($premier);
+
+        $second = $this->dossier('SOC-SARLU', ['soc.denomination' => "Bureau d'architecture"]);
+        $this->associe($second);
+
+        $anomalies = $this->service()->anomalies($second->fresh());
+
+        $this->assertArrayNotHasKey('soc_denomination', $anomalies);
     }
 
     public function test_regle4_une_denomination_libre_passe(): void

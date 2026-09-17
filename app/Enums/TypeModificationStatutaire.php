@@ -26,6 +26,8 @@ use App\Contracts\VarianteTypeActe;
  */
 enum TypeModificationStatutaire: string implements VarianteTypeActe
 {
+    case DenominationSociale = 'denomination_sociale';
+    case FormeJuridique      = 'forme_juridique';
     case GerantStatutaire    = 'gerant_statutaire';
     case GerantNonStatutaire = 'gerant_non_statutaire';
     case SiegeSocial         = 'siege_social';
@@ -63,6 +65,8 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     public function label(): string
     {
         return match($this) {
+            self::DenominationSociale => 'Modification de dénomination',
+            self::FormeJuridique      => 'Modification de forme juridique',
             self::GerantStatutaire    => 'Changement de gérant statutaire',
             self::GerantNonStatutaire => 'Changement de gérant non statutaire',
             self::SiegeSocial         => 'Transfert du siège social',
@@ -80,6 +84,8 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
             // Le seul cas qui ne touche pas les statuts : un gérant non statutaire n'y est
             // pas nommé, seul le RCCM enregistre le changement.
             self::GerantNonStatutaire => false,
+            self::DenominationSociale,
+            self::FormeJuridique,
             self::GerantStatutaire,
             self::SiegeSocial,
             self::CapitalAugmentation,
@@ -94,6 +100,8 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     {
         // Toutes, sans exception, d'après le tableau du document.
         return match($this) {
+            self::DenominationSociale,
+            self::FormeJuridique,
             self::GerantStatutaire,
             self::GerantNonStatutaire,
             self::SiegeSocial,
@@ -142,6 +150,8 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
             // cohérent avec impacteStatuts() : seul le PV est produit.
             self::GerantNonStatutaire => [...$pv, ...$rccm],
 
+            self::DenominationSociale,
+            self::FormeJuridique,
             self::GerantStatutaire,
             self::SiegeSocial,
             // Une diminution de capital modifie les statuts et passe au RCCM, mais ne
@@ -241,6 +251,8 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
             self::GerantStatutaire    => [self::GerantNonStatutaire],
             self::GerantNonStatutaire => [self::GerantStatutaire],
 
+            self::DenominationSociale,
+            self::FormeJuridique,
             self::SiegeSocial,
             self::CapitalCession,
             self::ObjetSocial         => [],
@@ -307,6 +319,8 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     public function blocQuestionnaire(): string
     {
         return match($this) {
+            self::DenominationSociale => 'modif_denomination',
+            self::FormeJuridique      => 'modif_forme',
             self::GerantStatutaire,
             self::GerantNonStatutaire => 'modif_gerant',
             self::SiegeSocial         => 'modif_siege',

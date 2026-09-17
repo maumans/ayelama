@@ -49,3 +49,47 @@ export function isoDateSeule(value) {
     const m = /^(\d{4}-\d{2}-\d{2})(?:[T ]|$)/.exec(String(value).trim());
     return m ? m[1] : '';
 }
+
+/**
+ * Calcule l'année de clôture du 1er exercice social selon la date de création :
+ * - Si créée entre le 01/01 et le 30/06 de l'année N (1er semestre) : clôture au 31 décembre de l'année N (ex. 2026).
+ * - Sinon (créée entre le 01/07 et le 31/12 de l'année N) : clôture au 31 décembre de l'année N+1 (ex. 2027).
+ *
+ * @param {string|Date} [date] Date en JJ/MM/AAAA, AAAA-MM-JJ ou objet Date (défaut : date courante)
+ * @returns {number} Année de clôture du premier exercice
+ */
+export function anneePremierExercice(date) {
+    let mois = null;
+    let annee = null;
+
+    if (!date) {
+        const now = new Date();
+        mois = now.getMonth() + 1;
+        annee = now.getFullYear();
+    } else if (date instanceof Date) {
+        mois = date.getMonth() + 1;
+        annee = date.getFullYear();
+    } else if (typeof date === 'string') {
+        const trimmed = date.trim();
+        const mFr = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+        if (mFr) {
+            mois = parseInt(mFr[2], 10);
+            annee = parseInt(mFr[3], 10);
+        } else {
+            const mIso = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+            if (mIso) {
+                annee = parseInt(mIso[1], 10);
+                mois = parseInt(mIso[2], 10);
+            }
+        }
+    }
+
+    if (!mois || !annee) {
+        const now = new Date();
+        mois = now.getMonth() + 1;
+        annee = now.getFullYear();
+    }
+
+    return mois <= 6 ? annee : annee + 1;
+}
+

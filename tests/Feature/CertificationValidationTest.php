@@ -190,12 +190,12 @@ class CertificationValidationTest extends TestCase
             ])
             ->assertSessionMissing('success');
 
-        // Sans le drapeau, le message reste affiché : la sauvegarde manuelle doit se voir.
+        // La sauvegarde ne génère plus de message de succès pour ne pas gêner l'utilisateur
         $this->actingAs($this->notaire)
             ->put("/dossiers/{$dossier->reference}/revision", [
                 'points' => [(string) $acte->id => ['etat' => 'ok']],
             ])
-            ->assertSessionHas('success', 'Grille de certification sauvegardée.');
+            ->assertSessionMissing('success');
     }
 
     public function test_un_redacteur_ne_peut_pas_valider(): void

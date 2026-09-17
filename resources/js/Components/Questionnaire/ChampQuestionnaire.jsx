@@ -257,15 +257,23 @@ function Controle({
     }
 
     return (
-        <Input
-            id={domId}
-            type={field.type === 'email' ? 'email' : 'text'}
-            placeholder={field.placeholder}
-            value={value || ''}
-            disabled={disabled}
-            onChange={(e) => changer(e.target.value)}
-            className={cn(field.mono && 'font-ref')}
-        />
+        <>
+            <Input
+                id={domId}
+                type={field.type === 'email' ? 'email' : 'text'}
+                placeholder={field.placeholder}
+                value={value || ''}
+                disabled={disabled}
+                onChange={(e) => changer(e.target.value)}
+                className={cn(field.mono && 'font-ref')}
+                list={field.datalist ? `${domId}-list` : undefined}
+            />
+            {field.datalist && (
+                <datalist id={`${domId}-list`}>
+                    {field.datalist.map(opt => <option key={opt} value={opt} />)}
+                </datalist>
+            )}
+        </>
     );
 }
 

@@ -1,3 +1,5 @@
+import { anneePremierExercice } from '@/lib/dates';
+
 // Configurations des questionnaires par type de dossier.
 // Clé = identifiant frontend (utilisé dans Create.jsx et Show.jsx).
 // TYPE_ACTE_CODE_MAP fait le lien avec les codes TypeActe stockés en base.
@@ -38,6 +40,14 @@ export const REGIMES_MATRIMONIAUX = [
 // que celui corrigé sur FORMES_SOCIETE.
 export const SITUATIONS_MATRIMONIALES = ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf/Veuve'];
 
+export const PIECES_TYPES = [
+    'CNI CEDEAO',
+    'Passeport',
+    'Extrait de naissance',
+    'Carte Consulaire',
+    'Permis de conduire'
+];
+
 
 const SOC_BASE = [
     { id: 'soc.denomination', label: 'Dénomination sociale', type: 'text', placeholder: 'Ex : Faya Distribution SARLU', required: true, section: 'Société', publicIntake: true },
@@ -50,7 +60,7 @@ const SOC_BASE = [
     { id: 'soc.siege_quartier', label: 'Quartier du siège social', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
     { id: 'soc.objet_social', label: 'Objet social', type: 'textarea', placeholder: 'Commerce général, import-export…', required: true, publicIntake: true },
     { id: 'soc.duree', label: 'Durée (années)', type: 'number', placeholder: '99', required: false, publicIntake: true },
-    { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: '2026', required: false, publicIntake: true },
+    { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: String(anneePremierExercice()), required: false, publicIntake: true },
     { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
     { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
     { id: 'soc.regime_fiscal_faveur', label: 'Bénéficie d\'un régime fiscal de faveur', type: 'checkbox', required: false, publicIntake: true },
@@ -86,7 +96,7 @@ const PP_ASSOCIE_UNIQUE = [
     { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
     { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
     { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-    { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+    { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
     { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
     { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: true },
     { id: 'pp.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: true },
@@ -107,7 +117,7 @@ const GER_FIELDS = [
     { id: 'ger.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'ger.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'ger.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-    { id: 'ger.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+    { id: 'ger.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
     { id: 'ger.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
     { id: 'ger.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: true },
     { id: 'ger.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: true },
@@ -136,7 +146,7 @@ const ASSOCIE_SCHEMA = [
     { id: 'commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-    { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false },
+    { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false, datalist: PIECES_TYPES },
     { id: 'cni', label: "N° pièce d'identité", type: 'text', placeholder: 'GN00123456', required: false, mono: true, showIf: { field: 'type_personne', equals: 'Personne physique' } },
     { id: 'piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
     { id: 'piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
@@ -156,7 +166,7 @@ const GERANT_SCHEMA = [
     { id: 'commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false },
     { id: 'quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false },
     { id: 'pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-    { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false },
+    { id: 'piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false, datalist: PIECES_TYPES },
     { id: 'piece_numero', label: "N° pièce d'identité", type: 'text', placeholder: 'GN00123456', required: false, mono: true },
     { id: 'piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
     { id: 'piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
@@ -246,7 +256,7 @@ const PP_BAILLEUR = [
     { id: 'pp.prenom_nom', label: 'Nom et prénoms', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
     { id: 'pp.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
     { id: 'pp.adresse', label: 'Adresse du bailleur', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true },
-    { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+    { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
     { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
     { id: 'pp.telephone', label: 'Téléphone bailleur', type: 'tel', placeholder: '622 XX XX XX', required: false },
     { id: 'pp.email', label: 'Email bailleur', type: 'email', placeholder: 'email@exemple.com', required: false },
@@ -258,7 +268,7 @@ const LOC_PRENEUR = [
     { id: 'loc.prenom_nom', label: 'Nom et prénoms / Dénomination', type: 'text', placeholder: 'Mariama SOW / Société XYZ SARL', required: true },
     { id: 'loc.nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false },
     { id: 'loc.adresse', label: 'Adresse du locataire', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true },
-    { id: 'loc.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / RCCM', required: true },
+    { id: 'loc.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / RCCM', required: true, datalist: PIECES_TYPES },
     { id: 'loc.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
     { id: 'loc.telephone', label: 'Téléphone locataire', type: 'tel', placeholder: '622 XX XX XX', required: false },
     { id: 'loc.email', label: 'Email locataire', type: 'email', placeholder: 'email@exemple.com', required: false },
@@ -286,7 +296,7 @@ export const QUESTIONNAIRES = {
         { id: 'ger.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true, showIf: { field: 'ger.est_different' } },
-        { id: 'ger.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false, showIf: { field: 'ger.est_different' } },
+        { id: 'ger.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false, showIf: { field: 'ger.est_different' }, datalist: PIECES_TYPES },
         { id: 'ger.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: false, mono: true, showIf: { field: 'ger.est_different' } },
         { id: 'ger.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false, showIf: { field: 'ger.est_different' } },
         { id: 'ger.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false, showIf: { field: 'ger.est_different' } },
@@ -325,7 +335,7 @@ export const QUESTIONNAIRES = {
         { id: 'soc.siege_quartier', label: 'Quartier du siège social', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
         { id: 'soc.objet_social', label: 'Objet social', type: 'textarea', placeholder: 'Commerce général, import-export…', required: true, publicIntake: true },
         { id: 'soc.duree', label: 'Durée (années)', type: 'number', placeholder: '99', required: false, publicIntake: true },
-        { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: '2026', required: false, publicIntake: true },
+        { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: String(anneePremierExercice()), required: false, publicIntake: true },
         { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
         { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
         {
@@ -465,7 +475,7 @@ export const QUESTIONNAIRES = {
         { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-        { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+        { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
         { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
         { id: 'pp.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
@@ -483,7 +493,7 @@ export const QUESTIONNAIRES = {
         { id: 'acq.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'acq.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'acq.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-        { id: 'acq.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+        { id: 'acq.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
         { id: 'acq.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'acq.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
         { id: 'acq.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
@@ -522,7 +532,7 @@ export const QUESTIONNAIRES = {
         { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-        { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+        { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
         { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
         { id: 'pp.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
@@ -540,7 +550,7 @@ export const QUESTIONNAIRES = {
         { id: 'acq.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
         { id: 'acq.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
         { id: 'acq.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-        { id: 'acq.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+        { id: 'acq.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
         { id: 'acq.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'acq.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
         { id: 'acq.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
@@ -621,7 +631,7 @@ export const QUESTIONNAIRES = {
         { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
         { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
         { id: 'pp.adresse', label: 'Adresse complète', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true },
-        { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true },
+        { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
         { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
         { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
         { id: 'pp.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
@@ -654,7 +664,7 @@ export const QUESTIONNAIRES = {
         { id: 'pp.civilite', label: 'Civilité du débiteur', type: 'select', options: ['M.', 'Mme', 'Mlle'], required: true, section: 'Débiteur', clientRole: 'debiteur' },
         { id: 'pp.prenom_nom', label: 'Nom et prénoms', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
         { id: 'pp.adresse', label: 'Adresse', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true },
-        { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false },
+        { id: 'pp.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: false, datalist: PIECES_TYPES },
         { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: false, mono: true },
         { id: 'pp.telephone', label: 'Téléphone', type: 'tel', placeholder: '622 XX XX XX', required: false },
         { id: 'bq.denomination', label: 'Dénomination de la banque créancière', type: 'text', placeholder: 'Ecobank Guinée SA', required: true, section: 'Banque créancière', clientRole: 'creancier' },
@@ -722,6 +732,8 @@ export const QUESTIONNAIRES = {
             'Diminution de capital',
             'Cession de parts sociales',
             "Modification de l'objet social",
+            'Modification de dénomination',
+            'Modification de forme juridique',
           ],
           note: 'Détermine les actes à produire, les formalités à engager et les droits à percevoir.' },
 
@@ -861,7 +873,18 @@ export const QUESTIONNAIRES = {
           showIf: { field: 'modif.types', includes: "Modification de l'objet social" },
           note: "L'objet actuel est repris dans la section « Société concernée » ci-dessus." },
 
-        // ── 10. Précisions ───────────────────────────────────────────────────
+        // ── 10. Modification de dénomination ─────────────────────────────────
+        { id: 'modif.denomination_nouvelle', label: 'Nouvelle dénomination sociale', type: 'text', placeholder: 'Nouvelle Raison Sociale', required: true, section: 'Modification de dénomination',
+          showIf: { field: 'modif.types', includes: 'Modification de dénomination' } },
+        { id: 'modif.sigle_nouveau', label: 'Nouveau sigle (facultatif)', type: 'text', placeholder: 'NRS', required: false,
+          showIf: { field: 'modif.types', includes: 'Modification de dénomination' } },
+
+        // ── 11. Modification de forme juridique ──────────────────────────────
+        { id: 'modif.forme_nouvelle', label: 'Nouvelle forme juridique', type: 'select',
+          options: FORMES_SOCIETE, required: true, section: 'Modification de forme juridique',
+          showIf: { field: 'modif.types', includes: 'Modification de forme juridique' } },
+
+        // ── 12. Précisions ───────────────────────────────────────────────────
         // Conservé mais rétrogradé : ce champ portait à lui seul toute l'information
         // de la modification, il n'est plus qu'un complément.
         { id: 'objet_modification', label: 'Précisions complémentaires', type: 'textarea', placeholder: 'Éléments de contexte non couverts par les sections ci-dessus', required: false, section: 'Précisions', publicIntake: true },

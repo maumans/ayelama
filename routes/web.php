@@ -146,6 +146,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/repertoire', [RepertoireController::class, 'index'])->name('repertoire.index');
     Route::get('/repertoire/autocomplete', [RepertoireController::class, 'autocomplete'])->name('repertoire.autocomplete');
 
+    // Anniversaires Clients
+    Route::get('/anniversaires', [\App\Http\Controllers\AnniversaireController::class, 'index'])->name('anniversaires.index');
+
     // Brouillons de l'assistant de création de dossier (saisie inachevée, propre à
     // son auteur — pas un Dossier, pour ne pas consommer de référence notariale)
     Route::post('/dossiers/brouillons', [DossierBrouillonController::class, 'store'])->name('dossiers.brouillons.store');

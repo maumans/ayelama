@@ -14,6 +14,33 @@ export function PieceStagedRow({ piece, file, fichierBrouillon, onFileSelected, 
     const inputRef = useRef(null);
     const [previewUrl, setPreviewUrl] = useState(null);
 
+    const ALLOWED_EXTS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+    const MAX_SIZE_MB = 20;
+
+    const handleFileChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) {
+            onFileSelected?.(null);
+            return;
+        }
+
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        
+        if (!ALLOWED_EXTS.includes(ext)) {
+            alert(`Le format du fichier "${file.name}" n'est pas autorisé.\nFormats acceptés : PDF, JPG, PNG, DOC, DOCX.`);
+            if (inputRef.current) inputRef.current.value = '';
+            return;
+        }
+
+        if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+            alert(`Le fichier "${file.name}" est trop volumineux (${(file.size / (1024 * 1024)).toFixed(1)} Mo).\nLa taille maximale autorisée est de ${MAX_SIZE_MB} Mo.`);
+            if (inputRef.current) inputRef.current.value = '';
+            return;
+        }
+
+        onFileSelected?.(file);
+    };
+
     useEffect(() => {
         if (file) {
             const url = URL.createObjectURL(file);
@@ -46,12 +73,13 @@ export function PieceStagedRow({ piece, file, fichierBrouillon, onFileSelected, 
 
                 {!file && fichierBrouillon ? (
                     <div className="flex shrink-0 items-center gap-3">
-                        <input
-                            ref={inputRef}
-                            type="file"
-                            className="hidden"
-                            onChange={(e) => onFileSelected?.(e.target.files?.[0] || null)}
-                        />
+                            <input
+                                ref={inputRef}
+                                type="file"
+                                className="hidden"
+                                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                onChange={handleFileChange}
+                            />
                         <button
                             type="button"
                             onClick={() => inputRef.current?.click()}
@@ -76,12 +104,13 @@ export function PieceStagedRow({ piece, file, fichierBrouillon, onFileSelected, 
                         >
                             <Eye className="h-3 w-3" /> {isPreviewOpen ? 'Masquer' : 'Aperçu'}
                         </button>
-                        <input
-                            ref={inputRef}
-                            type="file"
-                            className="hidden"
-                            onChange={(e) => onFileSelected?.(e.target.files?.[0] || null)}
-                        />
+                            <input
+                                ref={inputRef}
+                                type="file"
+                                className="hidden"
+                                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                onChange={handleFileChange}
+                            />
                         <button
                             type="button"
                             onClick={() => inputRef.current?.click()}
@@ -102,12 +131,13 @@ export function PieceStagedRow({ piece, file, fichierBrouillon, onFileSelected, 
                     </div>
                 ) : (
                     <>
-                        <input
-                            ref={inputRef}
-                            type="file"
-                            className="hidden"
-                            onChange={(e) => onFileSelected?.(e.target.files?.[0] || null)}
-                        />
+                            <input
+                                ref={inputRef}
+                                type="file"
+                                className="hidden"
+                                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                onChange={handleFileChange}
+                            />
                         <button
                             type="button"
                             onClick={() => inputRef.current?.click()}

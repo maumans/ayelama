@@ -179,9 +179,7 @@ class RevisionController extends Controller
 
         $revision->update(['statut' => \App\Enums\StatutRevision::EnCours]);
 
-        return $request->boolean('prelude')
-            ? back()
-            : back()->with('success', 'Grille de certification sauvegardée.');
+        return back();
     }
 
     public function valider(Dossier $dossier)

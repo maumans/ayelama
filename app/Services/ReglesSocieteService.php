@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\CategorieActe;
+use App\Enums\EtapeDossier;
 use App\Enums\FormeSociete;
 use App\Enums\TypeModificationStatutaire;
 use App\Models\Dossier;
@@ -66,54 +67,111 @@ class ReglesSocieteService
     }
 
     /**
+     * Indique si un dossier a dépassé l'étape des formalités (donc est en Expédition ou Clôturé).
+     * C'est le critère pour certifier qu'une société est officiellement créée (immatriculée au RCCM / API).
+     */
+    public function aDepasseFormalites(?Dossier $dossier): bool
+    {
+        if (! $dossier || ! $dossier->etape) {
+            return false;
+        }
+
+        return $dossier->etape->ordre() > EtapeDossier::Formalites->ordre();
+    }
+
+    /**
+     * Recherche un conflit de dénomination avec une société déjà certifiée créée.
+     *
+     * Deux dossiers en cours de constitution peuvent porter la même dénomination tant qu'aucun
+     * n'a dépassé l'étape des formalités. Dès qu'un dossier dépasse les formalités (passage en
+     * Expédition ou Clôture), la société est réputée officiellement créée (enregistrée au RCCM / API).
+     * Toute création ultérieure ou avancement d'un dossier homonyme est alors bloqué avec un message
+     * explicite (non pas un simple « déjà existant »).
+     *
+     * @return array{message: string, dossier: ?Dossier, societe: ?Societe}|null
+     */
+    public function conflitDenomination(string $denomination, ?int $exclureDossierId = null): ?array
+    {
+        $cible = $this->normaliser($denomination);
+        if ($cible === '') {
+            return null;
+        }
+
+        // 1. Dossiers de constitution ayant dépassé l'étape des formalités
+        $questionnaireConflit = Questionnaire::query()
+            ->when($exclureDossierId, fn ($q) => $q->whereNot('dossier_id', $exclureDossierId))
+            ->with('dossier:id,reference,type_acte_id,etape', 'dossier.typeActe:id,code')
+            ->get()
+            ->filter(fn (Questionnaire $q) => $this->normaliser($q->donnees['soc.denomination'] ?? null) === $cible)
+            ->filter(fn (Questionnaire $q) => FormeSociete::depuisCodeTypeActe($q->dossier?->typeActe?->code) !== null)
+            ->first(fn (Questionnaire $q) => $this->aDepasseFormalites($q->dossier));
+
+        if ($questionnaireConflit && $questionnaireConflit->dossier) {
+            $ref = $questionnaireConflit->dossier->reference;
+
+            return [
+                'message' => sprintf(
+                    'Cette dénomination sociale ne peut pas être utilisée : elle est déjà immatriculée par la société du dossier %s dont les formalités de création ont été accomplies.',
+                    $ref
+                ),
+                'dossier' => $questionnaireConflit->dossier,
+                'societe' => null,
+            ];
+        }
+
+        // 2. Société au registre dont le dossier a dépassé les formalités, ou déjà immatriculée (hors dossier / RCCM)
+        $societeConflit = Societe::with('dossier:id,reference,etape')
+            ->get()
+            ->first(function (Societe $s) use ($cible, $exclureDossierId) {
+                if ($this->normaliser($s->denomination) !== $cible) {
+                    return false;
+                }
+                if ($exclureDossierId && $s->dossier_id === $exclureDossierId) {
+                    return false;
+                }
+                if ($s->dossier) {
+                    return $this->aDepasseFormalites($s->dossier);
+                }
+
+                return filled($s->rccm_numero) || ! $s->dossier_id;
+            });
+
+        if ($societeConflit) {
+            $ref = $societeConflit->dossier?->reference;
+            $msg = $ref
+                ? sprintf('Cette dénomination sociale ne peut pas être utilisée : elle est déjà immatriculée par la société du dossier %s dont les formalités de création ont été accomplies.', $ref)
+                : sprintf('Cette dénomination sociale ne peut pas être utilisée : la société « %s » est déjà immatriculée au registre (formalités accomplies).', $societeConflit->denomination);
+
+            return [
+                'message' => $msg,
+                'dossier' => $societeConflit->dossier,
+                'societe' => $societeConflit,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
      * Règle 4 — « pas de répétition de nom de société, la dénomination doit être UNIQUE ».
      *
-     * La comparaison se fait sur les **questionnaires** : la table `societes` est vide, les
-     * dénominations ne vivent aujourd'hui que dans `questionnaires.donnees`. Le filtrage
-     * s'effectue en PHP plutôt qu'en SQL parce que la clé `soc.denomination` contient un
-     * point, que la notation `donnees->soc.denomination` de Laravel interpréterait comme un
-     * chemin imbriqué. Volume attendu de quelques centaines de dossiers — à revoir en
-     * requête JSON native si l'étude en compte des dizaines de milliers.
-     *
-     * ⚠️ **Seuls les dossiers de constitution sont comparés** (correctif du 2026-08-11). Un
-     * dossier de modification ou de dissolution porte la dénomination de la société qu'il
-     * traite : c'est la **même** société, pas un homonyme. La version précédente comparait
-     * tous les questionnaires, si bien qu'ouvrir une modification sur une société faisait
-     * apparaître son propre dossier de constitution comme un doublon — constaté sur la base
-     * réelle : `SOC-2026-0010` (constitution de MICH SARL) était signalé en conflit avec
-     * `SOC-2026-0012`, la modification de cette même société.
+     * Deux dossiers en cours de constitution peuvent porter la même dénomination tant qu'aucun
+     * n'a dépassé l'étape des formalités. Un conflit n'apparaît que lorsqu'un dossier a dépassé
+     * les formalités (immatriculation effective).
      */
     private function verifierDenominationUnique(Dossier $dossier): array
     {
-        $denomination = $this->normaliser($this->donnee($dossier, 'soc.denomination'));
-        if ($denomination === '') {
+        $denomination = $this->donnee($dossier, 'soc.denomination');
+        if (blank($denomination)) {
             return [];
         }
 
-        $conflits = Questionnaire::query()
-            ->whereNot('dossier_id', $dossier->id)
-            // `type_acte_id` doit figurer dans la sélection : sans la clé étrangère, Eloquent
-            // ne peut pas résoudre `dossier.typeActe` et la relation revient à null — le
-            // filtre ci-dessous écarterait alors *tous* les dossiers, y compris les vrais
-            // homonymes, et désarmerait la règle 4 en silence.
-            ->with('dossier:id,reference,type_acte_id', 'dossier.typeActe:id,code')
-            ->get()
-            ->filter(fn (Questionnaire $q) => $this->normaliser($q->donnees['soc.denomination'] ?? null) === $denomination)
-            // `depuisCodeTypeActe()` ne retourne une forme que pour une constitution : c'est
-            // exactement le critère « ce dossier crée-t-il une société ? ».
-            ->filter(fn (Questionnaire $q) => FormeSociete::depuisCodeTypeActe($q->dossier?->typeActe?->code) !== null)
-            ->map(fn (Questionnaire $q) => $q->dossier?->reference)
-            ->filter()
-            ->values();
-
-        if ($conflits->isEmpty()) {
-            return [];
+        $conflit = $this->conflitDenomination((string) $denomination, $dossier->id);
+        if ($conflit !== null) {
+            return ['soc_denomination' => [$conflit['message']]];
         }
 
-        return ['soc_denomination' => [sprintf(
-            'Cette dénomination est déjà utilisée par le dossier %s. La dénomination sociale doit être unique.',
-            $conflits->join(', '),
-        )]];
+        return [];
     }
 
     /**

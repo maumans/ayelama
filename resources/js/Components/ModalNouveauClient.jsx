@@ -158,8 +158,8 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
                 const isHtml = typeof res.data === 'string' && res.data.trim().startsWith('<');
                 console.error('ModalNouveauClient: réponse client inattendue', { status: res.status, data: res.data });
                 toast.error(isHtml
-                    ? 'Votre session a expiré. Reconnectez-vous puis réessayez de créer le client.'
-                    : "Le client n'a pas pu être créé (réponse inattendue du serveur).");
+                    ? (estEdition ? 'Votre session a expiré. Reconnectez-vous puis réessayez de modifier le client.' : 'Votre session a expiré. Reconnectez-vous puis réessayez de créer le client.')
+                    : (estEdition ? "La fiche client n'a pas pu être modifiée (réponse inattendue du serveur)." : "Le client n'a pas pu être créé (réponse inattendue du serveur)."));
                 return;
             }
             // Les dossiers réalignés sont annoncés : l'utilisateur corrige une fiche
@@ -177,7 +177,7 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
             if (err.response?.status === 422) {
                 setErrors(err.response.data.errors ?? {});
             } else {
-                toast.error(err.response?.data?.message || "Impossible de créer le client — réessayez.");
+                toast.error(err.response?.data?.message || (estEdition ? "Impossible de modifier le client — réessayez." : "Impossible de créer le client — réessayez."));
             }
         } finally {
             setSubmitting(false);
@@ -301,7 +301,14 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1.5">
                                         <Label>Type de pièce</Label>
-                                        <Input value={form.piece_type} onChange={f('piece_type')} placeholder="CNI CEDEAO / Passeport" />
+                                        <Input list="client-pieces-types" value={form.piece_type} onChange={f('piece_type')} placeholder="CNI CEDEAO / Passeport" />
+                                        <datalist id="client-pieces-types">
+                                            <option value="CNI CEDEAO" />
+                                            <option value="Passeport" />
+                                            <option value="Extrait de naissance" />
+                                            <option value="Carte Consulaire" />
+                                            <option value="Permis de conduire" />
+                                        </datalist>
                                     </div>
                                     <div className="space-y-1.5">
                                         <Label>Numéro de pièce</Label>
@@ -452,7 +459,11 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
 
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-                        <Button type="submit" disabled={submitting || incoherencesDates().length > 0}>{submitting ? 'Création…' : 'Créer le client'}</Button>
+                        <Button type="submit" disabled={submitting || incoherencesDates().length > 0}>
+                            {submitting
+                                ? (estEdition ? 'Modification…' : 'Création…')
+                                : (estEdition ? 'Modifier le client' : 'Créer le client')}
+                        </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>

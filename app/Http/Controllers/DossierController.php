@@ -281,6 +281,37 @@ class DossierController extends Controller
         }
     }
 
+    /**
+     * Refuse une dénomination sociale si une société portant ce nom a déjà dépassé
+     * l'étape de formalités (officiellement créée / immatriculée au RCCM ou à l'API).
+     *
+     * Deux dossiers de création peuvent porter la même dénomination tant qu'aucun
+     * n'a dépassé les formalités. Dès qu'un dossier dépasse les formalités, toute création ultérieure
+     * d'un dossier homonyme est bloquée avec une erreur explicite (non pas un simple « déjà existant »).
+     *
+     * @param  array<string, mixed> $donnees
+     */
+    private function refuserDenominationDejaCreee(array $donnees, ?TypeActe $typeActe, ?int $exclureDossierId = null): void
+    {
+        if (! $typeActe || FormeSociete::depuisCodeTypeActe($typeActe->code) === null) {
+            return;
+        }
+
+        $denomination = $donnees['soc.denomination'] ?? null;
+        if (blank($denomination)) {
+            return;
+        }
+
+        $conflit = app(\App\Services\ReglesSocieteService::class)->conflitDenomination((string) $denomination, $exclureDossierId);
+        if ($conflit !== null) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'donnees.soc.denomination' => [$conflit['message']],
+                'soc.denomination'         => [$conflit['message']],
+                'soc_denomination'         => [$conflit['message']],
+            ]);
+        }
+    }
+
     public function store(
         StoreDossierRequest $request,
         \App\Services\ActesGeneratorService $generatorService,
@@ -288,10 +319,12 @@ class DossierController extends Controller
         \App\Services\FormaliteGenerationService $formaliteGenerationService
     ) {
         $donnees = $request->validated();
+        $typeActe = TypeActe::find($donnees['type_acte_id']);
 
         // Même contrôle qu'à la mise à jour du questionnaire : un dossier ne doit pas **naître**
         // incohérent. Le brouillon, lui, reste libre — c'est une saisie en cours (décision #34).
         $this->refuserDatesIncoherentes($donnees['donnees'] ?? []);
+        $this->refuserDenominationDejaCreee($donnees['donnees'] ?? [], $typeActe);
 
         $dossier = $this->creerDossier(
             $donnees,
@@ -332,6 +365,9 @@ class DossierController extends Controller
         \App\Services\FormaliteGenerationService $formaliteGenerationService
     ): Dossier {
         $typeActe = TypeActe::findOrFail($data['type_acte_id']);
+
+        $this->refuserDatesIncoherentes($data['donnees'] ?? []);
+        $this->refuserDenominationDejaCreee($data['donnees'] ?? [], $typeActe);
 
         // Brouillon dont ce dossier est l'aboutissement : il détient les pièces déjà
         // téléversées pendant la saisie. Chargé hors transaction, supprimé après
@@ -528,7 +564,10 @@ class DossierController extends Controller
             fn (Societe $s) => Societe::normaliserDenomination($s->denomination) === $cible
         );
 
-        if ($existante) {
+        // Une société existante n'est réutilisée que si elle n'appartient pas à un autre dossier
+        // de constitution distinct en cours : deux dossiers en cours de création peuvent porter
+        // la même dénomination tant qu'aucun n'a dépassé les formalités, et chacun conserve sa propre fiche.
+        if ($existante && (! $existante->dossier_id || $existante->dossier_id === $dossier->id)) {
             $dossier->update(['societe_id' => $existante->id]);
 
             return;
@@ -712,6 +751,7 @@ class DossierController extends Controller
         // Voir CoherenceDonneesService pour ce qui est vérifié — et pourquoi les champs obligatoires
         // ne le sont pas.
         $this->refuserDatesIncoherentes($validated['donnees']);
+        $this->refuserDenominationDejaCreee($validated['donnees'], $dossier->typeActe, $dossier->id);
 
         // ⚠️ `$projection` **doit** être capturé : il est appelé plus bas dans cette closure
         // (`reprojeter`). Son absence faisait échouer tout enregistrement du questionnaire par une

@@ -105,6 +105,7 @@ export function mapSocieteToQuestionnaire(societe) {
     // société » juste au-dessus, mais le champ restait à ressaisir à la main.
     if (societe.gerant_actuel) {
         valeurs['soc.gerant_actuel'] = societe.gerant_actuel;
+        valeurs['gerant_sortant.prenom_nom'] = societe.gerant_actuel;
     }
 
     return valeurs;

@@ -68,6 +68,19 @@ export function PiecesConstitutivesCard({ societe, dossierReference, modifiable 
     const televerser = async (categorie, fichier) => {
         if (!fichier) return;
 
+        const ALLOWED_EXTS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+        const MAX_SIZE_MB = 20;
+        const ext = '.' + fichier.name.split('.').pop().toLowerCase();
+
+        if (!ALLOWED_EXTS.includes(ext)) {
+            toast.error(`Format non autorisé : "${fichier.name}". Formats acceptés : PDF, JPG, PNG, DOC, DOCX.`);
+            return;
+        }
+        if (fichier.size > MAX_SIZE_MB * 1024 * 1024) {
+            toast.error(`Fichier trop volumineux (${(fichier.size / (1024 * 1024)).toFixed(1)} Mo). Max : ${MAX_SIZE_MB} Mo.`);
+            return;
+        }
+
         const form = new FormData();
         form.append('fichier', fichier);
         if (dossierReference) form.append('dossier_reference', dossierReference);

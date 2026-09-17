@@ -22,6 +22,23 @@ export function PieceGedRow({ piece, peutGerer, isPreviewOpen, onTogglePreview, 
 
     const televerser = (file) => {
         if (!file) return;
+
+        const ALLOWED_EXTS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+        const MAX_SIZE_MB = 20;
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+
+        if (!ALLOWED_EXTS.includes(ext)) {
+            alert(`Le format du fichier "${file.name}" n'est pas autorisé.\nFormats acceptés : PDF, JPG, PNG, DOC, DOCX.`);
+            if (inputRef.current) inputRef.current.value = '';
+            return;
+        }
+
+        if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+            alert(`Le fichier "${file.name}" est trop volumineux (${(file.size / (1024 * 1024)).toFixed(1)} Mo).\nLa taille maximale autorisée est de ${MAX_SIZE_MB} Mo.`);
+            if (inputRef.current) inputRef.current.value = '';
+            return;
+        }
+
         router.post(finalUploadUrl, { fichier: file }, {
             forceFormData: true,
             preserveScroll: true,
@@ -84,9 +101,10 @@ export function PieceGedRow({ piece, peutGerer, isPreviewOpen, onTogglePreview, 
                         </a>
                         {peutGerer && (
                             <>
-                                <input
+                            <input
                                     ref={inputRef}
                                     type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                                     className="hidden"
                                     onChange={(e) => televerser(e.target.files?.[0])}
                                 />
@@ -105,6 +123,7 @@ export function PieceGedRow({ piece, peutGerer, isPreviewOpen, onTogglePreview, 
                         <input
                             ref={inputRef}
                             type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                             className="hidden"
                             onChange={(e) => televerser(e.target.files?.[0])}
                         />

@@ -55,7 +55,22 @@ class ActesGeneratorService
             ->whereHas('revision', fn ($q) => $q->where('dossier_id', $dossier->id))
             ->update(['perime' => true]);
 
-        $chemin = $this->genererDepuisGabarit($dossier, $gabarit, Str::slug($document->nom));
+        $referenceActe = $document->reference_acte;
+        if (! $referenceActe) {
+            $numeroActe = DocumentFichier::where('documentable_type', Dossier::class)
+                ->where('documentable_id', $dossier->id)
+                ->max('numero_acte') + 1;
+                
+            $notaireInitials = $dossier->notaire?->initiales ?? 'XX';
+            $redacteurInitials = $dossier->redacteur?->initiales ?? 'XX';
+            $referenceActe = sprintf('%s/%s/%s/%02d', $notaireInitials, $redacteurInitials, $dossier->reference, $numeroActe);
+            
+            $document->numero_acte = $numeroActe;
+            $document->reference_acte = $referenceActe;
+            $document->save();
+        }
+
+        $chemin = $this->genererDepuisGabarit($dossier, $gabarit, Str::slug($document->nom), $referenceActe);
 
         $document->nouvelleVersion($chemin, 'documents/' . $dossier->reference, ['source' => 'genere']);
         $document->update(['statut' => 'a_editer']);
@@ -104,12 +119,22 @@ class ActesGeneratorService
                 continue;
             }
 
-            $chemin = $this->genererDepuisGabarit($dossier, $acte['gabarit'], Str::slug($acte['nom']));
+            $numeroActe = DocumentFichier::where('documentable_type', Dossier::class)
+                ->where('documentable_id', $dossier->id)
+                ->max('numero_acte') + 1;
+                
+            $notaireInitials = $dossier->notaire?->initiales ?? 'XX';
+            $redacteurInitials = $dossier->redacteur?->initiales ?? 'XX';
+            $referenceActe = sprintf('%s/%s/%s/%02d', $notaireInitials, $redacteurInitials, $dossier->reference, $numeroActe);
+
+            $chemin = $this->genererDepuisGabarit($dossier, $acte['gabarit'], Str::slug($acte['nom']), $referenceActe);
 
             $document = $dossier->documents()->create([
                 'nom'       => $acte['nom'],
                 'categorie' => $acte['type_document'],
                 'statut'    => 'a_editer',
+                'numero_acte' => $numeroActe,
+                'reference_acte' => $referenceActe,
             ]);
             $document->nouvelleVersion($chemin, 'documents/' . $dossier->reference, ['source' => 'genere']);
             $crees++;
@@ -492,7 +517,7 @@ class ActesGeneratorService
      *
      * @param array{absolu?: string, relatif?: string, herite: bool} $gabarit
      */
-    private function genererDepuisGabarit(Dossier $dossier, array $gabarit, string $outputName): string
+    private function genererDepuisGabarit(Dossier $dossier, array $gabarit, string $outputName, ?string $referenceActe = null): string
     {
         // Convention unifiée avec les documents téléversés manuellement (voir DocumentFichier /
         // plan GED) — auparavant ce service écrivait dans 'dossiers/{id}/', un dossier distinct
@@ -525,7 +550,7 @@ class ActesGeneratorService
         }
 
         try {
-            $nbBalises = $this->genererDepuisModele($dossier, $templateAbsPath, $outputAbsolutePath, $outputName);
+            $nbBalises = $this->genererDepuisModele($dossier, $templateAbsPath, $outputAbsolutePath, $outputName, $referenceActe);
         } catch (\Throwable $e) {
             // Un gabarit hérité vient de l'extérieur : fichier corrompu, .docx protégé, structure
             // OOXML inattendue. Il ne doit jamais interrompre l'entrée en Édition, qui produit
@@ -576,12 +601,12 @@ class ActesGeneratorService
     // ── Génération réelle ────────────────────────────────────────────────────
 
     /** @return int Nombre de balises restées sans valeur — 0 pour un gabarit sans aucune balise. */
-    private function genererDepuisModele(Dossier $dossier, string $templateAbsPath, string $outputAbsPath, string $outputName): int
+    private function genererDepuisModele(Dossier $dossier, string $templateAbsPath, string $outputAbsPath, string $outputName, ?string $referenceActe = null): int
     {
         $tp = new TemplateProcessor($templateAbsPath);
 
         $this->remplirConstantesOffice($tp);
-        $this->remplirInfosDossier($tp, $dossier);
+        $this->remplirInfosDossier($tp, $dossier, $referenceActe);
         $this->remplirQuestionnaire($tp, $dossier);
         $nbBalises = $this->consignerChampsManquants($tp, $dossier, $outputName);
         $this->effacerMacrosResiduelles($tp);
@@ -636,11 +661,13 @@ class ActesGeneratorService
         $tp->setValue('office.email',      'ayelama.bah@notaire-guinee.com');
     }
 
-    private function remplirInfosDossier(TemplateProcessor $tp, Dossier $dossier): void
+    private function remplirInfosDossier(TemplateProcessor $tp, Dossier $dossier, ?string $referenceActe = null): void
     {
         $now = now();
 
         $tp->setValue('dossier.reference',     $dossier->reference);
+        $tp->setValue('acte.numero',           $referenceActe ?? '');
+        $tp->setValue('acte.reference',        $referenceActe ?? '');
         $tp->setValue('dossier.objet',         $dossier->objet ?? '');
         $tp->setValue('date_acte_jma',              $now->format('d/m/Y'));
         $tp->setValue('annee_lettres',               NombreEnLettres::convertir((float) $now->year, ''));
