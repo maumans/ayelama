@@ -81,13 +81,15 @@ class ModeleCourrierController extends Controller
         if ($request->hasFile('fichier')) {
             $file     = $request->file('fichier');
             $filename = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) . '.docx';
-            $file->storeAs('modeles/courrier', $filename, 'local');
-            $data['chemin_fichier'] = 'modeles/courrier/' . $filename;
-            unset($data['fichier']);
+            $nouveauChemin = 'modeles/courrier/' . $filename;
 
-            if ($modeleCourrier->chemin_fichier && \Illuminate\Support\Facades\Storage::disk('local')->exists($modeleCourrier->chemin_fichier)) {
+            if ($modeleCourrier->chemin_fichier && $modeleCourrier->chemin_fichier !== $nouveauChemin && \Illuminate\Support\Facades\Storage::disk('local')->exists($modeleCourrier->chemin_fichier)) {
                 \Illuminate\Support\Facades\Storage::disk('local')->delete($modeleCourrier->chemin_fichier);
             }
+
+            $file->storeAs('modeles/courrier', $filename, 'local');
+            $data['chemin_fichier'] = $nouveauChemin;
+            unset($data['fichier']);
         }
 
         $modeleCourrier->update(array_merge($data, ['updated_by' => Auth::id()]));

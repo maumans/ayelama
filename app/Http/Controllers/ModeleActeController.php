@@ -270,16 +270,18 @@ class ModeleActeController extends Controller
         if ($request->hasFile('fichier')) {
             $file     = $request->file('fichier');
             $filename = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) . '.docx';
-            $file->storeAs('modeles', $filename, 'local');
-            $data['chemin_fichier'] = $filename;
-            unset($data['fichier']);
 
             $ancienChemin = $modele->chemin_fichier
                 ? (str_starts_with($modele->chemin_fichier, 'modeles/') ? $modele->chemin_fichier : 'modeles/' . $modele->chemin_fichier)
                 : null;
-            if ($ancienChemin && Storage::disk('local')->exists($ancienChemin)) {
+            
+            if ($ancienChemin && $ancienChemin !== 'modeles/' . $filename && Storage::disk('local')->exists($ancienChemin)) {
                 Storage::disk('local')->delete($ancienChemin);
             }
+
+            $file->storeAs('modeles', $filename, 'local');
+            $data['chemin_fichier'] = $filename;
+            unset($data['fichier']);
         }
 
         $rattachements = $this->rattachementsDemandes($data, $modele);
