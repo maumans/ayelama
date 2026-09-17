@@ -1,1 +1,0 @@
-import{n as e}from"./app-f4evLl-D.js";import{t}from"./input-wTlmXQEi.js";import{i as n,n as r}from"./dates-Db7N6gu-.js";var i=e();function a({value:e,onValueChange:a,...o}){return(0,i.jsx)(t,{type:`date`,value:r(e),onChange:e=>a(n(e.target.value)),...o})}export{a as t};
