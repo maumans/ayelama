@@ -62,6 +62,6 @@ class FacturePdfService
      */
     public function nomFichier(Facture $facture): string
     {
-        return 'note-de-frais-' . str_replace(['/', '\\'], '-', (string) $facture->note_numero) . '.pdf';
+        return 'facture-' . str_replace(['/', '\\'], '-', (string) $facture->note_numero) . '.pdf';
     }
 }
