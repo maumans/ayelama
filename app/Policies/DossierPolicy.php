@@ -23,7 +23,7 @@ class DossierPolicy
      *
      * Réouverture : `DossierStepService::reculer()` existe mais n'est atteignable que
      * depuis le renvoi en correction d'une certification (Révision → Édition). Aucune
-     * route ne permet de sortir un dossier de Clôturé — c'est volontaire.
+     * route ne permet de sortir un dossier d'Archivé — c'est volontaire.
      */
     private function estFige(Dossier $dossier): bool
     {

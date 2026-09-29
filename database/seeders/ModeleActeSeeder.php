@@ -298,17 +298,49 @@ class ModeleActeSeeder extends Seeder
                 'src'  => null,
                 'dest' => 'modeles/societe/rccm-gie.docx',
             ],
+            // Dissolution : deux phases, donc deux jeux de gabarits, distingués par la
+            // `variante` du rattachement. Sans elle, le gabarit de dissolution serait proposé
+            // sur un dossier de clôture — un rattachement `variante = null` couvre *toutes*
+            // les variantes.
+            //
+            // Les quatre sont des marque-places (`src => null`, donc `est_actif = false`) :
+            // l'étude n'a pas encore fourni les `.docx`. L'application reste cohérente sans
+            // eux — elle affiche « attendu, gabarit manquant » plutôt que de se taire, ce que
+            // corrige `ActesGeneratorService::actesPrevus()` pour les types déclinés.
             [
-                'code' => 'SOC-DIS', 'type_document' => 'acte_principal', 'version' => '1.0',
+                'code' => 'SOC-DIS', 'variante' => 'dissolution',
+                'type_document' => 'acte_principal', 'version' => '1.0',
                 'nom'  => 'Acte de dissolution et liquidation',
-                'src'  => null,
+                // Balisé le 2026-09-29 depuis « PV DECISION ASSOCIE.docx » fourni par l'étude
+                // (dossier L'OR D'AFRIQUE, décembre 2023). Mise en forme d'origine conservée :
+                // seuls les pointillés et les valeurs propres à ce dossier ont été remplacés.
+                'src'  => 'Liquidation/PV_DISSOLUTION_balises.docx',
                 'dest' => 'modeles/societe/dissolution.docx',
             ],
             [
-                'code' => 'SOC-DIS', 'type_document' => 'insertion', 'version' => '1.0',
+                'code' => 'SOC-DIS', 'variante' => 'dissolution',
+                'type_document' => 'insertion', 'version' => '1.0',
                 'nom'  => 'Insertion au JORG dissolution',
-                'src'  => null,
+                // ⚠️ **Reconstruit**, pas converti : la source « MY_INSERTION.doc » est un
+                // binaire OLE2 que PhpWord ne sait pas ouvrir, et aucun convertisseur n'était
+                // disponible. Le texte a été extrait puis remonté en .docx. La mise en page est
+                // donc approchée — l'étude doit relire le rendu avant le premier acte réel.
+                'src'  => 'Liquidation/INSERTION_DISSOLUTION_balises.docx',
                 'dest' => 'modeles/societe/insertion-dissolution.docx',
+            ],
+            [
+                'code' => 'SOC-DIS', 'variante' => 'cloture_liquidation',
+                'type_document' => 'acte_principal', 'version' => '1.0',
+                'nom'  => 'PV de clôture de liquidation',
+                'src'  => null,
+                'dest' => 'modeles/societe/cloture-liquidation.docx',
+            ],
+            [
+                'code' => 'SOC-DIS', 'variante' => 'cloture_liquidation',
+                'type_document' => 'declaration_rccm', 'version' => '1.0',
+                'nom'  => 'Déclaration de radiation RCCM',
+                'src'  => null,
+                'dest' => 'modeles/societe/radiation-rccm.docx',
             ],
 
             // ════════════════════════════════════════════════════════════════
@@ -572,7 +604,28 @@ class ModeleActeSeeder extends Seeder
 
             // L'applicabilité ne vient plus d'une colonne : elle se déclare. `firstOrCreate` pour
             // rester relançable sans dupliquer le rattachement.
-            $modele->rattachements()->firstOrCreate(['type_acte_id' => $typeActeId, 'variante' => null]);
+            //
+            // ⚠️ `$m['variante'] ?? null` **explicitement** : sans la coalescence, les 66 entrées
+            // qui ne déclarent pas de variante lèveraient une erreur d'index — et avec une
+            // valeur par défaut mal choisie, elles changeraient de sens en silence.
+            $variante = $m['variante'] ?? null;
+
+            // ⚠️ Un rattachement `variante = null` **préexistant** couvre toutes les variantes.
+            // En laisser un à côté d'un rattachement ciblé ferait servir le gabarit de la
+            // phase 1 à la phase 2 : on le met donc à jour, on n'en ajoute pas un second.
+            // Le cas n'est pas théorique — les deux gabarits de dissolution ont été seedés
+            // sans variante avant le 2026-09-28.
+            $ouvert = $variante !== null
+                ? $modele->rattachements()->where('type_acte_id', $typeActeId)->whereNull('variante')->first()
+                : null;
+
+            if ($ouvert) {
+                $ouvert->update(['variante' => $variante]);
+
+                continue;
+            }
+
+            $modele->rattachements()->firstOrCreate(['type_acte_id' => $typeActeId, 'variante' => $variante]);
         }
     }
 }

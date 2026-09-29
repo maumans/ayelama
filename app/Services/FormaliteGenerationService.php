@@ -66,6 +66,14 @@ class FormaliteGenerationService
             }
 
             if ($formalite->wasRecentlyCreated) {
+                // ⚠️ **À la création seulement**, comme les pièces requises juste en dessous.
+                // Dans le tableau d'attributs d'`updateOrCreate`, une régénération réécrirait
+                // l'instantané — exactement ce que la copie est censée empêcher : un barème
+                // modifié en cours de route changerait ce qu'un dossier déjà ouvert réclame au
+                // retour. `genererFormalites()` n'est appelé que depuis `store()` aujourd'hui,
+                // mais s'appuyer là-dessus, c'est laisser un piège armé.
+                $formalite->update(['donnees_au_retour' => $bareme->donnees_au_retour]);
+
                 foreach ($bareme->pieces_requises ?? [] as $label) {
                     $formalite->pieces()->create([
                         'nom'        => $label,

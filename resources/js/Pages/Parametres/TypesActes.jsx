@@ -27,6 +27,72 @@ const CAT_BAR = {
     autre:      'bg-slate-400',
 };
 
+/**
+ * Pièce d'accord exigée à l'Initialisation, par type d'acte.
+ *
+ * L'exigence était uniforme jusqu'au 2026-09-28 : les 24 types devaient tous téléverser une
+ * pièce signée, ce qui immobilisait les dossiers de dissolution. Le code déclare une
+ * **référence** par type ; cette cellule permet à l'étude de la surcharger sans déploiement.
+ *
+ * ⚠️ Durcir l'exigence **bloque rétroactivement** les dossiers en cours qui n'ont pas la pièce :
+ * `verifierEdition()` rejoue les contrôles de constitution. Le nombre est affiché avant
+ * l'enregistrement — mesurer avant de décider vaut aussi à l'interface.
+ */
+const EXIGENCES_ACCORD = [
+    { valeur: 'bloquante', label: 'Obligatoire' },
+    { valeur: 'attendue',  label: 'Recommandée' },
+    { valeur: 'sans_objet', label: 'Sans objet' },
+];
+
+function CelluleAccord({ typeActe }) {
+    const accord = typeActe.accord;
+
+    if (!accord) return <span className="text-slate-300">—</span>;
+
+    const changer = (valeur) => router.patch(
+        `/parametres/types-actes/${typeActe.id}`,
+        { exigence_accord: valeur === 'reference' ? null : valeur },
+        { preserveState: true, preserveScroll: true },
+    );
+
+    const durcit = accord.effective !== 'bloquante';
+
+    return (
+        <div className="flex flex-col items-center gap-1">
+            <select
+                value={accord.exigence ?? 'reference'}
+                onChange={(e) => changer(e.target.value)}
+                className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs"
+                title={accord.nom}
+            >
+                <option value="reference">
+                    Référence ({EXIGENCES_ACCORD.find(e => e.valeur === accord.reference)?.label})
+                </option>
+                {EXIGENCES_ACCORD.map(e => (
+                    <option key={e.valeur} value={e.valeur}>{e.label}</option>
+                ))}
+            </select>
+
+            {accord.diverge && (
+                <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                    écart à la référence
+                </span>
+            )}
+            {accord.aVerifier && (
+                <span className="text-[10px] italic text-amber-700">à confirmer</span>
+            )}
+            {durcit && accord.impactes > 0 && (
+                <span
+                    className="text-[10px] text-slate-500"
+                    title="Ces dossiers, déjà en cours, seraient bloqués si vous rendiez la pièce obligatoire."
+                >
+                    {accord.impactes} dossier{accord.impactes > 1 ? 's' : ''} sans la pièce
+                </span>
+            )}
+        </div>
+    );
+}
+
 function InlineDelaiEdit({ typeActe }) {
     const [editing, setEditing] = useState(false);
     const [val, setVal]         = useState(String(typeActe.delai_jours ?? ''));
@@ -166,6 +232,7 @@ export default function ParametresTypesActes() {
                                                 <th>Code</th>
                                                 <th>Libellé</th>
                                                 <th className="text-center">Délai (j)</th>
+                                                <th className="text-center">Accord initial</th>
                                                 <th className="hidden md:table-cell">Description</th>
                                                 <th className="text-center">Actif</th>
                                             </tr>
@@ -181,6 +248,9 @@ export default function ParametresTypesActes() {
                                                     <td className="text-center">
                                                         <InlineDelaiEdit typeActe={t} />
                                                     </td>
+                                                    <td className="text-center">
+                                                        <CelluleAccord typeActe={t} />
+                                                    </td>
                                                     <td className="hidden md:table-cell text-slate-500 text-xs max-w-xs truncate">
                                                         {t.description || <span className="italic text-slate-300">—</span>}
                                                     </td>
@@ -191,7 +261,7 @@ export default function ParametresTypesActes() {
                                                 {/* La couverture du processus, sous la ligne du type
                                                     d'acte : gabarits attendus, présents, manquants. */}
                                                 <tr>
-                                                    <td colSpan={5} className="p-0">
+                                                    <td colSpan={6} className="p-0">
                                                         <PanneauProcessus typeActe={t} />
                                                     </td>
                                                 </tr>

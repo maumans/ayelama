@@ -177,12 +177,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/lieux/referentiel', [LieuController::class, 'referentiel'])->name('lieux.referentiel');
     Route::post('/lieux', [LieuController::class, 'store'])->name('lieux.store');
 
+    // Registre des sociétés — la page où l'étude suit ses liquidations.
+    Route::get('/societes', [SocieteController::class, 'index'])->name('societes.index');
     Route::get('/societes/autocomplete', [SocieteController::class, 'autocomplete'])->name('societes.autocomplete');
     // Déclarée AVANT `/societes/{societe}` : sans quoi « pieces » serait pris pour un identifiant.
     Route::delete('/societes/pieces/{piece}', [SocietePieceController::class, 'destroy'])->name('societes.pieces.destroy');
     Route::get('/societes/{societe}', [SocieteController::class, 'show'])->name('societes.show');
     Route::post('/societes', [SocieteController::class, 'store'])->name('societes.store');
     Route::patch('/societes/{societe}', [SocieteController::class, 'update'])->name('societes.update');
+    // Seule transition de cycle de vie qui ne soit pas automatique : la radiation n'est
+    // prouvée que par la pièce du greffe, qu'aucune étape de dossier ne constate.
+    Route::patch('/societes/{societe}/radiation', [SocieteController::class, 'radier'])->name('societes.radier');
     // Dossier constitutif d'une société que l'étude n'a pas constituée : statuts en vigueur, RCCM…
     // Rattaché à la société et non à un dossier — réutilisé par chacune de ses modifications.
     Route::post('/societes/{societe}/pieces/{categorie}', [SocietePieceController::class, 'televerser'])->name('societes.pieces.televerser');

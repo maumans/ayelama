@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\EtapeDossier;
 use App\Enums\RoleUtilisateur;
+use App\Enums\StatutSociete;
 use App\Models\Client;
 use App\Models\Dossier;
 use App\Models\Partie;
@@ -234,14 +235,40 @@ class RegistreSocietesTest extends TestCase
         $this->assertCount(2, $reponse->json());
     }
 
-    public function test_une_societe_desactivee_nest_plus_proposee(): void
+    /**
+     * Ce test affirmait l'inverse jusqu'au 2026-09-28 : une fiche `actif = false` ne devait plus
+     * être proposée. Le contrat a changé, et le test est **réécrit plutôt que supprimé** — sa
+     * garantie essentielle (le clerc sait à quoi il a affaire) tient toujours, par un autre
+     * moyen.
+     *
+     * Deux raisons de l'avoir changé. La colonne `actif` n'a jamais été écrite : 14 fiches sur
+     * 14 à `true`, ce test était donc le **seul** endroit du projet où un `false` existait. Et
+     * surtout, masquer contredit désormais la conception : la clôture d'une liquidation doit
+     * précisément désigner une société dissoute.
+     *
+     * Le registre renvoie donc toute fiche, avec son statut — « un blocage énuméré plutôt qu'un
+     * bouton grisé ». Une fiche absente d'une liste n'explique rien ; un badge « Radiée » si.
+     */
+    public function test_une_societe_dissoute_reste_proposee_mais_porte_son_statut(): void
     {
-        $this->fiche(['actif' => false]);
+        $this->fiche(['statut' => StatutSociete::Radiee]);
 
         $reponse = $this->actingAs($this->utilisateur(RoleUtilisateur::Clerc))->getJson('/societes/autocomplete?q=Faya');
 
         $reponse->assertOk();
-        $this->assertCount(0, $reponse->json());
+        $this->assertCount(1, $reponse->json());
+        $this->assertSame('radiee', $reponse->json('0.statut'));
+        $this->assertSame('Radiée', $reponse->json('0.statut_label'));
+        // L'explication accompagne le badge : c'est elle qui rend le statut actionnable.
+        $this->assertNotEmpty($reponse->json('0.statut_explication'));
+    }
+
+    public function test_une_fiche_neuve_est_active_sans_quon_le_demande(): void
+    {
+        // Le défaut vit à deux endroits (colonne et `$attributes` du modèle) et doit donner le
+        // même résultat. Sans le second, `Societe::create()` laissait `statut` à null en mémoire
+        // et l'autocomplétion renvoyait une 500 — défaut réel, corrigé le 2026-09-28.
+        $this->assertSame(StatutSociete::Active, $this->fiche()->statut);
     }
 
     public function test_la_fiche_expose_les_personnes_connues_du_dossier_de_constitution(): void

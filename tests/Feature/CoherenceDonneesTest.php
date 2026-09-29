@@ -252,6 +252,41 @@ class CoherenceDonneesTest extends TestCase
         );
     }
 
+    public function test_tout_prefixe_de_representation_a_ses_controles_de_dates_et_sa_cascade_geo(): void
+    {
+        // `PAIRES_DATES` et `TRIPLETS_GEO` sont écrites en clair — leur extraction par regex
+        // l'exige (voir le commentaire dans questionnaires.js). Le risque de l'écriture à la
+        // main est donc l'oubli : c'est précisément ce qui est arrivé à `gerant_entrant.*`, bloc
+        // dérivé dont les champs géo existaient sans cascade, et dont les dates n'étaient pas
+        // contrôlées. Ce test ferme la porte pour le sous-espace du représentant.
+        $source = file_get_contents(resource_path('js/data/questionnaires.js'));
+
+        $this->assertSame(
+            1,
+            preg_match("/export const PREFIXES_REPRESENTATION = \[(.*?)\];/s", $source, $captures),
+            'PREFIXES_REPRESENTATION doit être exportée par questionnaires.js.',
+        );
+
+        preg_match_all("/'([^']+)'/", $captures[1], $trouves);
+        // `null` en fin de liste = item de bloc répétable, dont les clés sont à plat.
+        $prefixes = [...$trouves[1], null];
+
+        foreach ($prefixes as $prefixe) {
+            $cle = fn (string $suffixe) => $prefixe ? "{$prefixe}.repr_{$suffixe}" : "repr_{$suffixe}";
+
+            $this->assertStringContainsString(
+                "naissance: '{$cle('date_naissance')}'",
+                $source,
+                "Le préfixe « {$prefixe} » n'a pas de groupe de dates dans PAIRES_DATES.",
+            );
+            $this->assertStringContainsString(
+                "commune: '{$cle('commune')}'",
+                $source,
+                "Le préfixe « {$prefixe} » n'a pas de cascade géographique dans TRIPLETS_GEO.",
+            );
+        }
+    }
+
     public function test_les_contraintes_php_et_js_sont_identiques(): void
     {
         $source = file_get_contents(resource_path('js/data/questionnaires.js'));

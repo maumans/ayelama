@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Bareme;
+use App\Enums\FormeSociete;
 use App\Models\TypeActe;
 use Illuminate\Database\Seeder;
 
@@ -132,9 +133,30 @@ class BaremeSeeder extends Seeder
         }
 
         // ═════════════════════════════════════════════════════════════════
-        // SOCIÉTÉS (SARL, SARLU, SAS, SASU)
+        // CONSTITUTION DE SOCIÉTÉ (SA, SARL, SARLU, SAS, SASU, SNC, GIE)
         // ═════════════════════════════════════════════════════════════════
-        $societeTypes = TypeActe::where('categorie', 'societe')->pluck('id');
+        //
+        // ⚠️ Filtré sur les **constitutions** depuis le 2026-09-28. `categorie = societe`
+        // ramenait aussi `SOC-MOD` et `SOC-DIS`, si bien qu'un dossier de dissolution héritait
+        // de toute la grille de création : une « Immatriculation RCCM », une « Obtention NIF »,
+        // des droits d'enregistrement « des Statuts et de la DNSV » et une insertion JAL
+        // décrite « avis de **constitution** ». Facturer l'immatriculation d'une société qu'on
+        // radie est faux, et c'est ce que la base contenait (mesuré : 7 barèmes actifs sur
+        // SOC-DIS, tous hérités de la constitution).
+        //
+        // Le prédicat n'est pas inventé pour l'occasion : `depuisCodeTypeActe()` rend une forme
+        // pour les sept constitutions et `null` pour SOC-MOD comme pour SOC-DIS — c'est
+        // exactement la distinction voulue, et elle est déjà la référence ailleurs.
+        //
+        // **Aucun barème de dissolution n'est créé en remplacement.** Le compte rendu de
+        // juillet 2026 n'en donne aucun, et inventer un montant le ferait figurer sur une
+        // facture d'étude. Conséquence assumée et visible : un dossier SOC-DIS aura une facture
+        // presque vide et aucune formalité automatique — corrigible en quelques lignes ici le
+        // jour où l'étude communiquera sa grille.
+        $societeTypes = TypeActe::where('categorie', 'societe')
+            ->get()
+            ->filter(fn (TypeActe $t) => FormeSociete::depuisCodeTypeActe($t->code) !== null)
+            ->pluck('id');
 
         foreach ($societeTypes as $typeActeId) {
             $baremes = $this->creerBaremes($typeActeId, [
@@ -148,10 +170,11 @@ class BaremeSeeder extends Seeder
                 ],
                 [
                     'organisme'    => 'Impots',
-                    'libelle'      => 'Enregistrement fiscal acte',
-                    'montant_fixe' => 70000.00,
+                    'libelle'      => 'Droits d\'enregistrement des Statuts et de la DNSV',
+                    'donnees_au_retour' => ['quittance_numero'],
+                    'montant_fixe' => 0,
                     'base_calcul'  => 'montant_fixe',
-                    'description'  => "Droits d'enregistrement des statuts",
+                    'description'  => "Droits d'enregistrement des statuts et de la DNSV",
                     'ordre'        => 2,
                     'genere_formalite' => true,
                     'type_impot'       => 'droits_enregistrement',
@@ -160,27 +183,19 @@ class BaremeSeeder extends Seeder
                 ],
                 [
                     'organisme'    => 'APIP',
-                    'libelle'      => 'Immatriculation RCCM',
-                    'montant_fixe' => 150000.00,
+                    'libelle'      => 'Frais APIP et RCCM',
+                    'montant_fixe' => 490000,
                     'base_calcul'  => 'montant_fixe',
-                    'description'  => 'Frais de constitution APIP et immatriculation RCCM',
+                    'description'  => 'Frais APIP et RCCM',
                     'ordre'        => 3,
                     'genere_formalite' => true,
-                    'retour_attendu'   => 'Extrait RCCM définitif',
+                    'retour_attendu'   => 'Extrait RCCM définitif et attestation NIF',
+                    // L'APIP délivre les deux en une démarche depuis la fusion des deux
+                    // anciens barèmes : le formulaire de retour réclame donc les trois
+                    // données, et les porte à la fiche société. Voir App\Enums\DonneeAuRetour.
+                    'donnees_au_retour' => ['rccm_numero', 'rccm_date', 'nif'],
                     'delai_heures'     => 72,
                     'pieces_requises'  => ['Statuts signés', 'Formulaire APIP', 'Copie CNI gérant'],
-                ],
-                [
-                    'organisme'    => 'APIP',
-                    'libelle'      => 'Obtention NIF',
-                    'montant_fixe' => 75000.00,
-                    'base_calcul'  => 'montant_fixe',
-                    'description'  => "Obtention du Numéro d'Identification Fiscale",
-                    'ordre'        => 4,
-                    'genere_formalite' => true,
-                    'retour_attendu'   => 'NIF attribué',
-                    'delai_heures'     => 72,
-                    'pieces_requises'  => ['Formulaire NIF', 'Copie statuts', 'Copie RCCM provisoire'],
                 ],
                 [
                     'organisme'    => 'Autre',
@@ -189,6 +204,12 @@ class BaremeSeeder extends Seeder
                     'base_calcul'  => 'montant_fixe',
                     'description'  => 'Publication de l\'avis de constitution dans le JAL',
                     'ordre'        => 5,
+                    // `societes.jal_journal` existe depuis juin 2026 sans écrivain ni lecteur :
+                    // c'est par ici qu'elle prend enfin un sens.
+                    'genere_formalite'  => true,
+                    'retour_attendu'    => 'Justificatif de parution au journal',
+                    'donnees_au_retour' => ['jal_journal', 'jal_date_parution'],
+                    'delai_heures'      => 168,
                 ],
                 [
                     'organisme'    => 'Impots',
@@ -211,12 +232,16 @@ class BaremeSeeder extends Seeder
                     'description'  => 'Dépôt des statuts définitifs auprès du greffe du tribunal de commerce',
                     'ordre'        => 7,
                     'genere_formalite'    => true,
-                    'depend_de_bareme_id' => $baremes['Immatriculation RCCM']->id,
+                    'donnees_au_retour'   => ['depot_greffe_numero'],
+                    'depend_de_bareme_id' => $baremes['Frais APIP et RCCM']->id,
                     'delai_heures'        => 48,
                     'pieces_requises'     => ['Extrait RCCM définitif'],
                 ],
             ]);
         }
+
+        $this->desactiverLibellesRetires();
+        $this->desactiverGrilleConstitutionHorsPerimetre();
 
         // ═════════════════════════════════════════════════════════════════
         // HYPOTHÈQUE
@@ -259,6 +284,101 @@ class BaremeSeeder extends Seeder
         }
 
         $this->command->info('✅ Barèmes initiaux insérés avec succès.');
+    }
+
+    /**
+     * Désactive la grille de **constitution** posée à tort sur les types d'acte de société qui
+     * ne constituent rien — `SOC-MOD` et `SOC-DIS`.
+     *
+     * La boucle ci-dessus est désormais filtrée, mais filtrer la création ne nettoie pas ce qui
+     * a déjà été semé : mesuré le 2026-09-28, un dossier de dissolution héritait de sept
+     * barèmes de création, dont une « Immatriculation RCCM » et une « Obtention NIF » —
+     * facturer l'immatriculation d'une société qu'on radie.
+     *
+     * `SOC-MOD` est traité au même titre : le défaut n'a jamais été propre à la dissolution.
+     * Ses propres tarifs lui sont réappliqués par {@see ReglesGestionBaremeSeeder}, qui tourne
+     * après celui-ci — les libellés qu'il pose sont donc exclus ici, sans quoi les deux
+     * seeders se contrediraient à chaque exécution.
+     *
+     * **Désactivés, jamais supprimés**, comme partout ailleurs : une facture émise les
+     * référence, et son montant doit rester explicable. Idempotent.
+     */
+    private function desactiverGrilleConstitutionHorsPerimetre(): void
+    {
+        $idsHorsPerimetre = TypeActe::where('categorie', 'societe')
+            ->get()
+            ->filter(fn (TypeActe $t) => FormeSociete::depuisCodeTypeActe($t->code) === null)
+            ->pluck('id');
+
+        if ($idsHorsPerimetre->isEmpty()) {
+            return;
+        }
+
+        Bareme::whereIn('type_acte_id', $idsHorsPerimetre)
+            ->whereIn('libelle', self::GRILLE_CONSTITUTION)
+            ->where('actif', true)
+            ->update([
+                'actif'       => false,
+                'description' => 'Désactivé le 2026-09-28 : tarif de constitution, hérité par erreur '
+                    . "d'un filtre sur la catégorie « société ». Ni une modification ni une dissolution "
+                    . 'ne constitue de société.',
+            ]);
+    }
+
+    /**
+     * Libellés de la grille de constitution — ceux que la boucle société crée.
+     *
+     * Liste explicite plutôt qu'une désactivation en masse : `ReglesGestionBaremeSeeder` pose
+     * sur `SOC-MOD` des tarifs légitimes (droit de cession, enregistrement du PV, DNSV) qu'une
+     * désactivation aveugle éteindrait aussitôt semés.
+     */
+    private const GRILLE_CONSTITUTION = [
+        'Honoraires forfaitaires',
+        'Enregistrement fiscal acte',
+        "Droits d'enregistrement des Statuts et de la DNSV",
+        'Frais APIP et RCCM',
+        'Immatriculation RCCM',
+        'Obtention NIF',
+        'Insertion JAL (Journal Annonces Légales)',
+        'Timbres & rôles',
+        'Dépôt statuts au greffe',
+    ];
+
+    /**
+     * Libellés que le seeder **ne produit plus**, à éteindre partout.
+     *
+     * `Immatriculation RCCM` (150 000) et `Obtention NIF` (75 000) ont été fusionnés dans
+     * `Frais APIP et RCCM` (490 000) : l'APIP délivre les deux en une démarche. Mais un
+     * `updateOrCreate` ne supprime jamais ce qu'il ne recrée pas — les deux anciennes lignes
+     * sont donc **restées actives** sur les sept types de constitution, à côté de la nouvelle.
+     *
+     * Conséquence mesurée le 2026-09-29 : une constitution portait **deux** formalités APIP
+     * déclarant toutes deux « Extrait RCCM définitif », et se voyait facturer 150 000 + 75 000
+     * en trop. Le second défaut est visible sur la facture ; le premier ne l'était pas — il le
+     * serait devenu au moment de saisir deux fois le même numéro au retour.
+     *
+     * ⚠️ **Liste explicite**, jamais « tout ce que le seeder ne crée plus » : l'étude peut
+     * créer ses propres barèmes depuis Paramètres, et une désactivation par déduction les
+     * éteindrait au premier `db:seed`.
+     */
+    private const LIBELLES_RETIRES = [
+        'Immatriculation RCCM' => 'Fusionné dans « Frais APIP et RCCM » le 2026-09-29 : l\'APIP délivre le RCCM et le NIF en une seule démarche.',
+        'Obtention NIF'        => 'Fusionné dans « Frais APIP et RCCM » le 2026-09-29 : l\'APIP délivre le RCCM et le NIF en une seule démarche.',
+    ];
+
+    /**
+     * Éteint les libellés retirés, **partout et non seulement hors périmètre**.
+     *
+     * Désactivés et jamais supprimés, comme les trois autres corrections de ce seeder : une
+     * facture émise les référence, et son montant doit rester explicable. Idempotent.
+     */
+    private function desactiverLibellesRetires(): void
+    {
+        foreach (self::LIBELLES_RETIRES as $libelle => $motif) {
+            Bareme::where('libelle', $libelle)
+                ->where('actif', true)
+                ->update(['actif' => false, 'description' => $motif]);
+        }
     }
 
     /**

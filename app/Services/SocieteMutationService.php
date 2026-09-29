@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\EffetSurLaFicheSociete;
 use App\Enums\TypeModificationStatutaire;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
@@ -30,8 +31,63 @@ use App\Models\User;
  * Une fiche de référence notariale qui change en silence est inacceptable — l'équipe doit
  * pouvoir constater, depuis le dossier, ce qui a été porté au registre.
  */
-class SocieteMutationService
+class SocieteMutationService implements EffetSurLaFicheSociete
 {
+    public function nom(): string
+    {
+        return 'modification statutaire';
+    }
+
+    /**
+     * Garde d'application — reprise **mot pour mot** de celle qui ouvrait `appliquer()`.
+     *
+     * Le comportement est donc strictement identique à celui d'avant l'extraction du contrat
+     * {@see EffetSurLaFicheSociete} (2026-09-28), et un test le vérifie plutôt que de le
+     * supposer. La garde reste également en tête d'`appliquer()` : ce service est appelé
+     * directement par des tests existants, et une méthode qui ne se protège que par la
+     * politesse de son appelant est une invitation.
+     */
+    public function concerne(Dossier $dossier): bool
+    {
+        $dossier->loadMissing('typeActe', 'questionnaire', 'societe');
+
+        return $dossier->typeActe?->code === 'SOC-MOD' && (bool) $dossier->societe;
+    }
+
+    /**
+     * **Pas de retour arrière**, volontairement — un avertissement journalisé à la place.
+     *
+     * L'asymétrie avec {@see SocieteCycleVieService::annuler()} est assumée. Là-bas, l'état
+     * précédent se déduit de la phase : le revert est sûr. Ici, il faudrait reconstituer
+     * l'ancien siège, l'ancien capital ou l'ancien gérant depuis le questionnaire — or une
+     * correction a pu être portée au registre entre-temps, et la réécrire l'effacerait sans
+     * trace. Un défaut bruyant vaut mieux qu'un revert hasardeux : l'équipe est prévenue que
+     * la fiche porte encore une modification dont le dossier est reparti en correction, et
+     * décide elle-même.
+     *
+     * @return array<string, array{avant: mixed, apres: mixed}>
+     */
+    public function annuler(Dossier $dossier, ?User $user = null): array
+    {
+        if (! $this->concerne($dossier)) {
+            return [];
+        }
+
+        JournalActivite::enregistrer(
+            $dossier,
+            sprintf(
+                'Dossier renvoyé en correction : la fiche société « %s » conserve les modifications déjà portées au registre. '
+                . 'Elles ne sont pas défaites automatiquement — une correction faite depuis serait écrasée. Vérifiez la fiche.',
+                $dossier->societe->denomination,
+            ),
+            'societe',
+            [],
+            $user,
+        );
+
+        return [];
+    }
+
     /**
      * @return array<string, array{avant: mixed, apres: mixed}> Champs effectivement modifiés
      */
@@ -44,9 +100,13 @@ class SocieteMutationService
         }
 
         $donnees = $dossier->questionnaire?->donnees ?? [];
-        $types   = TypeModificationStatutaire::depuisLibelles(
-            $donnees['modif.types'] ?? $donnees['modif.type'] ?? null,
-        );
+        // Le registre lit les clés déclarées par l'enum, ici `modif.types` puis `modif.type`.
+        // Le filtre d'instance est redondant avec la garde `SOC-MOD` ci-dessus, et volontaire :
+        // il rend l'hypothèse vérifiable plutôt que supposée.
+        $types   = array_values(array_filter(
+            \App\Support\VariantesTypeActe::duDossier($dossier),
+            fn ($v) => $v instanceof TypeModificationStatutaire,
+        ));
 
         if ($types === []) {
             return [];

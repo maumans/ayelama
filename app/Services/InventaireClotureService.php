@@ -57,7 +57,7 @@ class InventaireClotureService
 
     /**
      * Pièces restant à vérifier, tous rubriques confondues — ce qui bloque le passage à
-     * Clôturé (voir DossierStepService::verifierExpedition).
+     * Archivé (voir DossierStepService::verifierExpedition).
      *
      * @return Collection<int, array>
      */

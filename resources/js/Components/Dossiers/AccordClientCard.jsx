@@ -35,9 +35,19 @@ export function AccordClientCard({ dossier, can }) {
     // prop manque (page ouverte avant le déploiement).
     const attendu = dossier.accordAttendu ?? {
         titre: 'Accord client sur le questionnaire',
-        instructions: "Imprimez la fiche dossier, faites-la signer par le client, puis téléversez ici le document signé. Le dossier ne pourra pas passer en certification sans cet accord.",
+        instructions: "Imprimez la fiche dossier, faites-la signer par le client, puis téléversez ici le document signé. Le dossier ne pourra pas passer à l'étape suivante sans cette pièce.",
         imprimable: true,
+        // Repli **conservateur** : une page ouverte avant le déploiement doit continuer de
+        // montrer l'exigence la plus forte, jamais l'inverse.
+        exigence: 'bloquante',
+        aVerifier: false,
+        source: '',
     };
+
+    // Trois niveaux d'exigence — voir `App\Enums\ExigenceAccord`. Jusqu'au 2026-09-28 la pièce
+    // était bloquante pour les 24 types d'acte, ce qui immobilisait les dossiers de dissolution.
+    const bloquante = attendu.exigence !== 'attendue' && attendu.exigence !== 'sans_objet';
+    const sansObjet = attendu.exigence === 'sans_objet';
 
     const [preview, setPreview] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -51,6 +61,17 @@ export function AccordClientCard({ dossier, can }) {
             cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     }, []);
+
+    // ⚠️ « Sans objet » masque la **demande**, jamais une pièce déjà déposée : la catégorie reste
+    // `accord_client`, donc le document est exclu de l'onglet Actes et cette carte est le seul
+    // endroit d'où on peut le voir et le télécharger. Le masquer le rendrait inaccessible.
+    //
+    // ⚠️ Placé **après** les hooks, et non au plus tôt : un retour anticipé avant `useState` /
+    // `useEffect` rendrait leur appel conditionnel, ce que React interdit — la carte planterait
+    // au premier basculement de type d'acte.
+    if (sansObjet && !accordRecu) {
+        return null;
+    }
 
     const televerser = (file) => {
         if (!file) return;
@@ -94,19 +115,37 @@ export function AccordClientCard({ dossier, can }) {
     // `id` : cible du lien depuis le panneau « Conditions requises » de l'en-tête,
     // qui bascule sur cet onglet puis fait défiler jusqu'ici.
     return (
-        <Card id={ANCRE_ACCORD_CLIENT} ref={cardRef} className={cn(!accordRecu && 'border-warning/40 ring-2 ring-warning/40')}>
+        <Card
+            id={ANCRE_ACCORD_CLIENT}
+            ref={cardRef}
+            className={cn(!accordRecu && bloquante && 'border-warning/40 ring-2 ring-warning/40')}
+        >
             <CardHeader className="pb-3">
                 <CardTitle className="flex flex-wrap items-center gap-2">
                     {accordRecu
                         ? <CheckCircle2 className="h-4 w-4 text-success" />
-                        : <AlertTriangle className="h-4 w-4 text-warning-text" />}
+                        : <AlertTriangle className={cn('h-4 w-4', bloquante ? 'text-warning-text' : 'text-slate-400')} />}
                     {attendu.titre}
                     {!accordRecu && (
-                        <span className="rounded-full bg-warning-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-text">
-                            Requis pour passer à la certification
+                        <span className={cn(
+                            'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                            bloquante
+                                ? 'bg-warning-bg text-warning-text'
+                                : 'bg-slate-100 text-slate-600',
+                        )}>
+                            {bloquante ? 'Requis pour avancer' : "Attendu — n'empêche pas d'avancer"}
                         </span>
                     )}
                 </CardTitle>
+
+                {/* D'où vient l'exigence quand elle n'est pas arbitrée. Affichée, pas seulement
+                    écrite en commentaire : une attente fondée sur une hypothèse qui ne le dirait
+                    pas se prendrait pour une règle — même parti que les jalons de liquidation. */}
+                {attendu.aVerifier && attendu.source && (
+                    <p className="mt-1.5 text-xs italic text-amber-700">
+                        ⚠️ À confirmer avec l'étude. {attendu.source}
+                    </p>
+                )}
             </CardHeader>
             <CardContent className="space-y-3">
                 {accordRecu ? (

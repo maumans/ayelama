@@ -61,6 +61,9 @@
         table.prestations th.rang, table.prestations td.rang { width: 30px; text-align: center; }
         table.prestations th.qte, table.prestations td.qte { width: 40px; text-align: center; }
         table.prestations th.montant, table.prestations td.montant { width: 122px; text-align: right; white-space: nowrap; }
+        /* Le montant d'origine reste lisible, barré : c'est lui qui donne sa valeur à la remise. */
+        .remise-brut   { text-decoration: line-through; color: #888888; font-size: 9pt; }
+        .remise-detail { color: #8a6d1f; font-size: 8.5pt; }
         .precision { display: block; font-size: 9.5px; color: #666666; font-style: italic; margin-top: 2px; }
         tr.variable td { color: #666666; }
         tr.total td {
@@ -170,8 +173,20 @@
                     {{-- Un montant nul se lit « à déterminer », comme sur le formulaire de l'étude :
                          les droits d'enregistrement dépendent du capital et ne sont pas connus à
                          l'établissement de la note. --}}
+                    {{-- La remise apparaît **sur la ligne** et non en pied de facture : le client
+                         doit voir sur quelle prestation le geste a été fait, pas seulement qu'il
+                         y en a eu un. Le montant barré reste lisible, c'est ce qui donne sa
+                         valeur au geste. --}}
                     <td class="montant">
-                        {{ (float) $ligne->montant > 0 ? $fmt($ligne->montant * $ligne->quantite) : 'à déterminer' }}
+                        @if((float) $ligne->montant <= 0)
+                            à déterminer
+                        @elseif($ligne->remiseMontant() > 0)
+                            <span class="remise-brut">{{ $fmt($ligne->montantBrut()) }}</span><br>
+                            <span class="remise-detail">remise {{ $fmt($ligne->remiseMontant()) }}</span><br>
+                            {{ $fmt($ligne->total()) }}
+                        @else
+                            {{ $fmt($ligne->total()) }}
+                        @endif
                     </td>
                 </tr>
             @empty

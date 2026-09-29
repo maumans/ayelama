@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\CategorieActe;
 use App\Enums\EtapeDossier;
 use App\Enums\FormeSociete;
+use App\Enums\MotifRepresentation;
 use App\Enums\RoleUtilisateur;
 use App\Enums\TypeModificationStatutaire;
 use App\Http\Requests\StoreDossierRequest;
@@ -26,6 +27,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class DossierController extends Controller
@@ -84,6 +86,19 @@ class DossierController extends Controller
      * Duplication assumée entre le serveur (qui décide) et cet indicateur (qui pilote le
      * bouton « Avancer » de la liste) : c'est le point faible connu, documenté au devbook
      * §9. Toute règle modifiée dans le service doit l'être ici.
+     *
+     * ⚠️ **Ce n'est pas un miroir fidèle, et ce n'est pas un oubli** : il ignore délibérément
+     * `ReglesSocieteService::anomalies()` et `ReglesRepresentationService::anomalies()`, qui
+     * coûtent chacune des requêtes (`conflitDenomination()` charge toute la table des
+     * questionnaires) et seraient payées pour **chaque ligne** d'une liste paginée. Un bouton
+     * actif dont le clic échoue reste possible sur ces règles-là ; le message d'erreur du
+     * serveur fait alors foi, et le panneau « conditions requises » de la fiche dossier les
+     * affiche désormais dès l'ouverture.
+     *
+     * ⚠️ Sauf **les pièces** : la règle « quelle pièce manque et laquelle bloque » a été
+     * ramenée sur `Partie::aUnePieceBloquanteManquante()` le 2026-09-24, que les deux
+     * appellent. Ne pas la réécrire ici — c'est par là que les pièces non arbitrées
+     * (PIECES_A_CONFIRMER) sont exclues du blocage.
      */
     private function constitutionComplete(Dossier $dossier): bool
     {
@@ -94,13 +109,25 @@ class DossierController extends Controller
         }
 
         $piecesManquantes = $dossier->parties->contains(
-            fn ($p) => collect($p->piecesChecklist())->contains(fn ($item) => !$item['est_fourni'])
+            fn ($p) => $p->aUnePieceBloquanteManquante()
         );
         if ($piecesManquantes) {
             return false;
         }
 
-        return (bool) $dossier->documents->firstWhere('categorie', 'accord_client')?->est_signe_cachete;
+        // ⚠️ Passe par `pieceAccordAttendue()` depuis le 2026-09-28. La catégorie était codée en
+        // dur ici, et le caractère bloquant supposé universel : un dossier dont l'accord n'est
+        // pas exigé (une dissolution) aurait vu son bouton « Avancer » rester grisé dans la
+        // liste alors que le serveur l'acceptait — la divergence exactement à l'envers de celle
+        // corrigée le 2026-08-03.
+        $accordAttendu = $dossier->pieceAccordAttendue();
+
+        if (! $accordAttendu['exigence']->bloque()) {
+            return true;
+        }
+
+        return (bool) $dossier->documents
+            ->firstWhere('categorie', $accordAttendu['categorie'])?->est_signe_cachete;
     }
 
     public function index(Request $request)
@@ -242,7 +269,7 @@ class DossierController extends Controller
             'reviseurs'  => User::withRole('reviseur')->where('actif', true)->get(['id', 'name', 'initiales']),
             'formalistes' => User::withRole('formaliste')->where('actif', true)->get(['id', 'name', 'initiales']),
             'defauts'    => Setting::defaultAssignees(),
-            'piecesRequises' => Partie::piecesRequisesParCle(),
+            'piecesRequises' => Partie::reglesPiecesRequises(),
             // Saisies inachevées de l'utilisateur, proposées à la reprise en tête
             // de l'assistant (voir DossierBrouillonController).
             'brouillons' => DossierBrouillonController::pourUtilisateur(auth()->id()),
@@ -418,18 +445,20 @@ class DossierController extends Controller
                 }
                 unset($partieData['pieces'], $partieData['pieces_brouillon']);
 
-                $partie = Partie::create(array_merge(['dossier_id' => $dossier->id], $partieData));
+                $partie = Partie::create(array_merge(
+                    ['dossier_id' => $dossier->id],
+                    $this->sansRepresentation($partieData),
+                ));
 
-                foreach ($pieces as $categorie => $fichier) {
-                    $requis = $partie->piecesRequisesDefinition();
-                    $piece = $partie->pieces()->create([
-                        'nom' => $requis[$categorie] ?? 'Pièce',
-                        'categorie' => $categorie,
-                        'est_requis' => true
-                    ]);
-                    $piece->nouvelleVersion($fichier, 'parties/' . $dossier->reference);
+                $this->enregistrerPiecesPartie($partie, $pieces, $dossier->reference);
+
+                if (filled($partieData['cle_locale'] ?? null)) {
+                    $parCle[$partieData['cle_locale']] = $partie;
                 }
             }
+
+            // Seconde passe : le représentant n'existait pas quand le représenté a été créé.
+            $this->resoudreRepresentations($data['parties'] ?? [], $parCle ?? []);
 
             // Avant toute génération : réaligner le questionnaire sur les fiches
             // clients rattachées. Le frontend n'envoie plus l'identité des personnes
@@ -480,6 +509,167 @@ class DossierController extends Controller
         return $dossier;
     }
 
+    /** Champs de représentation, résolus en seconde passe et jamais posés à la création. */
+    private const CHAMPS_REPRESENTATION = [
+        'representation_motif', 'representation_qualite', 'representation_titre_forme',
+        'representation_titre_date', 'representation_titre_autorite', 'representation_titre_reference',
+    ];
+
+    /**
+     * Le payload d'une partie, débarrassé de ce qui ne se pose qu'en seconde passe.
+     *
+     * `cle_locale` et `represente_par_cle` sont un vocabulaire de transport, pas des colonnes ;
+     * les champs de représentation, eux, n'ont de sens qu'une fois le représentant créé.
+     */
+    private function sansRepresentation(array $partieData): array
+    {
+        foreach (['cle_locale', 'represente_par_cle', ...self::CHAMPS_REPRESENTATION] as $cle) {
+            unset($partieData[$cle]);
+        }
+
+        return $partieData;
+    }
+
+    /**
+     * Seconde passe : relier chaque représenté à son représentant, une fois tous créés.
+     *
+     * La corrélation passe par `cle_locale`, et non par un id : à la création, le représentant
+     * n'en a pas encore. Le même chemin sert à l'édition — deux chemins de résolution seraient
+     * deux branches de validation, et une divergence garantie.
+     *
+     * La validation a déjà refusé une clé inconnue (422) : l'absence dans `$parCle` ne peut
+     * donc venir que d'un appel hors formulaire, et on ne pose alors rien plutôt que de délier
+     * silencieusement.
+     *
+     * @param array<int, array<string, mixed>> $parties payload validé
+     * @param array<string, Partie>            $parCle  clé locale → Partie créée ou retrouvée
+     */
+    private function resoudreRepresentations(array $parties, array $parCle): void
+    {
+        foreach ($parties as $partieData) {
+            $cleRepresente = $partieData['cle_locale'] ?? null;
+            $cleMandataire = $partieData['represente_par_cle'] ?? null;
+
+            if (blank($cleRepresente) || ! isset($parCle[$cleRepresente])) {
+                continue;
+            }
+
+            $partie = $parCle[$cleRepresente];
+
+            // Décocher « se fait représenter » remet tout à null : c'est ainsi qu'on retire
+            // une représentation, et c'est ce qui rend l'effacement de la projection possible.
+            $valeurs = ['represente_par_partie_id' => null];
+            foreach (self::CHAMPS_REPRESENTATION as $champ) {
+                $valeurs[$champ] = null;
+            }
+
+            if (filled($cleMandataire) && isset($parCle[$cleMandataire])) {
+                $valeurs['represente_par_partie_id'] = $parCle[$cleMandataire]->id;
+                foreach (self::CHAMPS_REPRESENTATION as $champ) {
+                    $valeurs[$champ] = $partieData[$champ] ?? null;
+                }
+            }
+
+            $partie->update($valeurs);
+        }
+    }
+
+    /**
+     * Crée ou met à jour les représentants du payload, **sans jamais en supprimer**.
+     *
+     * Hors de la boucle `managedRoles` : celle-ci supprime toute Partie d'un rôle géré non
+     * référencée, et plusieurs représentants partagent le rôle `mandataire`. La suppression est
+     * confiée à `supprimerRepresentantsOrphelins()`, qui raisonne sur le graphe.
+     *
+     * @param array<int, array<string, mixed>> $parties
+     * @param array<string, Partie>            $parCle  enrichi au passage
+     */
+    private function synchroniserRepresentants(Dossier $dossier, array $parties, array &$parCle): void
+    {
+        $existants = $dossier->parties()
+            ->where('role', MotifRepresentation::ROLE)
+            ->get()
+            ->keyBy('id');
+
+        foreach ($parties as $partieData) {
+            if (($partieData['role'] ?? null) !== MotifRepresentation::ROLE) {
+                continue;
+            }
+
+            $partieId  = $partieData['partie_id'] ?? null;
+            $pieces    = $partieData['pieces'] ?? [];
+            $attributs = $this->sansRepresentation($partieData);
+            unset($attributs['partie_id'], $attributs['pieces'], $attributs['pieces_brouillon']);
+
+            if ($partieId && $existants->has($partieId)) {
+                $partie = $existants[$partieId];
+                $partie->update($attributs);
+            } else {
+                $partie = Partie::create(array_merge(['dossier_id' => $dossier->id], $attributs));
+            }
+
+            $this->enregistrerPiecesPartie($partie, $pieces, $dossier->reference);
+
+            if (filled($partieData['cle_locale'] ?? null)) {
+                $parCle[$partieData['cle_locale']] = $partie;
+            }
+        }
+    }
+
+    /**
+     * Supprime les représentants que plus personne ne désigne.
+     *
+     * Un mandataire n'existe que par le lien qui le désigne : dès qu'aucune partie ne le
+     * référence, il n'a plus de raison d'être au dossier — et sa checklist de pièces
+     * continuerait sinon de bloquer la sortie d'Initialisation pour une personne révoquée.
+     */
+    private function supprimerRepresentantsOrphelins(Dossier $dossier): void
+    {
+        $designes = $dossier->parties()
+            ->whereNotNull('represente_par_partie_id')
+            ->pluck('represente_par_partie_id')
+            ->unique()
+            ->all();
+
+        $dossier->parties()
+            ->where('role', MotifRepresentation::ROLE)
+            ->when($designes !== [], fn ($q) => $q->whereNotIn('id', $designes))
+            ->get()
+            ->each
+            ->supprimerAvecPieces();
+    }
+
+    /**
+     * Enregistre les pièces déposées pour une personne, en créant la version.
+     *
+     * Partagée par la création du dossier et la resynchronisation du questionnaire. Elle
+     * existait en double, et seule la branche « nouvelle partie » de la seconde l'appliquait :
+     * une pièce déposée pour une personne déjà enregistrée disparaissait sans un mot.
+     *
+     * `firstOrCreate` sur la catégorie : redéposer une pièce déjà présente doit produire une
+     * **nouvelle version**, pas un second DocumentFichier de même catégorie — que
+     * `piecesChecklist()` (un `keyBy('categorie')`) ferait alors disparaître au hasard.
+     *
+     * @param array<string, mixed> $pieces catégorie → fichier téléversé
+     */
+    private function enregistrerPiecesPartie(Partie $partie, array $pieces, string $reference): void
+    {
+        if ($pieces === []) {
+            return;
+        }
+
+        $requis = $partie->piecesRequisesDefinition();
+
+        foreach ($pieces as $categorie => $fichier) {
+            $piece = $partie->pieces()->firstOrCreate(
+                ['categorie' => $categorie],
+                ['nom' => $requis[$categorie] ?? 'Pièce', 'est_requis' => true],
+            );
+
+            $piece->nouvelleVersion($fichier, 'parties/' . $reference);
+        }
+    }
+
     /**
      * Actes prévus par la configuration mais absents du dossier.
      *
@@ -501,15 +691,9 @@ class DossierController extends Controller
         $dossier->loadMissing('documents', 'questionnaire', 'typeActe');
         $presents = $dossier->documents->pluck('nom')->all();
 
-        $variantes = TypeModificationStatutaire::depuisLibelles(
-            $dossier->questionnaire?->donnees['modif.types']
-                ?? $dossier->questionnaire?->donnees['modif.type']
-                ?? null,
-        );
-
         return collect($generateur->actesPrevus(
             $dossier->typeActe,
-            array_map(fn (TypeModificationStatutaire $t) => $t->value, $variantes),
+            \App\Support\VariantesTypeActe::valeursDuDossier($dossier),
         ))
             ->filter(fn (array $a) => $a['a_gabarit'] && ! in_array($a['nom'], $presents, true))
             ->map(fn (array $a) => ['nom' => $a['nom'], 'type_document' => $a['type_document']])
@@ -678,6 +862,11 @@ class DossierController extends Controller
             'reviseurs'   => User::withRole('reviseur')->where('actif', true)->get(['id', 'name']),
             'formalistes' => User::withRole('formaliste')->where('actif', true)->get(['id', 'name']),
             'notaires'    => User::withRole('notaire')->where('actif', true)->get(['id', 'name']),
+            // La même règle qu'à la création, et servie par le même accesseur. Elle n'était
+            // **pas** passée ici : la modale d'édition du questionnaire lisait donc une prop
+            // absente, et ajouter une personne depuis un dossier existant n'offrait jamais de
+            // déposer ses pièces. Create et Show ne montraient pas la même chose.
+            'piecesRequises' => Partie::reglesPiecesRequises(),
             // Impact statutaire, actes produits et formalités à venir d'un dossier de
             // modification (`null` pour tout autre type d'acte). Calculé depuis le
             // 2026-08-05 mais jamais affiché : le clerc ne pouvait pas savoir, en consultant
@@ -742,9 +931,26 @@ class DossierController extends Controller
         $validated = $request->validate([
             'donnees'         => ['required', 'array'],
             'managedRoles'    => ['nullable', 'array'],
-            'managedRoles.*'  => ['string', 'max:100'],
+            // Le rôle des représentants est exclu : la boucle par rôle supprime toute Partie
+            // non référencée, et plusieurs mandataires le partagent. Leur cycle de vie passe
+            // par le ramasse-miettes du graphe. `getManagedClientRoles()` ne le renvoie pas,
+            // mais une règle ne peut pas ne vivre que dans le formulaire — un payload forgé
+            // contournerait la protection.
+            'managedRoles.*'  => ['string', 'max:100', Rule::notIn([MotifRepresentation::ROLE])],
             ...StoreDossierRequest::partiesRules(),
         ]);
+
+        // La cohérence des liens de représentation ne s'exprime pas champ par champ : il faut
+        // voir le tableau entier. Branchée ici comme dans StoreDossierRequest, par le même
+        // appel — trois appelants partagent partiesRules(), une closure recopiée divergerait.
+        $verificateur = \Illuminate\Support\Facades\Validator::make(
+            $request->all(),
+            StoreDossierRequest::partiesRules(),
+        );
+        StoreDossierRequest::validerRepresentations($verificateur);
+        if ($verificateur->errors()->isNotEmpty()) {
+            throw new \Illuminate\Validation\ValidationException($verificateur);
+        }
 
         // `donnees` n'était validé que dans sa forme (`array`) : toute la cohérence du questionnaire
         // vivait dans le navigateur, et une pièce expirant avant sa délivrance entrait sans un mot.
@@ -771,6 +977,8 @@ class DossierController extends Controller
             // item au milieu de la liste (un simple index-à-index s'y ferait piéger). Un item
             // sans partie_id (nouvellement ajouté dans cette session d'édition) est créé ;
             // toute Partie existante non référencée dans le nouveau payload est supprimée.
+            $parCle = [];
+
             $managedRoles = $validated['managedRoles'] ?? [];
             foreach ($managedRoles as $role) {
                 $existantes   = $dossier->parties()->where('role', $role)->get()->keyBy('id');
@@ -784,26 +992,46 @@ class DossierController extends Controller
                     $pieces = $partieData['pieces'] ?? [];
                     unset($partieData['pieces']);
 
+                    $attributs = $this->sansRepresentation($partieData);
+
                     if ($partieId && $existantes->has($partieId)) {
-                        $existantes[$partieId]->update($partieData);
+                        $partie = $existantes[$partieId];
+                        $partie->update($attributs);
                         $idsConserves[] = $partieId;
                     } else {
-                        $nouvellePartie = Partie::create(array_merge(['dossier_id' => $dossier->id], $partieData));
-                        $idsConserves[] = $nouvellePartie->id;
-                        
-                        foreach ($pieces as $categorie => $fichier) {
-                            $requis = $nouvellePartie->piecesRequisesDefinition();
-                            $piece = $nouvellePartie->pieces()->create([
-                                'nom' => $requis[$categorie] ?? 'Pièce', 
-                                'categorie' => $categorie, 
-                                'est_requis' => true
-                            ]);
-                            $piece->nouvelleVersion($fichier, 'parties/' . $dossier->reference);
-                        }
+                        $partie = Partie::create(array_merge(['dossier_id' => $dossier->id], $attributs));
+                        $idsConserves[] = $partie->id;
                     }
+
+                    if (filled($partieData['cle_locale'] ?? null)) {
+                        $parCle[$partieData['cle_locale']] = $partie;
+                    }
+
+                    // Les deux branches enregistrent les pièces. Seule la création le faisait :
+                    // une pièce déposée dans la modale pour une personne **déjà existante** était
+                    // silencieusement jetée — le cas de toute deuxième sauvegarde.
+                    $this->enregistrerPiecesPartie($partie, $pieces, $dossier->reference);
                 }
-                $existantes->whereNotIn('id', $idsConserves)->each->delete();
+                // `supprimerAvecPieces()` et non `delete()` : `pieces()` est un morphMany sans
+                // contrainte FK, une suppression nue laissait les DocumentFichier, leurs versions
+                // et les fichiers sur le disque.
+                $existantes->whereNotIn('id', $idsConserves)->each->supprimerAvecPieces();
             }
+
+            // Les représentants ne sont **pas** synchronisés par rôle : la boucle ci-dessus
+            // supprime toute Partie d'un rôle géré qui n'est pas référencée, et un mandataire
+            // dont le front aurait perdu l'id serait détruit puis recréé — avec perte de ses
+            // pièces. Ils sont donc créés ou mis à jour à part, sans suppression…
+            $this->synchroniserRepresentants($dossier, $validated['parties'] ?? [], $parCle);
+
+            // …puis reliés, une fois tous présents.
+            $this->resoudreRepresentations($validated['parties'] ?? [], $parCle);
+
+            // …et enfin ramassés **par accessibilité dans le graphe** : est supprimé tout
+            // représentant que plus aucune partie ne désigne. Règle dérivée de l'état réel et
+            // non d'un appariement : il n'y a rien à apparier, donc rien à se tromper
+            // d'apparier, et elle est idempotente.
+            $this->supprimerRepresentantsOrphelins($dossier);
 
             // Les parties viennent d'être resynchronisées : un rôle peut désormais
             // pointer vers une autre fiche client (ou vers une fiche fraîchement
@@ -907,6 +1135,18 @@ class DossierController extends Controller
         // reviendrait à changer la pièce qui prouve l'accord du client sur un contenu
         // déjà validé.
         $this->authorize('modifierQuestionnaire', $dossier);
+
+        // Une pièce déclarée « sans objet » pour ce type d'acte n'a pas de carte à l'écran : la
+        // route resterait une porte dérobée, et une règle ne peut pas ne vivre que dans le
+        // formulaire. Le message renvoie vers l'endroit où l'on change d'avis.
+        if ($dossier->pieceAccordAttendue()['exigence'] === \App\Enums\ExigenceAccord::SansObjet) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'fichier' => [sprintf(
+                    "Aucune pièce d'accord n'est attendue pour un dossier « %s ». Modifiez le réglage dans Paramètres → Types d'actes si ce n'est pas voulu.",
+                    $dossier->typeActe?->label ?? 'de ce type',
+                )],
+            ]);
+        }
 
         $request->validate(['fichier' => ['required', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png']]);
 
@@ -1081,6 +1321,14 @@ class DossierController extends Controller
             // Titre, consigne et bouton d'impression dépendent du type de dossier : une
             // modification de statuts attend la décision des associés, pas une fiche signée.
             'accordAttendu' => $d->pieceAccordAttendue(),
+            // Anomalies métier calculées par le serveur, pour que le panneau « conditions
+            // requises » les affiche **dès l'ouverture** au lieu de les révéler au clic sur
+            // « Avancer ». Voir DossierStepService::anomaliesMetier() — vide hors Initialisation
+            // et Édition.
+            //
+            // ⚠️ Un `router.reload({ only: [...] })` qui oublierait cette clé laisserait le
+            // panneau afficher un état périmé.
+            'blocantsMetier' => $this->stepService->anomaliesMetier($d),
             'revision'    => $d->revision ? [
                 'id'         => $d->revision->id,
                 'statut'     => $d->revision->statut?->value,
@@ -1109,6 +1357,28 @@ class DossierController extends Controller
                 'email'     => $p->email,
                 'initiales' => $p->initiales,
                 'client_id' => $p->client_id,
+                // Emplacement de la partie dans le questionnaire. Exposé pour que
+                // `attachPartieIds()` (Show.jsx) apparie sur l'index réel de l'item plutôt
+                // que sur son rang dans la liste : un rang se décale au premier trou, et
+                // rattachait alors la partie — donc ses pièces — à la ligne voisine.
+                'donnees_bloc'  => $p->donnees_bloc,
+                'donnees_index' => $p->donnees_index,
+                // Représentation. `null` quand la personne comparaît elle-même. Le libellé du
+                // rôle vient du motif : le rôle en base reste `mandataire` pour les trois cas,
+                // l'afficher tel quel devant un tuteur serait faux.
+                'representation' => $p->representation_motif ? [
+                    'motif'           => $p->representation_motif->value,
+                    'motif_label'     => $p->representation_motif->label(),
+                    'role_label'      => $p->representation_motif->labelRepresentant(),
+                    'qualite'         => $p->representation_qualite,
+                    'titre_forme'     => $p->representation_titre_forme?->value,
+                    'titre_date'      => $p->representation_titre_date?->format('d/m/Y'),
+                    'titre_autorite'  => $p->representation_titre_autorite,
+                    'titre_reference' => $p->representation_titre_reference,
+                    // `null` si le représentant a été supprimé : l'écran doit alors le dire,
+                    // pas taire la personne. Voir ReglesRepresentationService.
+                    'representant_id' => $p->represente_par_partie_id,
+                ] : null,
                 'client'    => $p->client ? [
                     'id'           => $p->client->id,
                     'type'         => $p->client->type,
@@ -1125,8 +1395,14 @@ class DossierController extends Controller
                     : null,
                 // Les catégories de la checklist typée (piecesChecklist ci-dessous) sont
                 // exclues d'ici pour ne pas être affichées deux fois.
+                //
+                // Exclusion par **cette** personne, et non par l'union globale de toutes les
+                // catégories connues : une pièce déposée puis retirée de la checklist — le cas
+                // de `cni_representant` quand une représentation organique est déclarée, ou
+                // d'une procuration après qu'on a décoché la représentation — disparaîtrait
+                // sinon de partout, alors que le fichier est toujours au dossier.
                 'pieces'    => $p->pieces
-                    ->whereNotIn('categorie', array_merge(['photo'], Partie::categoriesPiecesRequises()))
+                    ->whereNotIn('categorie', array_merge(['photo'], array_keys($p->piecesRequisesDefinition())))
                     ->values()
                     ->map(fn ($doc) => $this->documentFichierToArray($doc)),
                 'piecesChecklist' => $p->piecesChecklist(),

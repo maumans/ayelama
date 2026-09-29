@@ -43,11 +43,7 @@ class PartieController extends Controller
     {
         $this->authorize('modifierQuestionnaire', $partie->dossier);
 
-        foreach ($partie->pieces as $piece) {
-            $piece->supprimerAvecFichiers();
-        }
-
-        $partie->delete();
+        $partie->supprimerAvecPieces();
 
         return back()->with('success', 'Personne retirée du dossier.');
     }

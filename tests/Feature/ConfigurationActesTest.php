@@ -106,10 +106,21 @@ class ConfigurationActesTest extends TestCase
         $this->assertSame([], VariantesTypeActe::pour('VTE-IMM'));
     }
 
-    public function test_soc_mod_declare_ses_sept_variantes(): void
+    /**
+     * Comptait « sept » variantes alors que l'enum en porte **neuf** depuis l'ajout de la
+     * dénomination sociale et de la forme juridique : le nombre en dur n'avait pas suivi, et
+     * le test était rouge dans l'arbre commité. Remis au vert le 2026-09-28.
+     *
+     * L'assertion ne compte plus : elle confronte le registre à l'enum. Un nombre écrit à la
+     * main redeviendra faux au prochain cas ajouté, ce qui est précisément ce qui s'est passé.
+     */
+    public function test_soc_mod_declare_toutes_les_variantes_de_son_enum(): void
     {
         $this->assertTrue(VariantesTypeActe::existePour('SOC-MOD'));
-        $this->assertCount(7, VariantesTypeActe::pour('SOC-MOD'));
+        $this->assertSame(
+            array_map(fn ($c) => $c->value, \App\Enums\TypeModificationStatutaire::cases()),
+            VariantesTypeActe::valeurs('SOC-MOD'),
+        );
         $this->assertContains('capital_cession', VariantesTypeActe::valeurs('SOC-MOD'));
     }
 

@@ -104,7 +104,7 @@ export default function DossiersIndex() {
                         { label: 'Total',           value: stats?.total        ?? 0, color: 'text-ink',      Icon: FolderOpen    },
                         { label: 'En cours',         value: stats?.enCours      ?? 0, color: 'text-blue-600', Icon: TrendingUp    },
                         { label: 'En retard',        value: stats?.enRetard     ?? 0, color: (stats?.enRetard ?? 0) > 0 ? 'text-danger' : 'text-slate-400', Icon: AlertTriangle },
-                        { label: 'Clôturés ce mois', value: stats?.cloturesMois ?? 0, color: 'text-success',  Icon: CheckCircle2  },
+                        { label: 'Archivés ce mois', value: stats?.cloturesMois ?? 0, color: 'text-success',  Icon: CheckCircle2  },
                     ].map(({ label, value, color, Icon }) => (
                         <Card key={label} className="p-3">
                             <div className="flex items-start justify-between">

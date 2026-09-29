@@ -13,7 +13,7 @@ import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
 import { ModalEnregistrerPaiement } from '@/Components/Facturation/ModalEnregistrerPaiement';
 import { ModalLigneFacture } from '@/Components/Facturation/ModalLigneFacture';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles , libelleRepresentant } from '@/data/questionnaires';
 import { ChampQuestionnaire, classesChamp } from '@/Components/Questionnaire/ChampQuestionnaire';
 import { allerAuBlocant, blocantsEtape, motifsParChamp } from '@/lib/blocantsEtape';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
@@ -30,8 +30,9 @@ import { ClotureTab } from '@/Components/Dossiers/ClotureTab';
 
 /** Ancre DOM de la carte « Parties & pièces » (onglet Informations). */
 const ANCRE_PIECES_PARTIES = 'pieces-parties';
-import { mapClientToPrefixedFields, buildPartieFields, estChampIdentite } from '@/lib/clientFields';
-import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles } from '@/lib/partiesPayload';
+import { mapClientToPrefixedFields, buildPartieFields, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
+import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles, roleRepresentant } from '@/lib/partiesPayload';
+import { piecesRequisesPour } from '@/lib/piecesRequises';
 import { isoDateToFR, frDateToISO } from '@/lib/dates';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -210,16 +211,29 @@ function attachPartieIds(fields, values, parties) {
     for (const field of fields) {
         if (field.type !== 'repeatable' || !field.clientRole) continue;
         const items = next[field.id] ?? [];
+        // Appariement sur `donnees_index`, l'emplacement réel de la partie dans le bloc, et
+        // non sur son rang dans la liste filtrée. Le rang se décale dès qu'un item du milieu
+        // n'a pas produit de Partie : la ligne 2 recevait alors l'id — donc les pièces — de
+        // la personne de la ligne 3. Repli sur le rang pour les parties antérieures au
+        // 2026-09-24, dont `donnees_index` est resté NULL (voir StoreDossierRequest, où les
+        // trois colonnes de localisation n'étaient pas validées, donc jamais persistées).
         const partiesDuRole = (parties ?? []).filter(p => p.role === field.clientRole);
+        const parIndex = new Map(
+            partiesDuRole.filter(p => p.donnees_index !== null && p.donnees_index !== undefined)
+                         .map(p => [p.donnees_index, p]),
+        );
         // `client` (l'objet, pas seulement l'id) est réattaché ici : sans lui, la
         // ligne rouvrirait en saisie libre et réafficherait les champs d'identité
         // que la refonte a justement retirés (voir ClientRoleSection).
-        next[field.id] = items.map((item, i) => ({
-            ...item,
-            partie_id: partiesDuRole[i]?.id ?? undefined,
-            client: partiesDuRole[i]?.client ?? item.client ?? undefined,
-            client_id: partiesDuRole[i]?.client?.id ?? item.client_id ?? undefined,
-        }));
+        next[field.id] = items.map((item, i) => {
+            const partie = parIndex.get(i) ?? (parIndex.size === 0 ? partiesDuRole[i] : undefined);
+            return {
+                ...item,
+                partie_id: partie?.id ?? undefined,
+                client: partie?.client ?? item.client ?? undefined,
+                client_id: partie?.client?.id ?? item.client_id ?? undefined,
+            };
+        });
     }
     return next;
 }
@@ -270,6 +284,15 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
         setClientLinks(prev => ({ ...prev, [group.clientRole]: client }));
     };
 
+    /** Même projection, au sous-préfixe près — miroir de Create.jsx. */
+    const applyClientToRepresentant = (group, client) => {
+        const prefix = group.fields[0].id.split('.')[0];
+        const fieldIds = group.fields.map(f => f.id);
+        const mapped = mapClientToPrefixedFields(client, prefix, fieldIds, 'repr_');
+        setFormValues(prev => ({ ...prev, ...mapped }));
+        setClientLinks(prev => ({ ...prev, [roleRepresentant(group.clientRole)]: client }));
+    };
+
     const unlinkClientFromSection = (role) => {
         setClientLinks(prev => {
             const next = { ...prev };
@@ -286,20 +309,35 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
     // Dès qu'une fiche est rattachée, ses champs d'identité sortent du formulaire :
     // même règle que dans l'assistant de création (voir Create.jsx).
     const champsAffichables = (group) => {
-        if (!group.clientRole || !clientLinks[group.clientRole]) return group.fields;
+        if (!group.clientRole) return group.fields;
+
+        // Décidé **par personne** : une section peut en porter deux, la partie et son
+        // représentant, chacune avec ou sans sa propre fiche. Rattacher celle du représenté ne
+        // doit pas faire disparaître les champs du mandataire, qui n'en a pas.
+        const fichesLiees = {
+            partie: clientLinks[group.clientRole] ?? null,
+            representant: clientLinks[roleRepresentant(group.clientRole)] ?? null,
+        };
+
         return group.fields.filter(f =>
             f.type === 'repeatable'
             || f.type === 'checkbox'
             || f.type === 'checkbox_required'
             || f.type === 'checkbox_group'
             || !estChampIdentite(f.id)
+            || !fichesLiees[personneDuChamp(f.id)]
         );
     };
 
-    const champsIdentiteManquants = (group) => {
-        if (!group.clientRole || !clientLinks[group.clientRole]) return [];
+    const champsIdentiteManquants = (group, personne = 'partie') => {
+        const role = personne === 'representant' ? roleRepresentant(group.clientRole) : group.clientRole;
+        if (!group.clientRole || !clientLinks[role]) return [];
+
         return group.fields
-            .filter(f => f.required && estChampIdentite(f.id) && !formValues[f.id])
+            .filter(f => f.required
+                && estChampIdentite(f.id)
+                && personneDuChamp(f.id) === personne
+                && !formValues[f.id])
             .map(f => f.label);
     };
 
@@ -390,6 +428,30 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                             saisieLibre={!!saisieLibreRoles[group.clientRole]}
                                             onToggleSaisieLibre={(v) => toggleSaisieLibre(group.clientRole, v)}
                                         />
+
+                                        {/* Le représentant, quand la personne se fait représenter.
+                                            Même composant, même échappatoire « saisie libre » — il
+                                            est une personne comme une autre. Les champs `repr_*`
+                                            s'affichent dans la liste ci-dessous, comme ceux de la
+                                            partie : cette modale est une liste à plat, pas la carte
+                                            de l'assistant. */}
+                                        {formValues[`${group.fields[0].id.split('.')[0]}.est_represente`] && (
+                                            <div className="mt-2 border-l-2 border-seal/25 pl-3">
+                                                <ClientRoleSection
+                                                    roleLabel={libelleRepresentant(
+                                                        formValues[`${group.fields[0].id.split('.')[0]}.representation_motif`],
+                                                    )}
+                                                    linked={clientLinks[roleRepresentant(group.clientRole)] ?? null}
+                                                    onSelect={(client) => applyClientToRepresentant(group, client)}
+                                                    onUnlink={() => unlinkClientFromSection(roleRepresentant(group.clientRole))}
+                                                    onCreateNew={() => setCreatingClientForGroup({ ...group, cible: 'representant' })}
+                                                    onEditClient={(client) => setEditingClient(client)}
+                                                    champsManquants={champsIdentiteManquants(group, 'representant')}
+                                                    saisieLibre={!!saisieLibreRoles[roleRepresentant(group.clientRole)]}
+                                                    onToggleSaisieLibre={(v) => toggleSaisieLibre(roleRepresentant(group.clientRole), v)}
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                                 {champsAffichables(group).map(field => (
@@ -441,20 +503,26 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                     if (!group.clientRole) return null;
                                     if (group.fields.some(f => f.type === 'repeatable')) return null;
 
-                                    // Si la partie existe déjà, RepeatableGroup et la fiche client s'en occupent,
-                                    // mais pour les non-répétables, s'il existe déjà une Partie, on ne propose pas d'upload temporaire.
-                                    // On vérifie si un client (donc une partie) est déjà lié.
-                                    const hasExistingPartie = !!clientLinks[group.clientRole];
-                                    if (hasExistingPartie) return null;
+                                    // Une Partie déjà enregistrée a sa vraie checklist sur l'onglet
+                                    // Informations, alimentée par `piecesChecklist()` : la proposer ici
+                                    // en second exemplaire ferait deux endroits pour déposer la même
+                                    // pièce. Ce dépôt-ci ne sert donc qu'aux personnes pas encore créées.
+                                    //
+                                    // Le test portait sur `clientLinks`, c'est-à-dire sur la présence
+                                    // d'une **fiche client** — pas d'une Partie. Rattacher une fiche à une
+                                    // personne que le dossier ne porte pas encore suffisait donc à faire
+                                    // disparaître le dépôt, sans qu'aucune checklist ne prenne le relais.
+                                    const partieExistante = (dossier.parties ?? []).some(p => p.role === group.clientRole);
+                                    if (partieExistante) return null;
 
-                                    let categorieRole = '';
-                                    if (group.clientRole === 'associe_unique') {
-                                        categorieRole = 'associe_physique';
-                                    } else if (['bailleur', 'locataire', 'vendeur', 'acheteur', 'liquidateur', 'creancier', 'debiteur'].includes(group.clientRole)) {
-                                        categorieRole = group.clientRole;
-                                    }
-                                    
-                                    const piecesRequisesSection = usePage().props.piecesRequises?.[categorieRole] ?? {};
+                                    // Règle servie par le serveur — voir lib/piecesRequises.js. La copie
+                                    // qui vivait ici nommait sept rôles sans jeu déclaré côté PHP, et la
+                                    // prop n'était même pas passée par `show()` : cette section était donc
+                                    // toujours vide.
+                                    const piecesRequisesSection = piecesRequisesPour(usePage().props.piecesRequises, {
+                                        role: group.clientRole,
+                                        typePersonne: formValues[`${group.fields[0].id.split('.')[0]}.type_personne`],
+                                    });
                                     const piecesKeys = Object.keys(piecesRequisesSection);
                                     
                                     if (piecesKeys.length === 0) return null;
@@ -523,7 +591,14 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
             open={creatingClientForGroup !== null}
             onClose={() => setCreatingClientForGroup(null)}
             onCreated={(client) => {
-                applyClientToSection(creatingClientForGroup, client);
+                // Une seule modale pour les deux personnes d'une section — le groupe porte
+                // `cible` quand la création vient de la carte du représentant. Miroir de
+                // Create.jsx : les deux écrans doivent se comporter pareil.
+                if (creatingClientForGroup.cible === 'representant') {
+                    applyClientToRepresentant(creatingClientForGroup, client);
+                } else {
+                    applyClientToSection(creatingClientForGroup, client);
+                }
                 setCreatingClientForGroup(null);
             }}
         />
@@ -881,6 +956,32 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
     const nbReprises = (partie) =>
         (partie.piecesChecklist ?? []).filter(i => !i.aUnFichier && i.reprise).length;
 
+    /**
+     * Les représentants sont rendus **à l'intérieur** de la carte de la personne qu'ils
+     * représentent, pas en cartes sœurs : un mandataire n'est pas une partie de plus à l'acte,
+     * c'est le mode de comparution de quelqu'un d'autre. Les lister à plat, badgés
+     * « mandataire » et détachés, aurait laissé croire à une partie supplémentaire.
+     *
+     * ⚠️ Un représentant dont le lien n'a pas résolu reste rendu au **premier niveau**, avec son
+     * badge. Une personne qui disparaît silencieusement d'un dossier notarial est le pire
+     * résultat possible : mieux vaut une carte orpheline, que ReglesRepresentationService
+     * signale par ailleurs comme un blocage.
+     */
+    const representantDe = React.useMemo(() => {
+        const parMandant = {};
+        for (const p of dossier.parties ?? []) {
+            if (p.representation?.representant_id) {
+                parMandant[p.id] = (dossier.parties ?? []).find(x => x.id === p.representation.representant_id) ?? null;
+            }
+        }
+        return parMandant;
+    }, [dossier.parties]);
+
+    const partiesRacines = React.useMemo(() => {
+        const designes = new Set(Object.values(representantDe).filter(Boolean).map(p => p.id));
+        return (dossier.parties ?? []).filter(p => !designes.has(p.id));
+    }, [dossier.parties, representantDe]);
+
     const questKey    = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
     const questFields = QUESTIONNAIRES[questKey] ?? [];
     const hasQuestData = dossier.questionnaire && Object.keys(dossier.questionnaire).length > 0;
@@ -1061,8 +1162,9 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                     )}
                     {!dossier.parties?.length ? (
                         <p className="text-sm text-slate-400 italic py-2">Aucune partie enregistrée.</p>
-                    ) : dossier.parties.map((partie, i) => {
+                    ) : partiesRacines.map((partie, i) => {
                         const estLibre = !managedRoles.includes(partie.role);
+                        const representant = representantDe[partie.id] ?? null;
                         return (
                             <Card key={i}>
                                 <CardContent className="p-4">
@@ -1136,6 +1238,74 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                                         canEdit={can?.gererPieces}
                                         onAjouter={() => setPieceModalPartie(partie)}
                                     />
+
+                                    {/* Le représentant, à l'intérieur de la carte de celui qu'il
+                                        représente : ce n'est pas une partie de plus, c'est le mode
+                                        de comparution de celle-ci. Il garde sa propre checklist —
+                                        sa CNI est sa pièce, la procuration est celle du mandant. */}
+                                    {partie.representation && (
+                                        <div className="mt-3 border-l-2 border-seal/30 pl-3">
+                                            <p className="text-xs text-slate-500">
+                                                {partie.representation.representant_id
+                                                    ? <>Représenté(e) à l'acte par <span className="font-medium text-slate-700">{representant?.nom}</span> — {partie.representation.motif_label}</>
+                                                    : <span className="text-danger">Représentation déclarée, représentant introuvable — à corriger avant l'édition.</span>}
+                                            </p>
+                                            {partie.representation.titre_date && (
+                                                <p className="mt-0.5 text-xs text-slate-400">
+                                                    Titre du {partie.representation.titre_date}
+                                                    {partie.representation.titre_autorite ? ` — ${partie.representation.titre_autorite}` : ''}
+                                                </p>
+                                            )}
+
+                                            {representant && (
+                                                <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                                                    <div className="flex items-start gap-3">
+                                                        <PartiePhotoAvatar partie={representant} canEdit={can?.gererPieces} />
+                                                        <div className="flex-1">
+                                                            <div className="text-sm font-medium text-slate-800">{representant.nom}</div>
+                                                            <Badge variant="secondary" className="mt-1">
+                                                                {partie.representation.role_label}
+                                                            </Badge>
+                                                            {representant.cni && (
+                                                                <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                                                                    <FileText className="h-3 w-3 shrink-0" />
+                                                                    <span className="font-ref">{representant.cni}</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        {can?.gererPieces && nbReprises(representant) > 0 && (
+                                                            <Button
+                                                                variant="outline" size="sm"
+                                                                className="h-8 shrink-0 gap-1.5 border-seal/40 bg-seal-light text-seal-hover hover:border-seal"
+                                                                onClick={() => router.post(`/parties/${representant.id}/pieces/reprendre-tout`, {}, { preserveScroll: true, preserveState: true })}
+                                                                title="Copier dans ce dossier les pièces déjà fournies par cette personne"
+                                                            >
+                                                                <CopyCheck className="h-3.5 w-3.5" />
+                                                                Reprendre {nbReprises(representant)} pièce{nbReprises(representant) > 1 ? 's' : ''}
+                                                            </Button>
+                                                        )}
+                                                    </div>
+
+                                                    {representant.piecesChecklist?.length > 0 && (
+                                                        <div className="mt-2 divide-y divide-slate-100">
+                                                            {representant.piecesChecklist.map(item => (
+                                                                <PieceGedRow
+                                                                    key={item.categorie}
+                                                                    piece={item}
+                                                                    peutGerer={can?.gererPieces}
+                                                                    isPreviewOpen={previewPieceKey === `${representant.id}:${item.categorie}`}
+                                                                    onTogglePreview={() => togglePreviewPiece(representant.id, item.categorie)}
+                                                                    uploadUrl={`/parties/${representant.id}/pieces/${item.categorie}/televerser`}
+                                                                    downloadUrl={`/documents/${item.id}/download`}
+                                                                    repriseUrl={`/parties/${representant.id}/pieces/${item.categorie}/reprendre`}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </CardContent>
                             </Card>
                         );
@@ -2208,6 +2378,44 @@ function ExpeditionTab({ dossier, reference, can }) {
  * message cliquable pour amener directement à l'endroit où agir, plutôt que de
  * laisser l'utilisateur chercher la section concernée.
  */
+/**
+ * Où corriger une anomalie métier — clé d'anomalie → onglet, ancre et libellé du bouton.
+ *
+ * Elle vit **côté client** et non dans le payload, délibérément : les ancres sont des
+ * identifiants DOM (`ANCRE_ACCORD_CLIENT`, `ANCRE_PIECES_PARTIES`) exportés par les composants.
+ * Les faire émettre par le serveur créerait une quatrième duplication PHP/JS à garder par un
+ * test de parité, pour un gain nul.
+ *
+ * ⚠️ Une clé absente de cette table n'est **pas** perdue : son message s'affiche sans bouton.
+ * C'est la propriété qui compte — un blocage nouveau est toujours visible, jamais avalé.
+ */
+const CIBLES_BLOCANTS = {
+    // Règles de société — la correction passe par le questionnaire ou la fiche société.
+    soc_denomination:        { tab: 'informations', action: 'Corriger le questionnaire' },
+    soc_capital:             { tab: 'informations', action: 'Corriger le questionnaire' },
+    soc_associes:            { tab: 'informations', action: 'Corriger le questionnaire' },
+    soc_commissaire:         { tab: 'informations', action: 'Corriger le questionnaire' },
+    soc_capacite:            { tab: 'informations', action: 'Corriger le questionnaire' },
+    modif_types:             { tab: 'informations', action: 'Corriger le questionnaire' },
+    modif_incompatibles:     { tab: 'informations', action: 'Corriger le questionnaire' },
+    modif_societe:           { tab: 'informations', action: 'Rattacher la société' },
+    modif_pieces_societe:    { tab: 'informations', action: 'Verser le dossier constitutif' },
+    modif_assemblee:         { tab: 'informations', action: 'Corriger le questionnaire' },
+    modif_valeur_parts:      { tab: 'informations', action: 'Corriger le questionnaire' },
+    modif_parties_cession:   { tab: 'informations', ancre: ANCRE_PIECES_PARTIES, action: 'Compléter les parties' },
+    modif_gerant:            { tab: 'informations', action: 'Corriger le questionnaire' },
+    // Dissolution-liquidation.
+    dissolution_phase:       { tab: 'informations', action: 'Choisir la phase' },
+    dissolution_cycle_vie:   { tab: 'informations', action: 'Voir le registre' },
+    dissolution_assemblee:   { tab: 'informations', action: 'Dater l\'assemblée' },
+    dissolution_liquidateur: { tab: 'informations', action: 'Nommer le liquidateur' },
+    // Représentation d'une partie.
+    representation_sans_representant: { tab: 'informations', ancre: ANCRE_PIECES_PARTIES, action: 'Compléter la représentation' },
+    representation_sans_motif:        { tab: 'informations', ancre: ANCRE_PIECES_PARTIES, action: 'Préciser le motif' },
+    representation_titre:             { tab: 'informations', ancre: ANCRE_PIECES_PARTIES, action: 'Dater la procuration' },
+    representation_chaine:            { tab: 'informations', ancre: ANCRE_PIECES_PARTIES, action: 'Corriger la représentation' },
+};
+
 function getStepBlockers(dossier) {
     const etape = dossier?.etape?.value;
     const docs = dossier?.documents ?? [];
@@ -2236,10 +2444,15 @@ function getStepBlockers(dossier) {
                     action: 'Compléter les pièces',
                 });
             }
-            if (!dossier.accordClient?.est_signe_cachete) {
-                // Libellé porté par le dossier : une modification de statuts attend la décision
-                // des associés, pas une fiche de recueil signée.
-                const attendu = dossier.accordAttendu;
+            // Libellé **et caractère bloquant** portés par le dossier : une modification de
+            // statuts attend la décision des associés, pas une fiche de recueil signée, et une
+            // dissolution ne bloque pas du tout (voir App\Support\AccordsInitialisation).
+            // `!== false` plutôt que `=== true` : le repli d'une page ouverte avant le
+            // déploiement n'a pas la clé, et doit rester conservateur.
+            const attendu = dossier.accordAttendu;
+            const accordBloque = attendu?.exigence ? attendu.exigence === 'bloquante' : true;
+
+            if (accordBloque && !dossier.accordClient?.est_signe_cachete) {
                 b.push({
                     texte: attendu
                         ? `« ${attendu.nom} » n'a pas été téléversé`
@@ -2253,6 +2466,24 @@ function getStepBlockers(dossier) {
             if (etape === 'edition' && docs.length === 0) {
                 b.push({ texte: "Aucun acte n'a été produit — au moins un est requis", tab: 'documents', action: 'Voir les actes' });
             }
+
+            // ── Règles métier, calculées par le SERVEUR ──────────────────────
+            // Règles de société (capital minimum, commissaire aux comptes, cohérence du cycle
+            // de vie d'une dissolution…) et de représentation. Elles n'apparaissaient nulle
+            // part ici : le panneau pouvait être vide alors que le serveur refusait, et le
+            // clerc ne le découvrait qu'en cliquant « Avancer ».
+            //
+            // Elles ne sont **pas réécrites en JavaScript** — le serveur les calcule et les
+            // envoie (`DossierStepService::anomaliesMetier()`). Une règle ajoutée demain
+            // apparaîtra ici sans une ligne de front. C'est la sortie que le devbook §9
+            // désignait pour ce troisième miroir.
+            //
+            // `CIBLES_BLOCANTS` n'ajoute qu'un bouton quand on sait où mener ; une clé inconnue
+            // s'affiche **sans** bouton plutôt que de disparaître.
+            for (const anomalie of dossier.blocantsMetier ?? []) {
+                b.push({ texte: anomalie.texte, ...(CIBLES_BLOCANTS[anomalie.cle] ?? {}) });
+            }
+
             return b;
         }
         case 'revision': {
@@ -2492,10 +2723,31 @@ function FacturationTab({ dossier, can }) {
                             <tbody className="divide-y divide-slate-100">
                                 {facture.lignes?.map((ligne, i) => (
                                     <tr key={i} className="hover:bg-slate-50 transition-colors">
-                                        <td className="px-4 py-3 text-slate-700">{ligne.designation}</td>
+                                        <td className="px-4 py-3 text-slate-700">
+                                            {ligne.designation}
+                                            {/* La remise se lit sous ses deux formes, comme elle se saisit. */}
+                                            {ligne.remiseMontant > 0 && (
+                                                <span className="ml-2 inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                                                    remise {fmtGNF(ligne.remiseMontant)} GNF ({ligne.remisePourcentage} %)
+                                                </span>
+                                            )}
+                                            {/* Un tarif revu à la baisse peut rendre une remise en montant plus
+                                                grande que la ligne : elle est plafonnée au calcul, jamais corrigée
+                                                en silence. */}
+                                            {ligne.remiseDepasse && (
+                                                <span className="ml-2 text-[11px] text-danger">
+                                                    ⚠️ remise supérieure au montant de la ligne
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-3 text-slate-500 text-right">{ligne.quantite}</td>
                                         <td className="px-4 py-3 text-slate-600 text-right font-ref">{fmtGNF(ligne.montant)}</td>
-                                        <td className="px-4 py-3 text-slate-800 font-medium text-right font-ref">{fmtGNF(ligne.total)}</td>
+                                        <td className="px-4 py-3 text-right font-ref">
+                                            {ligne.remiseMontant > 0 && (
+                                                <span className="mr-1.5 text-xs text-slate-400 line-through">{fmtGNF(ligne.montantBrut)}</span>
+                                            )}
+                                            <span className="font-medium text-slate-800">{fmtGNF(ligne.total)}</span>
+                                        </td>
                                         {lignesModifiables && (
                                             <td className="px-4 py-3 text-right">
                                                 <div className="flex items-center justify-end gap-1">
@@ -2512,6 +2764,22 @@ function FacturationTab({ dossier, can }) {
                                 ))}
                             </tbody>
                             <tfoot className="bg-slate-50 border-t border-slate-200">
+                                {/* Le brut et les remises ne s'affichent que s'il y en a : une facture
+                                    sans remise garde exactement l'allure qu'elle avait. */}
+                                {facture.totalRemises > 0 && (
+                                    <>
+                                        <tr className="text-slate-500">
+                                            <td colSpan={3} className="px-4 py-1.5 text-right text-xs">Sous-total avant remise</td>
+                                            <td className="px-4 py-1.5 text-right font-ref text-xs">{fmtGNF(facture.totalBrut)} GNF</td>
+                                            {lignesModifiables && <td />}
+                                        </tr>
+                                        <tr className="text-amber-700">
+                                            <td colSpan={3} className="px-4 py-1.5 text-right text-xs">Remises accordées</td>
+                                            <td className="px-4 py-1.5 text-right font-ref text-xs">− {fmtGNF(facture.totalRemises)} GNF</td>
+                                            {lignesModifiables && <td />}
+                                        </tr>
+                                    </>
+                                )}
                                 <tr>
                                     <td colSpan={3} className="px-4 py-3 text-right font-semibold text-slate-700">TOTAL À PAYER</td>
                                     <td className="px-4 py-3 text-right font-bold text-seal font-ref text-base">

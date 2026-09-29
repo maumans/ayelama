@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\StatutSociete;
+use App\Models\JournalActivite;
 use App\Models\Partie;
 use App\Models\Societe;
 use App\Support\Normalisation;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 
 /**
  * Registre des sociétés — recherche, création et correction d'une fiche sans quitter
@@ -18,6 +21,136 @@ use Illuminate\Http\Request;
 class SocieteController extends Controller
 {
     /**
+     * Registre des sociétés — la page où l'étude voit ses liquidations en cours.
+     *
+     * Sans elle, le cycle de vie n'existerait que dans la base : la commande d'alerte
+     * enverrait des courriels vers une page inexistante, et rien ne permettrait de constater
+     * une radiation. Une alerte sans bouton est une alerte qu'on apprend à ignorer.
+     *
+     * Volontairement une **liste**, pas un module : pas de page de détail, pas d'édition
+     * complète, pas d'historique de fiche. La correction d'une fiche se fait déjà depuis
+     * l'assistant de dossier ({@see update()}).
+     */
+    public function index(Request $request)
+    {
+        $this->authorize('viewAny', Societe::class);
+
+        $societes = Societe::query()
+            ->withCount('dossiers')
+            // `dossiers` en entier : `immatriculeeSansRccm()` a besoin de leur étape.
+            ->with('dossier:id,reference', 'dossiers:id,societe_id,etape')
+            ->when($request->q, fn ($query, $terme) => $query->recherche($terme))
+            ->when($request->statut, fn ($query, $statut) => $query->where('statut', $statut))
+            ->orderBy('denomination')
+            ->paginate(25)
+            ->withQueryString();
+
+        return Inertia::render('Societes/Index', [
+            'societes' => $societes->through(fn (Societe $s) => [
+                'id'                => $s->id,
+                'denomination'      => $s->denomination,
+                'sigle'             => $s->sigle,
+                'forme'             => $s->forme,
+                'forme_label'       => $s->formeLabel(),
+                'rccm_numero'       => $s->rccm_numero,
+                'statut'            => $s->statut->value,
+                'statut_label'      => $s->statut->label(),
+                'dissolution_at'    => $s->dissolution_at?->format('d/m/Y'),
+                'cloture_at'        => $s->cloture_liquidation_at?->format('d/m/Y'),
+                'radiation_at'      => $s->radiation_at?->format('d/m/Y'),
+                'liquidateur'       => $s->liquidateurActuel(),
+                'dossiers_count'    => $s->dossiers_count,
+                'dossier_origine'   => $s->dossier?->reference,
+                // Un seul calcul d'échéance dans tout le projet, partagé avec la commande
+                // d'alerte — voir Societe::echeancesLiquidation().
+                'echeance'          => $this->presenterEcheance($s->prochaineEcheanceLiquidation()),
+                // Seule une liquidation clôturée peut être radiée : le bouton n'apparaît que
+                // là, et la route le revérifie — l'interface n'est pas un contrôle.
+                'peut_etre_radiee'  => $s->statut === StatutSociete::LiquidationCloturee,
+                // Les données perdues avant la capture au retour de formalité : l'étude les
+                // corrige en une saisie, et le mécanisme empêche que cela se reproduise.
+                'manque_rccm'       => $s->immatriculeeSansRccm(),
+            ]),
+            'statuts' => StatutSociete::toutes(),
+            'filters' => [
+                'q'      => $request->q ?? '',
+                'statut' => $request->statut ?? '',
+            ],
+            'stats' => [
+                'total'         => Societe::count(),
+                'enLiquidation' => Societe::statut([StatutSociete::EnLiquidation])->count(),
+                'aRadier'       => Societe::statut([StatutSociete::LiquidationCloturee])->count(),
+                'manqueRccm'    => Societe::with('dossiers:id,societe_id,etape')->get()
+                    ->filter(fn (Societe $s) => $s->immatriculeeSansRccm())
+                    ->count(),
+            ],
+        ]);
+    }
+
+    /** @param array|null $echeance */
+    private function presenterEcheance(?array $echeance): ?array
+    {
+        if (! $echeance) {
+            return null;
+        }
+
+        return [
+            ...$echeance,
+            'echeance' => $echeance['echeance']->format('d/m/Y'),
+        ];
+    }
+
+    /**
+     * Constate la radiation d'une société au RCCM — **action humaine explicite**.
+     *
+     * Les trois autres transitions sont automatiques, posées à l'entrée en Expédition du
+     * dossier correspondant. Celle-ci ne peut pas l'être : la radiation n'est prouvée que par
+     * la pièce du greffe, et aucune étape de dossier ne la constate — le dossier de clôture
+     * est terminé bien avant que le greffe ne réponde. La rattacher à une formalité
+     * supposerait de déclarer *laquelle* vaut radiation, donc d'inventer.
+     */
+    public function radier(Request $request, Societe $societe)
+    {
+        $this->authorize('update', $societe);
+
+        if ($societe->statut !== StatutSociete::LiquidationCloturee) {
+            return back()->with('error', sprintf(
+                'La société « %s » est %s : seule une liquidation clôturée peut être radiée.',
+                $societe->denomination,
+                mb_strtolower($societe->statut->label()),
+            ));
+        }
+
+        $data = $request->validate([
+            // Colonne castée : ISO, jamais du français. Le contrat est en tête de
+            // resources/js/lib/dates.js, et poster du JJ/MM/AAAA vers une colonne castée est
+            // le défaut que ce projet a déjà commis cinq fois.
+            'radiation_at' => ['required', 'date', 'before_or_equal:today'],
+        ], [
+            'radiation_at.before_or_equal' => 'La radiation ne peut pas être constatée dans le futur.',
+        ]);
+
+        $societe->update([
+            'statut'       => StatutSociete::Radiee,
+            'radiation_at' => $data['radiation_at'],
+        ]);
+
+        JournalActivite::enregistrer(
+            $societe->dossier,
+            sprintf(
+                'Fiche société « %s » : radiation au RCCM constatée au %s',
+                $societe->denomination,
+                $societe->radiation_at->format('d/m/Y'),
+            ),
+            'societe',
+            ['statut' => ['avant' => StatutSociete::LiquidationCloturee->value, 'apres' => StatutSociete::Radiee->value]],
+            $request->user(),
+        );
+
+        return back()->with('success', "Radiation de « {$societe->denomination} » enregistrée.");
+    }
+
+    /**
      * Recherche de sociétés pour l'auto-complétion (sélecteur de société de l'assistant de
      * dossier). Réponse JSON brute, pas une page Inertia.
      */
@@ -27,7 +160,11 @@ class SocieteController extends Controller
 
         $q = trim((string) $request->get('q', ''));
 
-        $query = Societe::query()->actif()->with('dossier:id,reference');
+        // **Aucun filtre de statut** : la clôture d'une liquidation doit pouvoir désigner une
+        // société en liquidation, et masquer une fiche radiée priverait le clerc de la seule
+        // explication utile. Le statut voyage dans la réponse et s'affiche en badge — « un
+        // blocage énuméré plutôt qu'un bouton grisé ».
+        $query = Societe::query()->with('dossier:id,reference');
 
         if (mb_strlen($q) < 2) {
             // Aucune recherche saisie : proposer les fiches les plus récentes plutôt qu'une
@@ -182,6 +319,13 @@ class SocieteController extends Controller
             // Dirigeant en exercice, calculé : préremplit `soc.gerant_actuel` au rattachement plutôt
             // que de le laisser saisir alors qu'il est connu du registre.
             'gerant_actuel'    => $societe->gerantActuel(),
+            // Cycle de vie de la fiche. `statut_label` et `statut_explication` accompagnent la
+            // valeur pour que le sélecteur affiche son badge sans redéclarer l'enum en JavaScript.
+            'statut'             => $societe->statut->value,
+            'statut_label'       => $societe->statut->label(),
+            'statut_couleur'     => $societe->statut->couleur(),
+            'statut_explication' => $societe->statut->explication(),
+            'liquidateur_actuel' => $societe->liquidateurActuel(),
             // Dossier constitutif : seules les sociétés que l'étude n'a pas constituées doivent le
             // fournir — pour les autres, le dossier d'origine fait foi et la checklist ne s'affiche
             // pas du tout.

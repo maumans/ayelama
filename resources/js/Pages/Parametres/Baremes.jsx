@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 const EMPTY_BAREME_FORM = {
     applicable_tous: false, type_acte_ids: [], organisme: 'Impots', libelle: '',
     taux: '', montant_fixe: '', quantite_defaut: '1', base_calcul: 'valeur_acte', description: '',
+    remise_autorisee: false,
     genere_formalite: false, depend_de_bareme_id: '',
     type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
 };
@@ -39,7 +40,7 @@ const ORGANISME_COLORS = {
     Autre:        'bg-slate-100 text-slate-600',
 };
 
-function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesActesAvecBaremes, organismes }) {
+function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesActesAvecBaremes, organismes, donneesAuRetour = [] }) {
     const isEdit = Boolean(bareme);
     const [form, setForm] = useState(EMPTY_BAREME_FORM);
     const [nouvellePiece, setNouvellePiece] = useState('');
@@ -55,6 +56,7 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
                 taux:             bareme.taux ?? '',
                 montant_fixe:     bareme.montant_fixe ?? '',
                 quantite_defaut:  String(bareme.quantite_defaut ?? 1),
+                remise_autorisee: !!bareme.remise_autorisee,
                 base_calcul:      bareme.base_calcul ?? 'valeur_acte',
                 description:      bareme.description ?? '',
                 genere_formalite: !!bareme.genere_formalite,
@@ -63,6 +65,7 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
                 retour_attendu:   bareme.retour_attendu ?? '',
                 delai_heures:     bareme.delai_heures ?? '',
                 pieces_requises:  bareme.pieces_requises ?? [],
+                donnees_au_retour: bareme.donnees_au_retour ?? [],
             } : EMPTY_BAREME_FORM);
             setErrors({});
             setNouvellePiece('');
@@ -241,6 +244,27 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
                         {errors.quantite_defaut && <p className="text-xs text-danger-text">{errors.quantite_defaut}</p>}
                     </div>
 
+                    {/* Remise — distinct de la formalité, et volontairement au-dessus : c'est la
+                        nature de la ligne (honoraire ou débours) qui décide, pas son circuit. */}
+                    <div className="rounded-lg border border-slate-200 p-3">
+                        <label className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                            <Checkbox checked={form.remise_autorisee}
+                                onCheckedChange={(checked) => setForm(f => ({ ...f, remise_autorisee: checked === true }))} />
+                            <span>
+                                <span className="flex items-center gap-1.5">
+                                    <Percent className="h-3.5 w-3.5 text-seal-hover" />
+                                    Cette ligne peut recevoir une remise
+                                </span>
+                                <span className="block text-xs text-slate-500 mt-0.5">
+                                    À réserver aux honoraires de l'étude. Un débours — impôts, greffe,
+                                    APIP, journal — est versé intégralement au tiers : le remiser ferait
+                                    perdre de l'argent réel, pas de la marge.
+                                </span>
+                            </span>
+                        </label>
+                        {errors.remise_autorisee && <p className="text-xs text-danger-text">{errors.remise_autorisee}</p>}
+                    </div>
+
                     <div className="rounded-lg border border-slate-200 p-3 space-y-3">
                         <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
                             <Checkbox checked={form.genere_formalite}
@@ -324,6 +348,45 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
                                             disabled={!nouvellePiece.trim()} className="shrink-0">
                                             <Plus className="h-3.5 w-3.5 mr-1" /> Ajouter
                                         </Button>
+                                    </div>
+                                </div>
+
+                                {/* ── Données délivrées par l'autorité ──────────────────
+                                    Distinct des pièces requises, qui sont des **fichiers** :
+                                    ici on déclare les **valeurs** que le formaliste devra
+                                    saisir au retour, et qui seront portées à la fiche société.
+
+                                    La liste vient du serveur (`donneesAuRetour`) : cet écran
+                                    ne porte aucun nom de donnée, et un cas ajouté à l'enum y
+                                    apparaît sans toucher au front. */}
+                                <div className="mt-3 pt-3 border-t border-slate-100">
+                                    <Label className="text-xs">
+                                        Informations délivrées au retour
+                                        <span className="text-slate-400"> — reportées à la fiche société</span>
+                                    </Label>
+                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                        {(donneesAuRetour ?? []).map(d => {
+                                            const coche = (form.donnees_au_retour ?? []).includes(d.valeur);
+                                            return (
+                                                <label key={d.valeur} className="flex items-start gap-2 text-sm cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={coche}
+                                                        onChange={() => setForm(f => ({
+                                                            ...f,
+                                                            donnees_au_retour: coche
+                                                                ? f.donnees_au_retour.filter(v => v !== d.valeur)
+                                                                : [...(f.donnees_au_retour ?? []), d.valeur],
+                                                        }))}
+                                                        className="mt-1"
+                                                    />
+                                                    <span>
+                                                        <span className="text-ink">{d.label}</span>
+                                                        {d.exemple && <span className="block text-[11px] text-slate-400 font-mono">{d.exemple}</span>}
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             </div>
@@ -483,7 +546,7 @@ function TypeActeRow({ typeActe, onEdit }) {
 }
 
 export default function ParametresBaremes() {
-    const { typesActes = [], categories = [], organismes = [], filters = {}, stats = {} } = usePage().props;
+    const { typesActes = [], categories = [], organismes = [], filters = {}, stats = {}, donneesAuRetour = [] } = usePage().props;
 
     const [categorie, setCategorie] = useState(filters.categorie ?? '');
     const [modal, setModal] = useState({ open: false, bareme: null });
@@ -587,6 +650,7 @@ export default function ParametresBaremes() {
                 typesActes={allTypesActes}
                 typesActesAvecBaremes={typesActes}
                 organismes={organismes}
+                donneesAuRetour={donneesAuRetour}
             />
         </AppLayout>
     );

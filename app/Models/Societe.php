@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\EtapeDossier;
 use App\Enums\FormeSociete;
+use App\Enums\JalonLiquidation;
+use App\Enums\StatutSociete;
 use App\Support\Normalisation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -36,7 +38,21 @@ class Societe extends Model
         'rccm_numero', 'nif', 'jal_journal',
         'direction',
         'commissaire_titulaire', 'commissaire_suppleant',
-        'derniere_modification_at', 'actif',
+        'derniere_modification_at',
+        'statut', 'dissolution_at', 'cloture_liquidation_at', 'radiation_at',
+    ];
+
+    /**
+     * Statut par défaut, **côté modèle**.
+     *
+     * Le défaut de la colonne ne suffit pas : après `Societe::create()`, l'instance en mémoire
+     * n'a pas relu la ligne, `$societe->statut` vaut `null` et l'accès casté échoue. C'est
+     * exactement ce qui est arrivé le 2026-09-28 — `SocieteController::presenter()` renvoyait
+     * une 500 sur la création d'une fiche, faute d'un refresh que rien n'imposait. Déclaré ici,
+     * le défaut vaut pour l'objet comme pour la table.
+     */
+    protected $attributes = [
+        'statut' => StatutSociete::Active->value,
     ];
 
     /**
@@ -63,6 +79,12 @@ class Societe extends Model
         'soc.duree'                    => 'duree',
         'soc.rccm'                     => 'rccm_numero',
         'soc.nif'                      => 'nif',
+        // ⚠️ `date_constitution` porte la date d'**immatriculation au RCCM**, pas celle de
+        // signature des statuts : c'est à l'immatriculation que la société acquiert la
+        // personnalité juridique, c'est cette date que l'acte cite (« immatriculée sous le
+        // numéro …, en date du … ») et depuis laquelle court la durée statutaire de
+        // l'article 5. Le commentaire de la migration d'origine (« depuis quand la société
+        // existe ») était ambigu. Elle se remplit au retour de la formalité APIP.
         'soc.date_constitution'        => 'date_constitution',
     ];
 
@@ -85,7 +107,10 @@ class Societe extends Model
             'date_acte'                => 'date',
             'date_constitution'        => 'date',
             'derniere_modification_at' => 'datetime',
-            'actif'                    => 'boolean',
+            'statut'                   => StatutSociete::class,
+            'dissolution_at'           => 'date',
+            'cloture_liquidation_at'   => 'date',
+            'radiation_at'             => 'date',
             'direction'                => 'array',
         ];
     }
@@ -128,9 +153,29 @@ class Societe extends Model
         });
     }
 
-    public function scopeActif(Builder $query): Builder
+    /**
+     * Restreint aux statuts donnés.
+     *
+     * Remplace `scopeActif()`, dont l'usage unique (l'autocomplétion du sélecteur de société)
+     * ne filtre plus du tout : la clôture d'une liquidation doit pouvoir désigner une société
+     * en liquidation, et cacher une fiche radiée priverait le clerc de la seule explication
+     * utile. Le sélecteur affiche un badge de statut à la place — le dépôt préfère « un
+     * blocage énuméré à un bouton grisé ».
+     *
+     * @param  array<int, StatutSociete|string> $statuts
+     */
+    public function scopeStatut(Builder $query, array $statuts): Builder
     {
-        return $query->where('actif', true);
+        return $query->whereIn('statut', array_map(
+            fn (StatutSociete|string $s) => $s instanceof StatutSociete ? $s->value : $s,
+            $statuts,
+        ));
+    }
+
+    /** Sociétés dont la liquidation est en cours — cible de la commande d'alerte. */
+    public function scopeEnLiquidation(Builder $query): Builder
+    {
+        return $query->where('statut', StatutSociete::EnLiquidation->value);
     }
 
     public function formeEnum(): ?FormeSociete
@@ -591,5 +636,147 @@ class Societe extends Model
         }
 
         return null;
+    }
+
+    /**
+     * Liquidateur en exercice, ou `null`.
+     *
+     * Stocké dans le JSON `direction` — même emplacement que le gérant, écrit par le même
+     * mécanisme d'effet à l'entrée en Expédition. Aucune colonne dédiée : le liquidateur est
+     * un dirigeant de plus, pas une nature d'information nouvelle.
+     *
+     * **Pas de repli sur les parties du dossier**, contrairement à {@see gerantActuel()} : ce
+     * repli y existe parce que `direction` est nulle sur toutes les fiches issues du backfill,
+     * et qu'il va lire le dossier de **constitution**. Un liquidateur ne peut pas y figurer.
+     * L'inventer depuis `ROLES_DIRECTION` rendrait le gérant sous le nom de liquidateur.
+     */
+    public function liquidateurActuel(): ?string
+    {
+        $nom = $this->direction['liquidateur'] ?? null;
+
+        return filled($nom) ? trim((string) $nom) : null;
+    }
+
+    /** Qualité du liquidateur telle que déclarée à l'assemblée (associé, tiers désigné…). */
+    public function liquidateurQualite(): ?string
+    {
+        $qualite = $this->direction['liquidateur_qualite'] ?? null;
+
+        return filled($qualite) ? trim((string) $qualite) : null;
+    }
+
+    /**
+     * Échéances de liquidation de cette fiche — **un seul calcul**, pour tous ses lecteurs.
+     *
+     * La commande d'alerte et l'écran du registre consomment celui-ci. Deux calculs
+     * divergeraient : c'est exactement ce qui est arrivé au panneau « Actes attendus », qui
+     * annonçait quatre documents là où `modeles_actes` n'en avait aucun d'actif.
+     *
+     * ⚠️ Les délais ne sont **pas garantis** — voir {@see JalonLiquidation}. `aVerifier` et
+     * `source` voyagent avec chaque échéance pour que l'affichage et l'alerte le disent, au
+     * lieu de présenter une hypothèse comme une règle.
+     *
+     * @return array<int, array{jalon: string, label: string, echeance: \Illuminate\Support\Carbon,
+     *                          joursRestants: int, enRetard: bool, aVerifier: bool, source: string}>
+     */
+    public function echeancesLiquidation(): array
+    {
+        $echeances = [];
+
+        foreach (JalonLiquidation::pourStatut($this->statut) as $jalon) {
+            $depart = $this->{$jalon->colonneDepart()};
+
+            if (! $depart) {
+                // Jalon inapplicable : la date de départ n'est pas connue. Une fiche entrée au
+                // registre à la main peut être en liquidation sans date de dissolution, et
+                // inventer `created_at` comme point de départ produirait de fausses alertes.
+                continue;
+            }
+
+            // Le délai décidé par l'acte prime sur le paramètre d'étude : le mandat du
+            // liquidateur est fixé par l'assemblée, pas par une règle générale. Le paramètre
+            // ne sert que de repli, pour une fiche sans dossier porteur.
+            $mois     = $this->delaiDecideParLActe($jalon) ?? $jalon->delaiMois();
+            $echeance = $depart->copy()->addMonths($mois)->startOfDay();
+
+            $echeances[] = [
+                'jalon'         => $jalon->value,
+                'label'         => $jalon->label(),
+                'echeance'      => $echeance,
+                'joursRestants' => (int) now()->startOfDay()->diffInDays($echeance, false),
+                'enRetard'      => $echeance->isPast(),
+                // Un délai lu dans l'acte n'est plus une hypothèse : il ne porte ni le
+                // marqueur « à vérifier » ni sa justification.
+                'aVerifier'     => $jalon->aVerifier() && $this->delaiDecideParLActe($jalon) === null,
+                'source'        => $this->delaiDecideParLActe($jalon) !== null
+                    ? "Durée fixée par l'acte de dissolution."
+                    : $jalon->source(),
+            ];
+        }
+
+        return $echeances;
+    }
+
+    /**
+     * Délai en mois que le **dossier de dissolution** a fixé pour ce jalon — `null` sinon.
+     *
+     * Lu sur le dernier dossier `SOC-DIS` de cette société, celui qui a prononcé la
+     * dissolution. Rien n'est inventé si la clé est absente : l'appelant retombe alors sur le
+     * paramètre d'étude, marqué à vérifier.
+     */
+    private function delaiDecideParLActe(JalonLiquidation $jalon): ?int
+    {
+        $cle = $jalon->cleDonneesDelai();
+
+        if ($cle === null) {
+            return null;
+        }
+
+        $valeur = $this->dossiers()
+            ->whereHas('typeActe', fn ($q) => $q->where('code', 'SOC-DIS'))
+            ->with('questionnaire')
+            ->latest('id')
+            ->first()
+            ?->questionnaire?->donnees[$cle] ?? null;
+
+        return filled($valeur) && (int) $valeur > 0 ? (int) $valeur : null;
+    }
+
+    /**
+     * Cette société est-elle immatriculée sans que son numéro figure au registre ?
+     *
+     * C'est la trace des données perdues avant la capture au retour de formalité : mesuré le
+     * 2026-09-29, **5 des 6 sociétés** dont le dossier avait dépassé les formalités n'avaient
+     * ni RCCM ni NIF. L'information existait sur l'extrait reçu ; rien ne l'enregistrait.
+     *
+     * Aucun rattrapage automatique n'est possible : `reference_document_recu` ne contient que
+     * des valeurs de test, les importer remplirait le registre de faux numéros. On **signale**
+     * donc, et l'étude corrige en une saisie — un blocage énuméré plutôt qu'un silence.
+     *
+     * ⚠️ Calculé depuis `dossiers`, jamais par `whereJsonContains` sur `formalites` : la
+     * sémantique JSON diverge entre MySQL (développement) et SQLite (test).
+     */
+    public function immatriculeeSansRccm(): bool
+    {
+        if (filled($this->rccm_numero)) {
+            return false;
+        }
+
+        $this->loadMissing('dossiers');
+
+        return $this->dossiers->contains(
+            fn (Dossier $d) => $d->etape !== null
+                && $d->etape->ordre() > EtapeDossier::Formalites->ordre(),
+        );
+    }
+
+    /** Échéance la plus proche, ou `null` — ce qu'affiche la ligne du registre. */
+    public function prochaineEcheanceLiquidation(): ?array
+    {
+        $echeances = $this->echeancesLiquidation();
+
+        usort($echeances, fn (array $a, array $b) => $a['echeance'] <=> $b['echeance']);
+
+        return $echeances[0] ?? null;
     }
 }

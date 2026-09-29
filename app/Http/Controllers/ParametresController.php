@@ -337,6 +337,23 @@ class ParametresController extends Controller
                 'description'    => $t->description,
                 // La carte du processus : ce que la procédure attend, et ce qui peut le produire.
                 'processus'      => $this->processus($t, $modeles),
+                // La pièce d'accord exigée à l'Initialisation. `reference` est ce que le code
+                // déclare, `exigence` ce que l'étude a éventuellement imposé par-dessus, `null`
+                // signifiant « suivre la référence ». L'écart se voit, comme pour les documents
+                // attendus (`DocumentAttendu::divergeDeLaReference()`).
+                'accord'         => [
+                    'exigence'   => $t->exigence_accord?->value,
+                    'effective'  => \App\Support\AccordsInitialisation::pour($t)['exigence']->value,
+                    'reference'  => \App\Support\AccordsInitialisation::reference($t->code)['exigence']->value,
+                    'diverge'    => \App\Support\AccordsInitialisation::divergeDeLaReference($t),
+                    'aVerifier'  => \App\Support\AccordsInitialisation::pour($t)['aVerifier'],
+                    'nom'        => \App\Support\AccordsInitialisation::pour($t)['nom'],
+                    // Combien de dossiers en cours deviendraient bloqués si l'étude durcissait
+                    // l'exigence : `verifierEdition()` rejoue les contrôles de constitution, donc
+                    // un durcissement **bloque rétroactivement** ce qui est déjà en Édition.
+                    // Mesurer avant de décider, porté à l'écran.
+                    'impactes'   => $this->dossiersSansAccord($t),
+                ],
             ]),
             'typesDocument' => ModeleActe::typesDocumentOptions(),
         ]);
@@ -384,6 +401,52 @@ class ParametresController extends Controller
                 ? $attendus->pluck('type_document')->all()
                 : array_keys($reference);
 
+            // ⚠️ Sans cette branche, une variante sans référence écrite **et** sans configuration
+            // produisait `slugs = []`, donc `documents = []`, donc `collect([])->every()` — c'est
+            // `true`. L'écran annonçait « Complet » sur une procédure qui n'attend rien et que
+            // rien ne peut produire. Le cas était inatteignable tant que `SOC-MOD` était la seule
+            // catégorie déclinée ; inscrire `SOC-DIS` au registre l'a rendu atteignable, et aurait
+            // remplacé un silence par un mensonge — strictement pire.
+            //
+            // On montre donc ce qui existe réellement : les gabarits rattachés à cette variante,
+            // **actifs comme inactifs**, les inactifs comptés comme manquants. Un marque-place
+            // (`chemin_fichier` vide, `est_actif = false`) est précisément l'information utile.
+            if ($slugs === []) {
+                $rattaches = $modeles
+                    ->filter(fn (ModeleActe $m) => $m->applicablePour($typeActe, $variante['valeur']))
+                    ->values();
+
+                $documents = $rattaches->map(fn (ModeleActe $m) => [
+                    'slug'    => $m->type_document,
+                    'label'   => ModeleActe::TYPES_DOCUMENT[$m->type_document] ?? $m->nom,
+                    'gabarit' => $m->est_actif ? ['id' => $m->id, 'nom' => $m->nom] : null,
+                    'source'  => $m->est_actif
+                        ? 'modèle « ' . $m->nom . ' »'
+                        : null,
+                    // Distingue « aucun gabarit déclaré » de « gabarit déclaré mais absent » :
+                    // les deux se corrigent différemment, l'un en rattachant, l'autre en
+                    // téléversant le fichier.
+                    'manque'  => $m->est_actif ? null : 'gabarit manquant',
+                ])->all();
+
+                $incomplets += $rattaches->where('est_actif', false)->count();
+
+                $lignes[] = [
+                    ...$variante,
+                    'documents' => $documents,
+                    // Jamais `true` sur une procédure vide : rien à produire et rien pour le
+                    // produire, ce n'est pas « complet », c'est « pas encore configuré ».
+                    'complet'   => $rattaches->isNotEmpty()
+                        && $rattaches->every(fn (ModeleActe $m) => $m->est_actif),
+                    'diverge'   => false,
+                    'reference' => [],
+                    // L'écran doit pouvoir dire *pourquoi* la liste est vide, sans le déduire.
+                    'sansReference' => true,
+                ];
+
+                continue;
+            }
+
             $documents = [];
             foreach ($slugs as $slug) {
                 $gabarit = $modeles->where('est_actif', true)->first(
@@ -413,6 +476,7 @@ class ParametresController extends Controller
                 ...$variante,
                 'documents' => $documents,
                 'complet'   => collect($documents)->every(fn (array $d) => $d['gabarit'] || $d['source']),
+                'sansReference' => $reference === [],
                 // Écart à la règle écrite : une configuration modifiée doit se voir, puisqu'elle
                 // décide du contenu d'actes authentiques.
                 'diverge'   => DocumentAttendu::divergeDeLaReference($typeActe->code, $variante['valeur'], $slugs),
@@ -490,11 +554,47 @@ class ParametresController extends Controller
             'delai_jours' => ['sometimes', 'integer', 'min:1'],
             'actif'       => ['sometimes', 'boolean'],
             'description' => ['sometimes', 'nullable', 'string'],
+            // `nullable` = revenir à la référence déclarée en code. Distinct d'une valeur égale
+            // à la référence, qui reste une décision explicite de l'étude.
+            'exigence_accord' => ['sometimes', 'nullable', Rule::enum(\App\Enums\ExigenceAccord::class)],
         ]);
+
+        $avant = $typeActe->exigence_accord;
 
         $typeActe->update($data);
 
+        // Une règle qui décide du blocage d'un dossier ne change pas en silence — même parti
+        // que `updateDocumentsAttendus()`.
+        if (array_key_exists('exigence_accord', $data) && $avant !== $typeActe->exigence_accord) {
+            \Illuminate\Support\Facades\Log::info("Pièce d'accord du type d'acte {$typeActe->code} : exigence modifiée", [
+                'avant'       => $avant?->value,
+                'apres'       => $typeActe->exigence_accord?->value,
+                'reference'   => \App\Support\AccordsInitialisation::reference($typeActe->code)['exigence']->value,
+                'utilisateur' => auth()->id(),
+            ]);
+        }
+
         return back()->with('success', 'Type d\'acte mis à jour.');
+    }
+
+    /**
+     * Dossiers en cours de ce type qui n'ont pas de pièce d'accord signée.
+     *
+     * Ce sont ceux que **durcir** l'exigence bloquerait rétroactivement : `verifierEdition()`
+     * rejoue les contrôles de constitution pour les dossiers antérieurs au 2026-08-04. L'écran
+     * le dit avant l'enregistrement — mesurer avant de décider, y compris à l'interface.
+     */
+    private function dossiersSansAccord(TypeActe $typeActe): int
+    {
+        return \App\Models\Dossier::where('type_acte_id', $typeActe->id)
+            ->whereIn('etape', [
+                \App\Enums\EtapeDossier::Initialisation->value,
+                \App\Enums\EtapeDossier::Edition->value,
+            ])
+            ->whereDoesntHave('documents', fn ($q) => $q
+                ->where('categorie', 'accord_client')
+                ->where('est_signe_cachete', true))
+            ->count();
     }
 
     // ── Barèmes (facturation + génération automatique de formalités) ───────
@@ -510,6 +610,9 @@ class ParametresController extends Controller
             'taux'                => $b->taux,
             'montant_fixe'        => $b->montant_fixe,
             'quantite_defaut'     => $b->quantite_defaut ?? 1,
+            // Les honoraires de l'étude se remisent, un débours non : elle verse au tiers
+            // l'intégralité de ce qu'elle facture. Voir App\Enums\TypeRemise.
+            'remise_autorisee'    => (bool) $b->remise_autorisee,
             'base_calcul'         => $b->base_calcul,
             'description'         => $b->description,
             'actif'               => $b->actif,
@@ -518,6 +621,9 @@ class ParametresController extends Controller
             'depend_de_bareme_id' => $b->depend_de_bareme_id,
             'type_impot'          => $b->type_impot,
             'retour_attendu'      => $b->retour_attendu,
+            // Ce que l'autorité **délivre**, par opposition à `retour_attendu` qui nomme le
+            // papier reçu. Voir App\Enums\DonneeAuRetour.
+            'donnees_au_retour'   => $b->donnees_au_retour ?? [],
             'delai_heures'        => $b->delai_heures,
             'pieces_requises'     => $b->pieces_requises ?? [],
         ];
@@ -545,6 +651,10 @@ class ParametresController extends Controller
                 'label' => $c->label(),
             ]),
             'organismes' => self::ORGANISMES,
+            // Le catalogue des données captables, servi au lieu d'être recopié en JavaScript :
+            // l'écran ne porte ainsi aucun nom de donnée, et un cas ajouté à l'enum y apparaît
+            // sans toucher au front. Même parti que `piecesRequises.js` pour les rôles.
+            'donneesAuRetour' => \App\Enums\DonneeAuRetour::toutes(),
             'filters'    => $request->only(['categorie']),
             'stats'      => [
                 'total'  => Bareme::count(),
@@ -586,6 +696,7 @@ class ParametresController extends Controller
             'taux'              => ['nullable', 'numeric', 'min:0', 'max:100'],
             'montant_fixe'      => ['nullable', 'numeric', 'min:0'],
             'quantite_defaut'   => ['nullable', 'integer', 'min:1'],
+            'remise_autorisee'  => ['boolean'],
             'base_calcul'       => ['required', 'in:valeur_acte,montant_fixe'],
             'description'       => ['nullable', 'string'],
             'genere_formalite'    => ['boolean'],
@@ -595,6 +706,8 @@ class ParametresController extends Controller
             'delai_heures'      => ['nullable', 'integer', 'min:1'],
             'pieces_requises'   => ['nullable', 'array'],
             'pieces_requises.*' => ['string', 'max:200'],
+            'donnees_au_retour'   => ['nullable', 'array'],
+            'donnees_au_retour.*' => [Rule::enum(\App\Enums\DonneeAuRetour::class)],
         ]);
 
         $typeActeIds = $data['applicable_tous'] ? TypeActe::pluck('id')->all() : $data['type_acte_ids'];
@@ -622,6 +735,7 @@ class ParametresController extends Controller
             'taux'              => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'montant_fixe'      => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'quantite_defaut'   => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'remise_autorisee'  => ['sometimes', 'boolean'],
             'base_calcul'       => ['sometimes', 'in:valeur_acte,montant_fixe'],
             'description'       => ['sometimes', 'nullable', 'string'],
             'actif'             => ['sometimes', 'boolean'],
@@ -633,6 +747,8 @@ class ParametresController extends Controller
             'delai_heures'      => ['sometimes', 'nullable', 'integer', 'min:1'],
             'pieces_requises'   => ['sometimes', 'nullable', 'array'],
             'pieces_requises.*' => ['string', 'max:200'],
+            'donnees_au_retour'   => ['sometimes', 'nullable', 'array'],
+            'donnees_au_retour.*' => [Rule::enum(\App\Enums\DonneeAuRetour::class)],
         ]);
 
         if (array_key_exists('depend_de_bareme_id', $data) && $data['depend_de_bareme_id'] === (int) $bareme->id) {

@@ -4,13 +4,16 @@ namespace Tests\Feature;
 
 use App\Enums\EtapeDossier;
 use App\Enums\FormeSociete;
+use App\Enums\MotifRepresentation;
 use App\Enums\NatureSociete;
 use App\Enums\RoleUtilisateur;
+use App\Enums\StatutSociete;
 use App\Enums\TypeModificationStatutaire;
 use App\Models\Client;
 use App\Models\Dossier;
 use App\Models\Partie;
 use App\Models\Questionnaire;
+use App\Models\Societe;
 use App\Models\TypeActe;
 use App\Models\User;
 use App\Services\ReglesSocieteService;
@@ -282,8 +285,41 @@ class ReglesSocieteTest extends TestCase
         $this->assertArrayHasKey('representation', $anomalies);
     }
 
-    public function test_regle7_un_mineur_avec_tuteur_passe_en_societe_de_capitaux(): void
+    public function test_regle7_un_mineur_represente_passe_en_societe_de_capitaux(): void
     {
+        $dossier = $this->dossier('SOC-SARL');
+        $mineur  = $this->associe($dossier, [
+            'prenom_nom'     => 'Mamadou Mineur',
+            'date_naissance' => now()->subYears(15),
+        ]);
+        $this->associe($dossier, ['prenom_nom' => 'Adulte Deux', 'date_naissance' => now()->subYears(40)]);
+
+        // Un tuteur réel, désigné au dossier : une personne, avec sa fiche et ses pièces, et
+        // dont l'acte portera la mention de comparution.
+        $tuteur = Partie::create([
+            'dossier_id' => $dossier->id,
+            'nom'        => 'Fatoumata Diallo',
+            'role'       => MotifRepresentation::ROLE,
+            'client_id'  => Client::create(['type' => 'physique', 'prenom_nom' => 'Fatoumata Diallo'])->id,
+        ]);
+        $mineur->update([
+            'represente_par_partie_id' => $tuteur->id,
+            'representation_motif'     => MotifRepresentation::Legale,
+            'representation_qualite'   => 'Tuteur légal',
+        ]);
+
+        $this->assertSame([], $this->service()->anomalies($dossier->fresh()));
+    }
+
+    public function test_regle7_deux_mots_sur_la_fiche_client_ne_suffisent_plus(): void
+    {
+        // La tolérance s'obtenait en tapant un nom et une qualité dans
+        // `clients.representant_legal` / `representant_qualite` — deux textes libres conçus
+        // pour les personnes morales, détournés faute de mieux. Aucune personne réelle
+        // derrière, aucune pièce, et rien dans l'acte produit : une case à cocher déguisée.
+        //
+        // Mesuré avant la bascule du 2026-09-25 : zéro fiche physique portant
+        // `representant_legal`, zéro associé mineur, zéro dossier impacté.
         $dossier = $this->dossier('SOC-SARL');
         $this->associe($dossier, [
             'prenom_nom'           => 'Mamadou Mineur',
@@ -293,7 +329,31 @@ class ReglesSocieteTest extends TestCase
         ]);
         $this->associe($dossier, ['prenom_nom' => 'Adulte Deux', 'date_naissance' => now()->subYears(40)]);
 
-        $this->assertSame([], $this->service()->anomalies($dossier->fresh()));
+        $this->assertArrayHasKey('representation', $this->service()->anomalies($dossier->fresh()));
+    }
+
+    public function test_regle7_un_representant_dun_autre_motif_ne_couvre_pas_la_minorite(): void
+    {
+        // Une procuration n'est pas une tutelle : un mineur qui donne mandat ne peut pas
+        // donner ce qu'il n'a pas. Seule la représentation **légale** lève l'obstacle.
+        $dossier = $this->dossier('SOC-SARL');
+        $mineur  = $this->associe($dossier, [
+            'prenom_nom'     => 'Mamadou Mineur',
+            'date_naissance' => now()->subYears(15),
+        ]);
+        $this->associe($dossier, ['prenom_nom' => 'Adulte Deux', 'date_naissance' => now()->subYears(40)]);
+
+        $mandataire = Partie::create([
+            'dossier_id' => $dossier->id,
+            'nom'        => 'Mamadou BAH',
+            'role'       => MotifRepresentation::ROLE,
+        ]);
+        $mineur->update([
+            'represente_par_partie_id' => $mandataire->id,
+            'representation_motif'     => MotifRepresentation::Procuration,
+        ]);
+
+        $this->assertArrayHasKey('representation', $this->service()->anomalies($dossier->fresh()));
     }
 
     public function test_regle7_un_age_inconnu_ne_bloque_pas(): void
@@ -380,11 +440,159 @@ class ReglesSocieteTest extends TestCase
         $this->assertSame([], $this->service()->anomalies($dossier));
     }
 
+    /**
+     * Ce test affirmait `assertSame([], ...)` jusqu'au 2026-09-28. Il est **réécrit et non
+     * supprimé** : son intention — une dissolution n'est pas une constitution — reste
+     * exactement valable, et c'est elle qu'on vérifie. Ce qui a changé, c'est qu'une
+     * dissolution a désormais ses propres règles, si bien qu'un tableau vide ne prouverait
+     * plus rien : il serait tout aussi compatible avec une branche jamais atteinte.
+     *
+     * L'assertion porte donc sur l'**absence des clés de constitution**, ce qui est la
+     * garantie utile, plutôt que sur l'absence de toute anomalie.
+     */
     public function test_une_dissolution_nest_pas_soumise_aux_regles_de_constitution(): void
     {
-        // `SOC-DIS` est de catégorie société mais ne constitue aucune forme : bloquer sur
-        // un capital minimum y serait absurde.
         $dossier = $this->dossier('SOC-DIS');
+
+        $anomalies = $this->service()->anomalies($dossier);
+
+        foreach (['soc_capital', 'soc_associes', 'soc_commissaire', 'soc_capacite'] as $cle) {
+            $this->assertArrayNotHasKey(
+                $cle,
+                $anomalies,
+                "Bloquer une dissolution sur « {$cle} » serait absurde : elle ne constitue aucune société.",
+            );
+        }
+    }
+
+    // ── Dissolution-liquidation ──────────────────────────────────────────────
+
+    public function test_une_dissolution_sans_phase_est_bloquee(): void
+    {
+        // La phase décide des actes produits et du statut porté à la fiche société : sans elle,
+        // le dossier ne peut rien déclencher. Même parti que `modif_types`.
+        $anomalies = $this->service()->anomalies($this->dossier('SOC-DIS'));
+
+        $this->assertArrayHasKey('dissolution_phase', $anomalies);
+    }
+
+    public function test_une_dissolution_renseignee_ne_remonte_aucune_anomalie(): void
+    {
+        $dossier = $this->dossier('SOC-DIS', [
+            'dissolution.phase'          => 'Dissolution anticipée',
+            'soc.denomination'           => 'Faya Distribution SARLU',
+            'dissolution.date_assemblee' => '01/07/2026',
+            'liquidateur.prenom_nom'     => 'Ibrahima DIALLO',
+        ]);
+
+        $this->assertSame([], $this->service()->anomalies($dossier));
+    }
+
+    public function test_une_dissolution_exige_sa_date_dassemblee_et_son_liquidateur(): void
+    {
+        $dossier = $this->dossier('SOC-DIS', [
+            'dissolution.phase' => 'Dissolution anticipée',
+            'soc.denomination'  => 'Faya Distribution SARLU',
+        ]);
+
+        $anomalies = $this->service()->anomalies($dossier);
+
+        $this->assertArrayHasKey('dissolution_assemblee', $anomalies);
+        $this->assertArrayHasKey('dissolution_liquidateur', $anomalies);
+    }
+
+    public function test_une_cloture_nexige_pas_de_liquidateur_mais_sa_propre_date(): void
+    {
+        // À la clôture, le liquidateur est en fonction depuis des mois et figure au registre :
+        // le redemander ferait ressaisir ce que l'application détient déjà. En revanche la
+        // seconde assemblée a sa propre date — `cloture.date_assemblee`, pas celle de phase 1.
+        $dossier = $this->dossier('SOC-DIS', [
+            'dissolution.phase'          => 'Clôture de la liquidation',
+            'soc.denomination'           => 'Faya Distribution SARLU',
+            'dissolution.date_assemblee' => '01/07/2026',
+        ]);
+
+        $anomalies = $this->service()->anomalies($dossier);
+
+        $this->assertArrayNotHasKey('dissolution_liquidateur', $anomalies);
+        $this->assertArrayHasKey('dissolution_assemblee', $anomalies);
+    }
+
+    public function test_on_ne_cloture_pas_la_liquidation_dune_societe_active(): void
+    {
+        $dossier = $this->dossier('SOC-DIS', [
+            'dissolution.phase'       => 'Clôture de la liquidation',
+            'cloture.date_assemblee'  => '01/07/2029',
+        ]);
+        $dossier->update(['societe_id' => Societe::create([
+            'denomination' => 'Faya Distribution SARLU',
+            'statut'       => StatutSociete::Active,
+        ])->id]);
+
+        $anomalies = $this->service()->anomalies($dossier->fresh());
+
+        $this->assertArrayHasKey('dissolution_cycle_vie', $anomalies);
+        // Le message doit dire quoi faire : une règle qui refuse sans indiquer la sortie se
+        // contourne par une saisie à la main, ce qu'on cherche précisément à éviter.
+        $this->assertStringContainsString('Dissolution anticipée', $anomalies['dissolution_cycle_vie'][0]);
+    }
+
+    public function test_on_ne_dissout_pas_deux_fois_la_meme_societe(): void
+    {
+        $dossier = $this->dossier('SOC-DIS', [
+            'dissolution.phase'          => 'Dissolution anticipée',
+            'dissolution.date_assemblee' => '01/07/2026',
+            'liquidateur.prenom_nom'     => 'Ibrahima DIALLO',
+        ]);
+        $dossier->update(['societe_id' => Societe::create([
+            'denomination'   => 'Faya Distribution SARLU',
+            'statut'         => StatutSociete::EnLiquidation,
+            'dissolution_at' => '2026-07-01',
+        ])->id]);
+
+        $anomalies = $this->service()->anomalies($dossier->fresh());
+
+        $this->assertArrayHasKey('dissolution_cycle_vie', $anomalies);
+        $this->assertStringContainsString('Clôture de la liquidation', $anomalies['dissolution_cycle_vie'][0]);
+    }
+
+    public function test_un_dossier_deja_applique_ne_se_signale_pas_lui_meme(): void
+    {
+        // Un dossier renvoyé en correction puis repassé en Expédition retrouve une fiche qui
+        // porte déjà l'état d'après. Ce n'est pas une incohérence, et le signaler rendrait le
+        // dossier impossible à faire ré-avancer.
+        $dossier = $this->dossier('SOC-DIS', [
+            'dissolution.phase'          => 'Dissolution anticipée',
+            'dissolution.date_assemblee' => '01/07/2026',
+            'liquidateur.prenom_nom'     => 'Ibrahima DIALLO',
+        ]);
+        $dossier->update(['societe_id' => Societe::create([
+            'denomination' => 'Faya Distribution SARLU',
+            'statut'       => StatutSociete::EnLiquidation,
+        ])->id]);
+
+        // Tant que le dossier n'a pas atteint l'Expédition, une fiche déjà en liquidation ne
+        // peut pas être de son fait : c'est une seconde dissolution, et elle se signale.
+        $this->assertArrayHasKey('dissolution_cycle_vie', $this->service()->anomalies($dossier->fresh()));
+
+        // Une fois l'effet appliqué (entrée en Expédition), la même fiche est cohérente.
+        $dossier->update(['etape' => EtapeDossier::Expedition]);
+
+        $this->assertArrayNotHasKey('dissolution_cycle_vie', $this->service()->anomalies($dossier->fresh()));
+    }
+
+    public function test_aucun_delai_de_liquidation_ne_bloque_un_dossier(): void
+    {
+        // Garde-fou de doctrine, pas de comportement : les délais de liquidation ne viennent
+        // d'aucune source validée. Ce test échouera le jour où quelqu'un en fera une règle
+        // bloquante — c'est exactement son rôle.
+        $dossier = $this->dossier('SOC-DIS', [
+            'dissolution.phase'          => 'Dissolution anticipée',
+            'soc.denomination'           => 'Faya Distribution SARLU',
+            // Assemblée tenue il y a plus de dix ans : très au-delà de tout délai évoqué.
+            'dissolution.date_assemblee' => '01/07/2014',
+            'liquidateur.prenom_nom'     => 'Ibrahima DIALLO',
+        ]);
 
         $this->assertSame([], $this->service()->anomalies($dossier));
     }

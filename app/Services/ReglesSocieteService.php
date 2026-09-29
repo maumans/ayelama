@@ -5,12 +5,15 @@ namespace App\Services;
 use App\Enums\CategorieActe;
 use App\Enums\EtapeDossier;
 use App\Enums\FormeSociete;
+use App\Enums\MotifRepresentation;
 use App\Enums\TypeModificationStatutaire;
+use App\Enums\VarianteDissolution;
 use App\Models\Dossier;
 use App\Models\ModeleActe;
 use App\Models\Partie;
 use App\Models\Questionnaire;
 use App\Models\Societe;
+use App\Support\VariantesTypeActe;
 
 /**
  * Contrôle des règles légales applicables à la constitution d'une société
@@ -47,6 +50,13 @@ class ReglesSocieteService
             return $this->verifierModificationStatutaire($dossier);
         }
 
+        // Dissolution-liquidation : ses propres règles, symétriques de celles de la
+        // modification. Comme elle, ce n'est pas une constitution — lui appliquer le capital
+        // minimum ou le nombre d'associés n'aurait aucun sens.
+        if ($dossier->typeActe?->code === 'SOC-DIS') {
+            return $this->verifierDissolution($dossier);
+        }
+
         $forme = $this->forme($dossier);
         if (!$forme) {
             // Aucune forme identifiable : soit le type d'acte n'en désigne pas une
@@ -67,7 +77,7 @@ class ReglesSocieteService
     }
 
     /**
-     * Indique si un dossier a dépassé l'étape des formalités (donc est en Expédition ou Clôturé).
+     * Indique si un dossier a dépassé l'étape des formalités (donc est en Expédition ou Archivé).
      * C'est le critère pour certifier qu'une société est officiellement créée (immatriculée au RCCM / API).
      */
     public function aDepasseFormalites(?Dossier $dossier): bool
@@ -287,8 +297,20 @@ class ReglesSocieteService
                 continue;
             }
 
-            // Société de capitaux : toléré si la représentation est renseignée.
-            if (blank($client->representant_legal) || blank($client->representant_qualite)) {
+            // Société de capitaux : toléré si le mineur est **effectivement représenté**.
+            //
+            // La tolérance s'obtenait jusqu'au 2026-09-25 en tapant deux mots dans
+            // `clients.representant_legal` / `representant_qualite` — deux champs de texte
+            // libre conçus pour les personnes morales, détournés faute de mieux. Aucune
+            // personne réelle derrière, aucune pièce, et rien dans l'acte produit : une case à
+            // cocher déguisée. Elle exige désormais un tuteur désigné au dossier, avec sa
+            // fiche, sa CNI et sa mention de comparution.
+            //
+            // Mesuré avant bascule : zéro fiche physique portant `representant_legal`, zéro
+            // associé mineur, zéro dossier impacté. Le changement était donc sans effet de
+            // bord sur l'existant.
+            if ($partie->representation_motif !== MotifRepresentation::Legale
+                || $partie->represente_par_partie_id === null) {
                 $mineursSansTuteur[] = $partie->nom;
             }
         }
@@ -305,7 +327,8 @@ class ReglesSocieteService
 
         if ($mineursSansTuteur) {
             $erreurs['representation'] = [sprintf(
-                'Associé mineur sans représentant légal : %s. Renseignez le tuteur et sa qualité sur la fiche client.',
+                'Associé mineur non représenté : %s. Cochez « Se fait représenter » sur cette personne '
+                . 'et désignez son tuteur ou curateur — la fiche client ne suffit plus.',
                 implode(', ', $mineursSansTuteur),
             )];
         }
@@ -348,6 +371,149 @@ class ReglesSocieteService
             $this->verifierCapital($dossier, $types),
             $this->verifierGerance($dossier, $types),
         );
+    }
+
+    /**
+     * Règles d'un dossier de dissolution-liquidation.
+     *
+     * ⚠️ **Aucun délai n'est contrôlé ici, et c'est délibéré.** Durée du mandat de liquidateur,
+     * clôture sous trois ans, radiation sous un mois : ces chiffres circulent mais ne viennent
+     * d'aucune source que le dépôt puisse citer — le compte rendu de juillet 2026 ne mentionne
+     * ni dissolution, ni liquidation, ni radiation. Les transformer en règle bloquante
+     * empêcherait l'étude de traiter un dossier parfaitement régulier, au nom d'une contrainte
+     * inventée. Ils vivent dans {@see \App\Enums\JalonLiquidation}, marqués à vérifier, et
+     * **alertent** sans jamais bloquer.
+     *
+     * Ce qui est contrôlé ici ne relève pas du droit guinéen mais de la **cohérence interne**
+     * de données que l'application produit elle-même : on ne clôture pas la liquidation d'une
+     * société qui n'a jamais été dissoute, et on ne dissout pas deux fois la même.
+     */
+    private function verifierDissolution(Dossier $dossier): array
+    {
+        $phases = array_values(array_filter(
+            VariantesTypeActe::duDossier($dossier),
+            fn ($v) => $v instanceof VarianteDissolution,
+        ));
+
+        if ($phases === []) {
+            return ['dissolution_phase' => [
+                'La phase doit être précisée : dissolution anticipée ou clôture de la liquidation. '
+                . 'Elle détermine les actes à produire et le statut porté à la fiche société.',
+            ]];
+        }
+
+        return array_merge(
+            $this->verifierSocieteRattachee($dossier),
+            $this->verifierPiecesConstitutives($dossier),
+            $this->verifierCoherenceCycleVie($dossier, $phases[0]),
+            $this->verifierAssembleeDissolution($dossier, $phases[0]),
+            $this->verifierLiquidateur($dossier, $phases[0]),
+        );
+    }
+
+    /**
+     * La phase demandée est-elle compatible avec l'état actuel de la fiche société ?
+     *
+     * Le contrôle ne s'exerce que si le dossier est rattaché au registre : une société saisie à
+     * la main n'a pas d'historique dans l'application, et exiger qu'elle en ait un bloquerait
+     * les dissolutions de sociétés constituées ailleurs — que l'étude traite couramment.
+     *
+     * Le message dit **quoi faire**, pas seulement ce qui ne va pas : une règle qui refuse sans
+     * indiquer la sortie se contourne par une saisie à la main, ce qui est exactement ce qu'on
+     * cherche à éviter.
+     */
+    private function verifierCoherenceCycleVie(Dossier $dossier, VarianteDissolution $phase): array
+    {
+        $societe = $dossier->societe;
+
+        if (!$societe) {
+            return [];
+        }
+
+        $actuel = $societe->statut;
+        $requis = $phase->statutRequis();
+
+        if ($actuel === $requis) {
+            return [];
+        }
+
+        // Le dossier en cours a déjà posé son effet : l'état de la fiche est celui d'après, pas
+        // celui d'avant, et le signaler rendrait le dossier impossible à faire ré-avancer après
+        // un renvoi en correction.
+        //
+        // ⚠️ La condition porte sur **l'étape de ce dossier-ci**, pas seulement sur l'état de la
+        // fiche. Une première version comparait `$actuel === $phase->statutApres()`, ce qui
+        // exemptait aussi une société dissoute par *un autre* dossier : la règle « on ne dissout
+        // pas deux fois » était alors désarmée en silence. Deux tests l'ont attrapé.
+        // `aDepasseFormalites()` est le seuil exact auquel l'effet est appliqué.
+        if ($actuel === $phase->statutApres() && $this->aDepasseFormalites($dossier)) {
+            return [];
+        }
+
+        $message = match ($phase) {
+            VarianteDissolution::Dissolution => sprintf(
+                'La société « %s » est déjà %s au registre%s. Une seconde dissolution ne peut pas être prononcée : '
+                . "pour en clôturer la liquidation, ouvrez un dossier en phase « %s ».",
+                $societe->denomination,
+                mb_strtolower($actuel->label()),
+                $societe->dissolution_at ? ' depuis le ' . $societe->dissolution_at->format('d/m/Y') : '',
+                VarianteDissolution::ClotureLiquidation->label(),
+            ),
+            VarianteDissolution::ClotureLiquidation => sprintf(
+                'La société « %s » est %s au registre : on ne peut pas clôturer une liquidation qui n\'a pas été ouverte. '
+                . "Ouvrez d'abord un dossier en phase « %s », ou corrigez le statut de la fiche s'il est erroné.",
+                $societe->denomination,
+                mb_strtolower($actuel->label()),
+                VarianteDissolution::Dissolution->label(),
+            ),
+        };
+
+        return ['dissolution_cycle_vie' => [$message]];
+    }
+
+    /**
+     * L'assemblée de la phase en cours doit être datée.
+     *
+     * La clé dépend de la phase ({@see VarianteDissolution::cleDateAssemblee()}) : les deux
+     * assemblées sont séparées de mois ou d'années, chacune est datée dans son propre dossier.
+     * C'est cette date qui alimente `dissolution_at` / `cloture_liquidation_at` au registre, et
+     * depuis laquelle les échéances de liquidation se calculent.
+     */
+    private function verifierAssembleeDissolution(Dossier $dossier, VarianteDissolution $phase): array
+    {
+        if (filled($this->donnee($dossier, $phase->cleDateAssemblee()))) {
+            return [];
+        }
+
+        return ['dissolution_assemblee' => [
+            sprintf(
+                "La date de l'assemblée doit être renseignée : elle date l'acte, et c'est depuis elle que "
+                . 'court le suivi de la liquidation au registre (phase « %s »).',
+                $phase->label(),
+            ),
+        ]];
+    }
+
+    /**
+     * Un liquidateur doit être nommé par l'assemblée de dissolution.
+     *
+     * Phase 1 seulement : à la clôture, le liquidateur est déjà en fonction et figure au
+     * registre — le redemander ferait ressaisir une information que l'application détient.
+     */
+    private function verifierLiquidateur(Dossier $dossier, VarianteDissolution $phase): array
+    {
+        if ($phase !== VarianteDissolution::Dissolution) {
+            return [];
+        }
+
+        if (filled($this->donnee($dossier, 'liquidateur.prenom_nom'))) {
+            return [];
+        }
+
+        return ['dissolution_liquidateur' => [
+            "Le liquidateur doit être nommé : c'est lui qui représente la société pendant toute la "
+            . 'liquidation et qui signe les actes.',
+        ]];
     }
 
     /**
@@ -670,9 +836,15 @@ class ReglesSocieteService
      */
     private function typesModification(Dossier $dossier): array
     {
-        return TypeModificationStatutaire::depuisLibelles(
-            $this->donnee($dossier, 'modif.types') ?? $this->donnee($dossier, 'modif.type'),
-        );
+        // Passe par le registre pour que la liste des clés lues reste déclarée à un seul endroit
+        // (`TypeModificationStatutaire::clesQuestionnaire()`). Le filtre d'instance n'est pas une
+        // précaution de style : `duDossier()` rend les variantes du type d'acte du dossier, qui
+        // peuvent être des VarianteDissolution — les passer à `contient()` provoquerait une
+        // comparaison toujours fausse, en silence.
+        return array_values(array_filter(
+            \App\Support\VariantesTypeActe::duDossier($dossier),
+            fn ($v) => $v instanceof TypeModificationStatutaire,
+        ));
     }
 
     /** @param array<int, TypeModificationStatutaire> $types */

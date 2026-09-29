@@ -5,7 +5,7 @@ import {
     FolderOpen, ClipboardCheck, Clock, Building2,
     AlertTriangle, ChevronRight, Plus,
     PenLine, CheckCircle2, Package, MessageSquare, FolderPlus, Activity,
-    LayoutGrid, Archive, Mail, CalendarDays, Filter, X,
+    LayoutGrid, Archive, Mail, CalendarDays, Filter, X, Landmark,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -22,7 +22,7 @@ const ETAPE_META = {
     signature:         { label: 'Signature',      short: 'Sig.',       ordre: 2, color: 'bg-purple-500', light: 'bg-purple-50',  text: 'text-purple-700',  border: 'border-purple-300' },
     formalites:        { label: 'Formalités',     short: 'Formalités', ordre: 3, color: 'bg-orange-500', light: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-300' },
     expedition:        { label: 'Expédition',     short: 'Expédition', ordre: 4, color: 'bg-cyan-500',   light: 'bg-cyan-50',    text: 'text-cyan-700',    border: 'border-cyan-300' },
-    cloture:           { label: 'Clôturés',       short: 'Clôturés',   ordre: 5, color: 'bg-green-500',  light: 'bg-green-50',   text: 'text-green-700',   border: 'border-green-300' },
+    cloture:           { label: 'Archivés',       short: 'Archivés',   ordre: 5, color: 'bg-green-500',  light: 'bg-green-50',   text: 'text-green-700',   border: 'border-green-300' },
 };
 
 const ETAPE_KEYS = ['edition', 'revision', 'signature', 'formalites', 'expedition', 'cloture'];
@@ -262,6 +262,20 @@ export default function Dashboard() {
                     <SecondaryKpi label="créés ce mois"        value={stats?.ceMois ?? 0}             icon={CalendarDays} color="text-blue-600"  href="/dossiers" />
                     <SecondaryKpi label="clôturés"             value={stats?.clos ?? 0}               icon={Archive}      color="text-green-600" href="/dossiers?etape=cloture" />
                     <SecondaryKpi label="courriers en attente" value={stats?.courriersEnAttente ?? 0} icon={Mail}         color="text-slate-500" href="/courriers" />
+                    {/* Une liquidation n'apparaît dans aucun compteur de dossiers : entre la
+                        dissolution et la clôture, il n'y a pas de dossier ouvert. Le libellé
+                        nomme les retards, parce que c'est la seule partie actionnable. */}
+                    {(stats?.liquidations ?? 0) > 0 && (
+                        <SecondaryKpi
+                            label={stats?.liquidationsRetard > 0
+                                ? `en liquidation (dont ${stats.liquidationsRetard} en retard)`
+                                : 'en liquidation'}
+                            value={stats.liquidations}
+                            icon={Landmark}
+                            color={stats?.liquidationsRetard > 0 ? 'text-red-600' : 'text-amber-600'}
+                            href="/societes?statut=en_liquidation"
+                        />
+                    )}
                 </motion.div>
 
                 {/* ── Pipeline étapes ── */}

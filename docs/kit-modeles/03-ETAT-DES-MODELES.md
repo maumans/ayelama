@@ -108,6 +108,81 @@ Les fichiers bruts sont dans `Documents reçus/SARL/`, `/SAS/`, `/SASU/`. **Plus
 questionnaire `modification` (72 champs + 4 blocs répétables) est prêt : ces documents sont les
 plus rentables à traiter ensuite.
 
+### Dissolution et liquidation — phase 1 balisée, phase 2 en attente *(mis à jour le 2026-09-29)*
+
+**Les deux modèles de phase 1 sont balisés et actifs.** L'étude a fourni
+`PV DECISION ASSOCIE.docx` et `MY_INSERTION.doc` (dossier L'OR D'AFRIQUE, décembre 2023) ; ils
+sont désormais dans `Documents reçus/Liquidation/`, en version source et en version balisée :
+
+| Modèle | Balises | État |
+|---|---|---|
+| `PV_DISSOLUTION_balises.docx` | 32 | ✅ balisé depuis le `.docx` de l'étude, mise en forme d'origine conservée |
+| `INSERTION_DISSOLUTION_balises.docx` | 21 | ⚠️ **reconstruit**, mise en page approchée — à relire |
+
+⚠️ **Pourquoi l'insertion est reconstruite et non convertie.** `MY_INSERTION.doc` est un binaire
+OLE2 (signature `d0cf11e0`), format que PhpWord ne sait pas ouvrir. Aucun convertisseur n'étant
+disponible, le texte a été extrait puis remonté en `.docx`. Centrages, gras et interlignes sont
+reproduits d'après le texte, pas copiés. **L'étude doit relire le rendu avant le premier acte
+réel** — ou, mieux, réenregistrer l'original en `.docx` depuis Word et signaler qu'il faut
+rebaliser à partir de lui.
+
+### Ce que ces deux actes ont appris
+
+Ils n'ont pas seulement fourni des gabarits ; ils ont corrigé la conception :
+
+- le **liquidateur est une personne morale** (« le Cabinet TEDSOM SARLU, représenté par
+  Monsieur … ») — le bloc de saisie, dérivé du gérant, ne savait décrire qu'une personne
+  physique ;
+- le **mandat dure trois mois**, fixés par l'assemblée — et non les trente-six mois d'un
+  paramètre global, qui se trompait de principe autant que de valeur ;
+- le **requérant** comparaît « non présent, mais représenté par … en vertu d'une procuration » :
+  c'est `${pp.comparution}`, et aucune partie n'était déclarée pour le porter ;
+- il existe un **siège de la liquidation** distinct du siège social ;
+- les deux actes écrivaient **deux mentions différentes** pour la même société — « (EN
+  LIQUIDATION) » et « (EN COURS DE LIQUIDATION) » — d'où `${soc.mention_liquidation}`, dérivée
+  du statut de la fiche ;
+- ils donnaient aussi **deux adresses différentes pour l'office** (« Immeuble FiBank » et
+  « Immeuble VISTA BANK »), ce que `${office.adresse}` supprime ;
+- le **calcul de durée de l'article 5 était faux de vingt jours** : constitution le 24/08/2021,
+  durée « réduite à deux ans quatre (04) mois » expirant « le 04 Décembre 2023 », alors que
+  24/08/2021 + 2 ans 4 mois donne le 24/12/2023. `${dissolution.duree_reduite}` le calcule.
+
+### Phase 2 — toujours aucun modèle
+
+`PV de clôture de liquidation` et `Déclaration de radiation RCCM` restent des marque-places. Le
+questionnaire de clôture garde donc quatre champs seulement : c'est le gabarit qui dictera les
+balises à ajouter, pas l'inverse.
+
+### Les quatre entrées en base *(2026-09-28)*
+
+Le type d'acte `SOC-DIS` se décline désormais en **deux phases**, chacune avec ses gabarits. Les
+quatre entrées existent en base, inactives, sans fichier :
+
+| Phase | Rôle (`type_document`) | Modèle attendu |
+|---|---|---|
+| `dissolution` | `acte_principal` | Acte de dissolution et liquidation |
+| `dissolution` | `insertion` | Insertion au JORG dissolution |
+| `cloture_liquidation` | `acte_principal` | PV de clôture de liquidation |
+| `cloture_liquidation` | `declaration_rccm` | Déclaration de radiation RCCM |
+
+⚠️ **Le rattachement porte la variante.** Un gabarit rattaché sans variante servirait aux *deux*
+phases : l'acte de dissolution serait proposé sur un dossier de clôture. Au téléversement, bien
+choisir la phase.
+
+Le questionnaire `dissolution` est prêt et à jour : sélecteur de société au registre, champ de
+phase, bloc liquidateur complet (état civil + pièce d'identité, comme un gérant), et bloc de
+clôture (date d'assemblée, quitus, boni). Voir la section « Dissolution et liquidation » du
+dictionnaire.
+
+⚠️ **`${liquidateur.nom}` n'existe plus** — c'est `${liquidateur.prenom_nom}`, par cohérence avec
+tous les autres blocs de personne. Aucun modèle en service n'était concerné : les deux gabarits de
+dissolution étaient des marque-places sans fichier.
+
+Le contenu de la phase 2 est volontairement minimal (quatre champs). Rapport du liquidateur,
+comptes détaillés, mali de liquidation : **c'est le gabarit qui dictera les balises à ajouter**.
+Fournir le `.docx` d'abord, compléter le questionnaire ensuite — l'inverse ferait saisir des
+champs qu'aucun acte ne consomme.
+
 ### Courriers — douze documents, aucun balisé
 
 `Documents reçus/Courrier de transmission/` : les douze lettres sont téléversées **telles quelles**,

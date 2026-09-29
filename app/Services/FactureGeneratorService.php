@@ -51,7 +51,13 @@ class FactureGeneratorService
             $tp->setValue("ligne.numero#{$n}", (string) $n);
             $tp->setValue("ligne.designation#{$n}", $this->echapper($ligne->designation));
             $tp->setValue("ligne.quantite#{$n}", (string) $ligne->quantite);
-            $tp->setValue("ligne.montant#{$n}", $this->formaterMontant((float) $ligne->montant));
+            // Le **total de la ligne**, remise deduite — et non le montant unitaire, qui etait
+            // ecrit ici jusqu'au 2026-09-29. Deux raisons : le PDF vivant
+            // (resources/views/factures/pdf.blade.php) rend deja `total()` dans cette colonne, et
+            // `fac.total` en est la somme — afficher l'unitaire faisait un document qui ne
+            // s'additionnait pas des que la quantite depassait 1. Une remise aurait ete
+            // simplement invisible.
+            $tp->setValue("ligne.montant#{$n}", $this->formaterMontant($ligne->total()));
         }
 
         $tp->setValue('fac.numero', $facture->note_numero);

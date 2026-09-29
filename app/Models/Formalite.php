@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DonneeAuRetour;
 use App\Enums\StatutFormalite;
 use Illuminate\Database\Eloquent\Model;
 
@@ -13,6 +14,7 @@ class Formalite extends Model
         'taux', 'montant_base', 'montant_calcule', 'montant_paye', 'type_impot',
         'retour_attendu', 'delai_heures',
         'numero_recepisse', 'reference_document_recu',
+        'donnees_au_retour', 'donnees_recues', 'motif_rejet',
         'depose_at', 'retour_at', 'echeance_at',
     ];
 
@@ -24,6 +26,8 @@ class Formalite extends Model
             'montant_base'    => 'decimal:2',
             'montant_calcule' => 'decimal:2',
             'montant_paye'    => 'decimal:2',
+            'donnees_au_retour' => 'array',
+            'donnees_recues'    => 'array',
             'depose_at'       => 'datetime',
             'retour_at'       => 'datetime',
             'echeance_at'     => 'datetime',
@@ -158,6 +162,28 @@ class Formalite extends Model
      * DossierController::dossierDetailToArray() (onglet Formalités d'un dossier),
      * pour éviter que les deux se désynchronisent sur les champs exposés au front.
      */
+    /**
+     * Données que cette formalité doit rapporter, prêtes pour le formulaire de retour.
+     *
+     * Lues sur la **formalité** et non sur le barème : la copie est figée à la génération, pour
+     * qu'un barème modifié en cours de route ne change pas ce qu'un dossier déjà ouvert
+     * réclame — même parti que `retour_attendu` et `pieces_requises`.
+     *
+     * @return array<int, array{valeur: string, label: string, type: string, exemple: string}>
+     */
+    public function donneesAttendues(): array
+    {
+        return array_map(
+            fn (DonneeAuRetour $d) => [
+                'valeur'  => $d->value,
+                'label'   => $d->label(),
+                'type'    => $d->type(),
+                'exemple' => $d->exemple(),
+            ],
+            DonneeAuRetour::depuis($this->donnees_au_retour),
+        );
+    }
+
     public function versArray(?User $user = null): array
     {
         $this->loadMissing(['pieces.versionActuelle', 'dependDe', 'dependants']);
@@ -175,6 +201,13 @@ class Formalite extends Model
             'montant_paye'            => $this->montant_paye !== null ? (float) $this->montant_paye : null,
             'numero_recepisse'        => $this->numero_recepisse,
             'reference_document_recu' => $this->reference_document_recu,
+            // `retour_attendu` était écrit par la génération et **jamais restitué** : le
+            // formaliste ne voyait donc nulle part quel document il devait recevoir. Il
+            // s'affiche désormais dans la modale de retour.
+            'retour_attendu'          => $this->retour_attendu,
+            'donnees_au_retour'       => $this->donneesAttendues(),
+            'donnees_recues'          => $this->donnees_recues ?? [],
+            'motif_rejet'             => $this->motif_rejet,
             'delai_heures'            => $this->delai_heures,
             'echeance_at'             => $this->echeance_at?->toDateTimeString(),
             'depose_at'               => $this->depose_at?->format('d/m/Y'),

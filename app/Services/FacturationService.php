@@ -67,6 +67,13 @@ class FacturationService
         }
 
         return DB::transaction(function () use ($dossier, $baremes, $assiette, $objet) {
+            // ⚠️ **Les remises survivent à la régénération.** Cette méthode supprime la facture
+            // et la reconstruit ; sans cette reprise, une remise accordée à la main
+            // disparaîtrait au premier recalcul, en silence — perte d'une décision commerciale.
+            // Relevées par barème, puisque c'est la seule chose stable entre l'ancienne facture
+            // et la nouvelle.
+            $remisesAnterieures = $this->remisesParBareme($dossier);
+
             // Supprimer l'ancienne facture si elle existe (regénération)
             $dossier->factures()->delete();
 
@@ -92,21 +99,57 @@ class FacturationService
 
                 $quantite = $bareme->quantite_defaut ?? 1;
 
-                LigneFacture::create([
+                $ligne = LigneFacture::create([
                     'facture_id'  => $facture->id,
+                    // La ligne sait d'où elle vient : c'est ce qui permet de retrouver sa
+                    // remise à la prochaine régénération, et de savoir si elle est remisable.
+                    'bareme_id'   => $bareme->id,
                     'designation' => $this->formaterDesignation($bareme, $assiette),
                     'quantite'    => $quantite,
                     'montant'     => $montant,
+                    // Copié, pas relu : une facture émise garde la règle du jour où elle a été
+                    // établie, même si le barème est reconfiguré ensuite.
+                    'remise_autorisee' => (bool) $bareme->remise_autorisee,
+                    ...($remisesAnterieures[$bareme->id] ?? []),
                 ]);
 
-                $total += $montant * $quantite;
+                $total += $ligne->total();
             }
 
             // Mettre à jour le total
-            $facture->update(['total_chiffres' => $total]);
+            $facture->update(['total_chiffres' => round($total, 2)]);
 
             return $facture->load('lignes');
         });
+    }
+
+    /**
+     * Remises déjà accordées sur ce dossier, indexées par barème.
+     *
+     * Le rattachement se fait par `bareme_id` et non par désignation : celle-ci contient le
+     * détail du calcul (« Honoraires (2 % de 50 000 000) »), qui change dès que l'assiette
+     * bouge — or c'est précisément quand elle bouge qu'on régénère.
+     *
+     * ⚠️ Une remise **en montant** est reprise telle quelle et peut se retrouver supérieure à
+     * la nouvelle ligne si le tarif a baissé. Elle n'est ni écrêtée ni effacée :
+     * `TypeRemise::montantSurBrut()` la plafonne au calcul pour que le total ne devienne pas
+     * négatif, et `LigneFacture::remiseDepasseLaLigne()` la signale à l'écran. Corriger tout
+     * seul une décision commerciale serait pire que la montrer.
+     *
+     * @return array<int, array{remise_type: string, remise_valeur: float}>
+     */
+    private function remisesParBareme(Dossier $dossier): array
+    {
+        return LigneFacture::query()
+            ->whereIn('facture_id', $dossier->factures()->pluck('id'))
+            ->whereNotNull('bareme_id')
+            ->whereNotNull('remise_type')
+            ->get()
+            ->mapWithKeys(fn (LigneFacture $l) => [$l->bareme_id => [
+                'remise_type'   => $l->remise_type->value,
+                'remise_valeur' => (float) $l->remise_valeur,
+            ]])
+            ->all();
     }
 
     /**

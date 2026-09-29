@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, libelleRepresentant } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
@@ -8,9 +8,10 @@ import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
 import { ChoixSociete } from '@/Components/Societes/ChoixSociete';
-import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estChampIdentite } from '@/lib/clientFields';
+import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
 import { mapSocieteToQuestionnaire, estChampSociete, ficheRenseigneChamp, societeDisplayName } from '@/lib/societeFields';
-import { groupFieldsBySection, buildPartiesPayload } from '@/lib/partiesPayload';
+import { groupFieldsBySection, buildPartiesPayload, roleRepresentant } from '@/lib/partiesPayload';
+import { piecesRequisesPour } from '@/lib/piecesRequises';
 import { construireFormDataBrouillon, libelleBrouillon, compterPieces } from '@/lib/brouillonDossier';
 import { allerAuBlocant, ancreSection, blocantsEtape, compterParSection, motifsParChamp, OBJET_LONGUEUR_MIN } from '@/lib/blocantsEtape';
 import { ChampQuestionnaire, classesChamp } from '@/Components/Questionnaire/ChampQuestionnaire';
@@ -762,6 +763,21 @@ export default function DossierCreate() {
         setClientLinks(prev => ({ ...prev, [group.clientRole]: client }));
     };
 
+    /**
+     * Rattacher une fiche au **représentant** de cette section.
+     *
+     * Même fonction de projection, au sous-préfixe près : le représentant est une personne
+     * ordinaire, sa fiche l'est aussi. Le lien est rangé sous une clé dérivée du rôle
+     * (`roleRepresentant`) pour que les deux personnes d'une même section ne se confondent pas.
+     */
+    const applyClientToRepresentant = (group, client) => {
+        const prefix = group.fields[0].id.split('.')[0];
+        const fieldIds = group.fields.map(f => f.id);
+        const mapped = mapClientToPrefixedFields(client, prefix, fieldIds, 'repr_');
+        setFormValues(prev => ({ ...prev, ...mapped }));
+        setClientLinks(prev => ({ ...prev, [roleRepresentant(group.clientRole)]: client }));
+    };
+
     const unlinkClientFromSection = (role) => {
         setClientLinks(prev => {
             const next = { ...prev };
@@ -789,13 +805,23 @@ export default function DossierCreate() {
         // principe, appliqué à la personne morale objet du dossier plutôt qu'à une partie.
         if (group.societePicker) return champsSocieteAffichables(group);
 
-        if (!group.clientRole || !clientLinks[group.clientRole]) return group.fields;
+        if (!group.clientRole) return group.fields;
+
+        // Le masquage se décide **par personne**. Une section peut en porter deux : la partie
+        // et son représentant, chacun avec — ou sans — sa propre fiche. Rattacher la fiche du
+        // représenté ne doit pas faire disparaître les champs du mandataire, qui n'en a pas.
+        const fichesLiees = {
+            partie: clientLinks[group.clientRole] ?? null,
+            representant: clientLinks[roleRepresentant(group.clientRole)] ?? null,
+        };
+
         return group.fields.filter(f =>
             f.type === 'repeatable'
             || f.type === 'checkbox'
             || f.type === 'checkbox_required'
             || f.type === 'checkbox_group'
             || !estChampIdentite(f.id)
+            || !fichesLiees[personneDuChamp(f.id)]
         );
     };
 
@@ -810,10 +836,15 @@ export default function DossierCreate() {
      * Cet avertissement **dans la section** complète la liste globale des blocants, qui signale le
      * même cas via `estMasque` et renvoie vers cette carte ; ici on nomme les champs sur place.
      */
-    const champsIdentiteManquants = (group) => {
-        if (!group.clientRole || !clientLinks[group.clientRole]) return [];
+    const champsIdentiteManquants = (group, personne = 'partie') => {
+        const role = personne === 'representant' ? roleRepresentant(group.clientRole) : group.clientRole;
+        if (!group.clientRole || !clientLinks[role]) return [];
+
         return group.fields
-            .filter(f => f.required && estChampIdentite(f.id) && !formValues[f.id])
+            .filter(f => f.required
+                && estChampIdentite(f.id)
+                && personneDuChamp(f.id) === personne
+                && !formValues[f.id])
             .map(f => f.label);
     };
 
@@ -1525,9 +1556,13 @@ export default function DossierCreate() {
                                                             dépliée. */}
                                                         {(() => {
                                                         const estSectionClient = group.clientRole && group.fields.length > 1;
-                                                        const grille = (
+                                                        // Deux grilles depuis un seul rendu : celle de la partie, et celle
+                                                        // du représentant, qui vit dans sa propre carte. Paramétrer plutôt
+                                                        // que dupliquer — le moteur de rendu de champ est déjà le point de
+                                                        // contrôle que le CLAUDE.md nomme.
+                                                        const grilleDe = (champs) => (
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
-                                                            {champsAffichables(group).map(field => {
+                                                            {champs.map(field => {
                                                                 // En rouge seulement après une tentative d'avancement, et le rouge
                                                                 // s'efface dès la saisie (le champ quitte alors la liste des blocants).
                                                                 const enDefaut = validationTentee && blocantsParChamp.has(field.id);
@@ -1585,6 +1620,11 @@ export default function DossierCreate() {
                                                         </div>
                                                         );
 
+                                                        const champsVisibles  = champsAffichables(group);
+                                                        const champsPartie    = champsVisibles.filter(f => personneDuChamp(f.id) === 'partie');
+                                                        const champsRepr      = champsVisibles.filter(f => personneDuChamp(f.id) === 'representant');
+                                                        const grille          = grilleDe(champsPartie);
+
                                                         // Section « société concernée » : la fiche du
                                                         // registre est la source, la saisie manuelle le
                                                         // recours. Les champs `soc.*` sont retirés de
@@ -1624,6 +1664,9 @@ export default function DossierCreate() {
                                                         // client, qui reste la source de vérité. Les champs d'identité
                                                         // sont retirés de `grille` par champsAffichables() dès qu'un
                                                         // client est lié — seules les données propres à l'acte restent.
+                                                        const roleRepr = roleRepresentant(group.clientRole);
+                                                        const prefixeGroupe = group.fields[0].id.split('.')[0];
+
                                                         return (
                                                             <ClientRoleSection
                                                                 roleLabel={group.name}
@@ -1638,6 +1681,33 @@ export default function DossierCreate() {
                                                                 onToggleSaisieLibre={(v) => toggleSaisieLibre(group.clientRole, v)}
                                                             >
                                                                 {grille}
+
+                                                                {/* Le représentant est une personne comme une autre : même
+                                                                    composant, donc même recherche, même création de fiche, même
+                                                                    échappatoire « saisie libre ». Il est **imbriqué** dans la
+                                                                    carte de la personne représentée parce que c'est un mode de
+                                                                    comparution de celle-ci, pas une partie de plus à l'acte.
+                                                                    La case et le motif restent au-dessus, hors de cette carte :
+                                                                    ils décrivent le mandat, pas l'identité du mandataire, et
+                                                                    seraient repliés avec elle une fois la fiche rattachée. */}
+                                                                {champsRepr.length > 0 && (
+                                                                    <div className="mt-4 border-l-2 border-seal/25 pl-4">
+                                                                        <ClientRoleSection
+                                                                            roleLabel={libelleRepresentant(formValues[`${prefixeGroupe}.representation_motif`])}
+                                                                            linked={clientLinks[roleRepr] ?? null}
+                                                                            onSelect={(client) => applyClientToRepresentant(group, client)}
+                                                                            onUnlink={() => unlinkClientFromSection(roleRepr)}
+                                                                            onCreateNew={() => setCreatingClientForGroup({ ...group, cible: 'representant' })}
+                                                                            onEditClient={(client) => setEditingClient({ client, group, cible: 'representant' })}
+                                                                            poolClients={poolClients}
+                                                                            champsManquants={champsIdentiteManquants(group, 'representant')}
+                                                                            saisieLibre={!!saisieLibreRoles[roleRepr]}
+                                                                            onToggleSaisieLibre={(v) => toggleSaisieLibre(roleRepr, v)}
+                                                                        >
+                                                                            {grilleDe(champsRepr)}
+                                                                        </ClientRoleSection>
+                                                                    </div>
+                                                                )}
                                                             </ClientRoleSection>
                                                         );
                                                         })()}
@@ -1661,14 +1731,17 @@ export default function DossierCreate() {
                                                             // On vérifie s'il y a un repeatable group dans cette section, si oui on skip car c'est RepeatableGroup qui s'en charge.
                                                             if (group.fields.some(f => f.type === 'repeatable')) return null;
 
-                                                            let categorieRole = '';
-                                                            if (group.clientRole === 'associe_unique') {
-                                                                categorieRole = 'associe_physique'; // Par défaut, on ne gère pas encore PP_ASSOCIE_UNIQUE avec type_personne variable ici. Mais pour l'instant ça suffit.
-                                                            } else if (group.clientRole === 'bailleur' || group.clientRole === 'locataire' || group.clientRole === 'vendeur' || group.clientRole === 'acheteur' || group.clientRole === 'liquidateur' || group.clientRole === 'creancier' || group.clientRole === 'debiteur') {
-                                                                categorieRole = group.clientRole; // On l'utilise tel quel si des pièces sont définies dans Partie.php
-                                                            }
-                                                            
-                                                            const piecesRequisesSection = usePage().props.piecesRequises[categorieRole] ?? {};
+                                                            // Règle servie par le serveur, plus recomposée ici. L'ancienne liste
+                                                            // blanche nommait sept rôles (bailleur, locataire, vendeur, acheteur,
+                                                            // liquidateur, créancier, débiteur) dont aucun n'a de jeu déclaré côté
+                                                            // PHP : la section restait donc vide sans que rien ne le dise. Elle
+                                                            // forçait par ailleurs `associe_unique` en personne physique, d'où le
+                                                            // TODO qui l'accompagnait — `type_personne` est désormais passé, et le
+                                                            // jour où la section scalaire en gagnera un, il n'y aura rien à changer.
+                                                            const piecesRequisesSection = piecesRequisesPour(usePage().props.piecesRequises, {
+                                                                role: group.clientRole,
+                                                                typePersonne: formValues[`${group.fields[0].id.split('.')[0]}.type_personne`],
+                                                            });
                                                             const piecesKeys = Object.keys(piecesRequisesSection);
                                                             
                                                             if (piecesKeys.length === 0) return null;
@@ -2039,7 +2112,14 @@ export default function DossierCreate() {
                 open={creatingClientForGroup !== null}
                 onClose={() => setCreatingClientForGroup(null)}
                 onCreated={(client) => {
-                    applyClientToSection(creatingClientForGroup, client);
+                    // Une seule modale pour les deux personnes d'une section : le groupe porte
+                    // `cible` quand la création vient de la carte du représentant. Deux modales
+                    // auraient été deux états à tenir en phase pour un formulaire identique.
+                    if (creatingClientForGroup.cible === 'representant') {
+                        applyClientToRepresentant(creatingClientForGroup, client);
+                    } else {
+                        applyClientToSection(creatingClientForGroup, client);
+                    }
                     addClientToPool(client);
                     setCreatingClientForGroup(null);
                 }}

@@ -30,6 +30,7 @@ class DossierStepService
         private ActesGeneratorService $actes,
         private ReglesSocieteService $reglesSociete,
         private SocieteMutationService $societeMutation,
+        private ReglesRepresentationService $reglesRepresentation,
     ) {}
 
     public function avancer(Dossier $dossier, User $user): Dossier
@@ -121,11 +122,16 @@ class DossierStepService
         if ($etapeSuivante === EtapeDossier::Expedition) {
             $this->genererLettresTransmission($dossier, $user);
 
-            // Les formalités sont revenues : la modification statutaire est enregistrée au
-            // RCCM, donc opposable. C'est le moment de porter le nouveau siège, le nouveau
-            // capital, le nouvel objet ou le nouveau gérant à la fiche du registre — sans
-            // quoi le prochain dossier de modification se préremplirait avec l'état périmé.
-            $this->societeMutation->appliquer($dossier, $user);
+            // Les formalités sont revenues : ce que le dossier a décidé est enregistré au RCCM,
+            // donc opposable. C'est le moment de le porter à la fiche du registre — sans quoi
+            // le prochain dossier se préremplirait avec un état périmé.
+            //
+            // Passe par le registre d'effets depuis le 2026-09-28 : une modification
+            // statutaire écrit le siège, le capital ou le gérant ; une dissolution écrit le
+            // statut, la date du jalon et le liquidateur. L'appel en dur à un seul service ne
+            // pouvait pas porter les deux, et un `match` sur le code de type d'acte aurait
+            // exigé une branche par défaut — voir App\Support\EffetsFicheSociete.
+            \App\Support\EffetsFicheSociete::appliquer($dossier, $user);
         }
 
         // Un client ajouté pendant la création du dossier n'est qu'un prospect tant que le
@@ -207,6 +213,15 @@ class DossierStepService
         }
 
         $ancienneEtape = $dossier->etape;
+
+        // Sortie d'Expédition : ce que le dossier avait porté à la fiche société n'est plus
+        // acquis. Chaque effet décide s'il peut se défaire sans écraser une correction faite
+        // depuis — le cycle de vie revert, la modification statutaire se contente d'avertir.
+        // Appelé **avant** le changement d'étape : les effets lisent l'état d'où l'on part.
+        if ($ancienneEtape === EtapeDossier::Expedition) {
+            \App\Support\EffetsFicheSociete::annuler($dossier, $user);
+        }
+
         $dossier->etape = $etapePrecedente;
         $dossier->save();
 
@@ -295,6 +310,56 @@ class DossierStepService
     }
 
     /**
+     * Anomalies **métier** du dossier, à plat, pour le panneau « conditions requises ».
+     *
+     * Le panneau de la fiche dossier (`getStepBlockers()` dans `Dossiers/Show.jsx`) recalcule en
+     * JavaScript les cinq blocages structurels — objet, notaire, certificateur, pièces des
+     * personnes, accord client — mais **ne connaissait pas** les règles de
+     * {@see ReglesSocieteService} ni de {@see ReglesRepresentationService}. Constaté le
+     * 2026-09-28 sur un dossier de clôture de liquidation : le panneau n'annonçait que l'accord,
+     * le clerc le déposait, cliquait « Avancer », et découvrait *alors seulement* que la société
+     * n'était pas en liquidation. L'inverse exact de la doctrine du dépôt — « un blocage énuméré
+     * plutôt qu'un bouton grisé » — et le docbloc de `ReglesSocieteService` affirmait pourtant
+     * que ces règles « remontent automatiquement dans le panneau ».
+     *
+     * **Le serveur calcule, le client affiche** : c'est la sortie que le devbook §9 avait déjà
+     * désignée (« à terme, exposer les blocages depuis le serveur supprimerait le troisième »).
+     * Les règles ne sont donc jamais réécrites en JavaScript, et une règle ajoutée demain
+     * apparaîtra dans le panneau sans une ligne de front.
+     *
+     * ⚠️ Rend **uniquement** les anomalies métier, pas les cinq blocages structurels : le
+     * panneau les calcule déjà, avec leurs ancres et leurs libellés d'action. Les renvoyer ici
+     * les afficherait en double.
+     *
+     * ⚠️ Borné aux deux étapes qui appliquent ces règles. `ReglesSocieteService::anomalies()`
+     * charge toute la table des questionnaires pour contrôler l'unicité de dénomination : le
+     * payer à l'affichage d'un dossier déjà signé serait gratuit.
+     *
+     * Les deux services sont parcourus **séparément** et non fusionnés par `array_merge` :
+     * celui-ci écrase à clé égale, et deux règles homonymes perdraient un message.
+     *
+     * @return array<int, array{cle: string, texte: string}>
+     */
+    public function anomaliesMetier(Dossier $dossier): array
+    {
+        if (! in_array($dossier->etape, [EtapeDossier::Initialisation, EtapeDossier::Edition], true)) {
+            return [];
+        }
+
+        $blocants = [];
+
+        foreach ([$this->reglesSociete->anomalies($dossier), $this->reglesRepresentation->anomalies($dossier)] as $source) {
+            foreach ($source as $cle => $messages) {
+                foreach ((array) $messages as $texte) {
+                    $blocants[] = ['cle' => $cle, 'texte' => $texte];
+                }
+            }
+        }
+
+        return $blocants;
+    }
+
+    /**
      * Ce qui manque à la constitution du dossier — partagé par verifierInitialisation()
      * et verifierEdition() pour que les deux ne puissent pas diverger.
      *
@@ -316,19 +381,28 @@ class DossierStepService
         }
 
         $piecesManquantes = $dossier->parties->contains(
-            fn ($p) => collect($p->piecesChecklist())->contains(fn ($item) => !$item['est_fourni'])
+            fn ($p) => $p->aUnePieceBloquanteManquante()
         );
         if ($piecesManquantes) {
             $errors['pieces'] = ["Toutes les pièces justificatives des personnes au dossier doivent être fournies."];
         }
 
-        // Le libellé vient du dossier : une modification de statuts attend la décision des
-        // associés, pas une fiche de recueil signée. Message identique à celui de l'écran — un
-        // appel direct à l'API doit dire la même chose que l'interface.
+        // Le libellé **et le caractère bloquant** viennent du dossier : une modification de
+        // statuts attend la décision des associés, pas une fiche de recueil signée, et une
+        // dissolution ne bloque pas du tout — voir `App\Support\AccordsInitialisation`.
+        //
+        // L'exigence était uniforme jusqu'au 2026-09-28, et c'est ce qui immobilisait les
+        // dossiers de dissolution : seule cette ligne les empêchait de passer en Édition.
+        // Message identique à celui de l'écran — un appel direct à l'API doit dire la même
+        // chose que l'interface.
         $accordAttendu = $dossier->pieceAccordAttendue();
-        $accordClient  = $dossier->documents->firstWhere('categorie', $accordAttendu['categorie']);
-        if (!$accordClient?->est_signe_cachete) {
-            $errors['accord_client'] = [sprintf('« %s » doit être téléversé.', $accordAttendu['nom'])];
+
+        if ($accordAttendu['exigence']->bloque()) {
+            $accordClient = $dossier->documents->firstWhere('categorie', $accordAttendu['categorie']);
+
+            if (!$accordClient?->est_signe_cachete) {
+                $errors['accord_client'] = [sprintf('« %s » doit être téléversé.', $accordAttendu['nom'])];
+            }
         }
 
         // Règles légales de constitution (capital minimum, associé unique, commissaire aux
@@ -336,6 +410,13 @@ class DossierStepService
         // l'accord client : produire les statuts d'une SA sous-capitalisée expose l'office.
         // Ne renvoie rien hors dossiers de société.
         $errors = array_merge($errors, $this->reglesSociete->anomalies($dossier));
+
+        // Appelé **inconditionnellement**, contrairement aux règles de société : une
+        // représentation se déclare sur tout type d'acte — un vendeur ou un bailleur se font
+        // représenter aussi couramment qu'un associé. Clés distinctes de celles de
+        // ReglesSocieteService : `array_merge` écrase à clé égale, et l'anomalie « associé
+        // mineur non représenté » (clé `representation`) ne doit pas disparaître derrière.
+        $errors = array_merge($errors, $this->reglesRepresentation->anomalies($dossier));
 
         return $errors;
     }

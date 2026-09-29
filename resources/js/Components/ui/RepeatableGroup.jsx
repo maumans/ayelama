@@ -9,10 +9,11 @@ import { NumberField } from '@/Components/ui/number-field';
 import { PhoneField } from '@/Components/ui/phone-field';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
-import { mapClientToRepeatableItem, estChampIdentite } from '@/lib/clientFields';
-import { getVisibleFields } from '@/data/questionnaires';
+import { mapClientToRepeatableItem, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
+import { getVisibleFields, libelleRepresentant } from '@/data/questionnaires';
 import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
+import { piecesRequisesPour } from '@/lib/piecesRequises';
 
 /**
  * RepeatableGroup — bloc de formulaire répétable pour associés, gérants, administrateurs, etc.
@@ -105,17 +106,64 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
      */
     const champsAffichables = (item) => {
         const visibles = getVisibleFields(fields, item);
-        if (!clientRole || !item.client) return visibles;
-        return visibles.filter(f => !estChampIdentite(f.id));
+        if (!clientRole) return visibles;
+
+        // Décidé **par personne** : une ligne peut en porter deux, l'associé et son
+        // représentant, chacune avec ou sans fiche. Rattacher celle de l'associé ne doit pas
+        // faire disparaître les champs du mandataire, qui n'en a pas. Même règle que dans
+        // Create.jsx et dans la modale de Show.jsx — les trois moteurs de rendu doivent la
+        // partager, c'est un point de contrôle du dépôt.
+        const fichesLiees = {
+            partie: item.client ?? null,
+            representant: item.representant_client ?? null,
+        };
+
+        return visibles.filter(f => !estChampIdentite(f.id) || !fichesLiees[personneDuChamp(f.id)]);
     };
 
     // Champs d'identité obligatoires que la fiche rattachée ne renseigne pas : ils
     // sont masqués, donc invisiblement bloquants sans ce rappel (voir Create.jsx).
-    const champsManquants = (item) => {
-        if (!clientRole || !item.client) return [];
+    const champsManquants = (item, personne = 'partie') => {
+        const fiche = personne === 'representant' ? item.representant_client : item.client;
+        if (!clientRole || !fiche) return [];
+
         return getVisibleFields(fields, item)
-            .filter(f => f.required && estChampIdentite(f.id) && !item[f.id])
+            .filter(f => f.required
+                && estChampIdentite(f.id)
+                && personneDuChamp(f.id) === personne
+                && !item[f.id])
             .map(f => f.label);
+    };
+
+    /**
+     * L'état des modales porte soit un index nu (la personne de la ligne), soit
+     * `{ idx, cible }` (son représentant). Normalisé ici, à un seul endroit.
+     */
+    const cibleCreation = (etat) =>
+        (typeof etat === 'object' && etat !== null) ? etat : { idx: etat, cible: 'partie' };
+
+    const ficheEnEdition = () => {
+        if (editingIndex === null) return null;
+        const { idx, cible } = cibleCreation(editingIndex);
+        return (cible === 'representant' ? value[idx]?.representant_client : value[idx]?.client) ?? null;
+    };
+
+    /** Rattache une fiche au représentant de CETTE ligne — miroir exact de `applyClient`. */
+    const applyClientRepresentant = (idx, client) => {
+        const mapped = mapClientToRepeatableItem(client, fields.map(f => f.id), 'repr_');
+        onChange(value.map((item, i) =>
+            i === idx
+                ? { ...item, ...mapped, representant_client: client, representant_client_id: client.id }
+                : item
+        ));
+    };
+
+    const unlinkClientRepresentant = (idx) => {
+        onChange(value.map((item, i) => {
+            if (i !== idx) return item;
+            const { representant_client, representant_client_id, ...reste } = item;
+            return reste;
+        }));
     };
 
     if (readOnly) {
@@ -256,6 +304,26 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                 readOnly={readOnly}
                             >
                                 {grille}
+
+                                {/* Le représentant de cette ligne. Imbriqué dans sa carte parce
+                                    qu'il est un mode de comparution de cette personne-là, et non
+                                    une ligne de plus au bloc : ajouter un associé et lui donner un
+                                    mandataire sont deux gestes différents. */}
+                                {item.est_represente && (
+                                    <div className="mt-3 border-l-2 border-seal/25 pl-3">
+                                        <ClientRoleSection
+                                            roleLabel={libelleRepresentant(item.representation_motif)}
+                                            linked={item.representant_client ?? null}
+                                            onSelect={(client) => applyClientRepresentant(idx, client)}
+                                            onUnlink={() => unlinkClientRepresentant(idx)}
+                                            onCreateNew={() => setCreatingForIndex({ idx, cible: 'representant' })}
+                                            onEditClient={() => setEditingIndex({ idx, cible: 'representant' })}
+                                            poolClients={poolClients}
+                                            champsManquants={champsManquants(item, 'representant')}
+                                            readOnly={readOnly}
+                                        />
+                                    </div>
+                                )}
                             </ClientRoleSection>
                         );
                         })()}
@@ -287,15 +355,14 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                             }
 
                             // Si partie_id n'existe pas, on est en création (ou ajout de nouvel item).
-                            // On vérifie le clientRole de la section pour savoir quelles pièces demander.
-                            let categorieRole = '';
-                            if (clientRole === 'associe' || clientRole === 'associe_unique') {
-                                categorieRole = item.type_personne === 'Personne morale' ? 'associe_morale' : 'associe_physique';
-                            } else if (clientRole === 'gerant') {
-                                categorieRole = 'gerant';
-                            }
-                            
-                            const piecesRequisesSection = piecesRequises[categorieRole] ?? {};
+                            // La règle « rôle (+ type de personne) → pièces » vient du serveur et
+                            // n'est plus recomposée ici : cette copie ne couvrait que 3 rôles sur 7,
+                            // laissant cédants, cessionnaires, souscripteurs et gérants entrants
+                            // sans aucune pièce à l'écran alors que le serveur les exige ensuite.
+                            const piecesRequisesSection = piecesRequisesPour(piecesRequises, {
+                                role: clientRole,
+                                typePersonne: item.type_personne,
+                            });
                             const piecesKeys = Object.keys(piecesRequisesSection);
                             
                             if (piecesKeys.length > 0) {
@@ -352,7 +419,12 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                         open={creatingForIndex !== null}
                         onClose={() => setCreatingForIndex(null)}
                         onCreated={(client) => {
-                            applyClient(creatingForIndex, client);
+                            // L'état porte soit un index (la personne de la ligne), soit
+                            // `{ idx, cible }` (son représentant). Une seule modale pour les
+                            // deux : le formulaire de fiche est identique, et deux états
+                            // auraient été deux choses à tenir en phase.
+                            const { idx, cible } = cibleCreation(creatingForIndex);
+                            (cible === 'representant' ? applyClientRepresentant : applyClient)(idx, client);
                             setCreatingForIndex(null);
                             onClientCreated?.(client);
                         }}
@@ -360,16 +432,27 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                     {/* Correction en place de la fiche rattachée à cette ligne */}
                     <ModalNouveauClient
                         open={editingIndex !== null}
-                        client={editingIndex !== null ? (value[editingIndex]?.client ?? null) : null}
+                        client={ficheEnEdition()}
                         onClose={() => setEditingIndex(null)}
                         onCreated={(client) => {
                             // Réapplique la fiche corrigée sur toutes les lignes qui la
-                            // désignent, pas seulement celle éditée.
+                            // désignent, pas seulement celle éditée — et dans les deux rôles
+                            // qu'une ligne peut lui donner : la personne, ou son représentant.
                             const fieldIds = fields.map(f => f.id);
-                            const mapped = mapClientToRepeatableItem(client, fieldIds);
-                            onChange(value.map(item => item.client?.id === client.id
-                                ? { ...item, ...mapped, client }
-                                : item));
+                            onChange(value.map(item => {
+                                let suivant = item;
+                                if (item.client?.id === client.id) {
+                                    suivant = { ...suivant, ...mapClientToRepeatableItem(client, fieldIds), client };
+                                }
+                                if (item.representant_client?.id === client.id) {
+                                    suivant = {
+                                        ...suivant,
+                                        ...mapClientToRepeatableItem(client, fieldIds, 'repr_'),
+                                        representant_client: client,
+                                    };
+                                }
+                                return suivant;
+                            }));
                             setEditingIndex(null);
                             onClientCreated?.(client);
                         }}

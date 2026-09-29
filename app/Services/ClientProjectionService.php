@@ -102,7 +102,10 @@ class ClientProjectionService
         'email'          => 'email',
     ];
 
-    public function __construct(private ActesGeneratorService $generateur) {}
+    public function __construct(
+        private ActesGeneratorService $generateur,
+        private MentionComparutionService $mentions,
+    ) {}
 
     /**
      * Recalcule `donnees` du dossier depuis les fiches clients de ses parties.
@@ -118,17 +121,30 @@ class ClientProjectionService
             return false;
         }
 
-        $dossier->loadMissing(['questionnaire', 'parties.client']);
+        $dossier->loadMissing(['questionnaire', 'parties.client', 'parties.representant.client']);
 
         $donnees = $dossier->questionnaire?->donnees ?? [];
         $avant   = $donnees;
 
         foreach ($dossier->parties as $partie) {
-            if (!$partie->estProjetable() || !$partie->client) {
+            // `estLocalisee()` et non `estProjetable()` : la mention de comparution doit être
+            // écrite même pour une personne saisie sans fiche client. Sans fiche il n'y a pas
+            // d'identité à projeter, mais il y a toujours une façon de comparaître à restituer
+            // — et un acte qui tairait « ici représenté par… » serait faux.
+            if (!$partie->estLocalisee()) {
                 continue;
             }
 
-            $valeurs = $this->valeursPour($partie->client);
+            $valeurs = $partie->client ? $this->valeursPour($partie->client) : [];
+
+            // Sous-espace du représentant + phrase de comparution. Le séparateur suit la forme
+            // de l'hôte : pointé dans une section scalaire (`pp.repr_nom`), plat dans un item
+            // de bloc (`repr_nom`) — c'est la convention déjà en vigueur pour le reste.
+            $valeurs += $this->valeursRepresentation($partie);
+
+            if ($valeurs === []) {
+                continue;
+            }
 
             if ($partie->donnees_bloc === null) {
                 foreach ($valeurs as $suffixe => $valeur) {
@@ -179,8 +195,20 @@ class ClientProjectionService
     {
         $dossiers = Dossier::query()
             ->whereNot('etape', EtapeDossier::Cloture->value)
-            ->whereHas('parties', fn ($q) => $q->projetables()->where('client_id', $client->id))
-            ->with(['questionnaire', 'parties.client', 'documents'])
+            ->where(fn ($q) => $q
+                // Partie localisée portant cette fiche : le cas d'origine.
+                ->whereHas('parties', fn ($p) => $p->projetables()->where('client_id', $client->id))
+                // …ou **représentant** d'une partie localisée. Un mandataire n'est jamais
+                // localisé pour lui-même : sans cette branche, corriger sa fiche ne toucherait
+                // aucun dossier, et l'acte garderait son ancien numéro de pièce d'identité.
+                ->orWhereHas(
+                    'parties',
+                    fn ($p) => $p->localisees()->whereHas(
+                        'representant',
+                        fn ($r) => $r->where('client_id', $client->id),
+                    ),
+                ))
+            ->with(['questionnaire', 'parties.client', 'parties.representant.client', 'documents'])
             ->get();
 
         $touches = [];
@@ -304,5 +332,88 @@ class ClientProjectionService
             array_keys(self::SUFFIXES_COMMUNS),
             ['type_personne', 'adresse', 'domicile', 'siege'],
         )));
+    }
+
+    // ── Représentation ───────────────────────────────────────────────────────
+
+    /** Préfixe du sous-espace où l'identité du représentant est projetée. */
+    private const PREFIXE_REPRESENTANT = 'repr_';
+
+    /** Suffixes propres au mandat, en plus de l'identité re-préfixée du représentant. */
+    private const SUFFIXES_MANDAT = [
+        'repr_motif', 'repr_qualite',
+        'repr_titre_forme', 'repr_titre_date', 'repr_titre_autorite', 'repr_titre_reference',
+    ];
+
+    /**
+     * Toutes les clés que la représentation écrit — identité re-préfixée, mandat, comparution.
+     *
+     * Exposée parce que deux choses en dépendent et ne doivent pas en tenir de copie :
+     * l'effacement ci-dessous, qui doit être exhaustif par construction, et le test de parité
+     * qui vérifie que **tous** ces suffixes sont masqués en saisie côté JavaScript. Un champ
+     * du sous-espace resté saisissable serait tapé à la main puis écrasé à la sauvegarde
+     * suivante — la double vérité que la projection existe justement pour supprimer.
+     *
+     * @return array<int, string>
+     */
+    public static function suffixesRepresentation(): array
+    {
+        return array_values(array_unique(array_merge(
+            array_map(
+                fn (string $s) => self::PREFIXE_REPRESENTANT . $s,
+                self::suffixesProjetes(),
+            ),
+            self::SUFFIXES_MANDAT,
+            ['comparution'],
+        )));
+    }
+
+    /**
+     * Ce que la représentation d'une partie ajoute à son emplacement.
+     *
+     * ⚠️ **Cette méthode efface**, là où le reste du service ne fait que compléter (« les
+     * valeurs vides sont omises : la projection complète, elle n'efface pas »). L'exception est
+     * délibérée et son critère est général : *la projection peut effacer exactement ce qu'elle
+     * seule écrit*. Personne ne saisit jamais `repr_*` ni `comparution` — ils sont masqués en
+     * saisie — donc les réinitialiser ne peut détruire aucune frappe humaine. Sans cela,
+     * retirer une représentation laisserait l'acte imprimer un mandataire révoqué : le pire
+     * défaut possible sur un acte authentique.
+     *
+     * @return array<string, string>
+     */
+    private function valeursRepresentation(Partie $partie): array
+    {
+        // Table rase : toutes les clés du sous-espace, vides. Ce qui suit les repeuple.
+        $valeurs = array_fill_keys(self::suffixesRepresentation(), '');
+
+        $valeurs['comparution'] = $this->mentions->pour($partie);
+
+        $representant = $partie->representant;
+        if (! $partie->estRepresentee() || $representant === null) {
+            return $valeurs;
+        }
+
+        if ($representant->client) {
+            foreach ($this->valeursPour($representant->client) as $suffixe => $valeur) {
+                $valeurs[self::PREFIXE_REPRESENTANT . $suffixe] = $valeur;
+            }
+        } else {
+            // Représentant saisi sans fiche : l'acte doit quand même le nommer.
+            $valeurs['repr_prenom_nom'] = (string) $representant->nom;
+            $valeurs['repr_nom']        = (string) $representant->nom;
+            $valeurs['repr_adresse']    = (string) $representant->adresse;
+            $valeurs['repr_cni']        = (string) $representant->cni;
+        }
+
+        $valeurs['repr_motif']            = $partie->representation_motif?->label() ?? '';
+        $valeurs['repr_qualite']          = (string) $partie->representation_qualite;
+        $valeurs['repr_titre_forme']      = $partie->representation_titre_forme?->label() ?? '';
+        // Format JJ/MM/AAAA, comme toute date de `donnees` : c'est de lui que
+        // ActesGeneratorService dérive `${..._jma}` et `${..._lettres}`.
+        $valeurs['repr_titre_date']       = $partie->representation_titre_date?->format('d/m/Y') ?? '';
+        $valeurs['repr_titre_autorite']   = (string) $partie->representation_titre_autorite;
+        $valeurs['repr_titre_reference']  = (string) $partie->representation_titre_reference;
+
+        return $valeurs;
     }
 }

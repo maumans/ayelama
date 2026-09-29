@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Dossier;
+use App\Enums\TypeRemise;
 use App\Models\Facture;
 use App\Models\JournalActivite;
 use App\Models\LigneFacture;
@@ -11,6 +12,7 @@ use App\Models\Recu;
 use App\Services\FacturePdfService;
 use App\Services\RecuPdfService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -298,7 +300,14 @@ class FactureController extends Controller
             'montant'     => ['required', 'numeric', 'min:0'],
         ]);
 
-        LigneFacture::create([...$data, 'facture_id' => $facture->id]);
+        LigneFacture::create([
+            ...$data,
+            'facture_id' => $facture->id,
+            // Une ligne ajoutée à la main est remisable : l'étude l'a créée délibérément, et
+            // aucun barème ne dit qu'elle serait un débours. Les lignes générées, elles,
+            // héritent du drapeau de leur barème.
+            'remise_autorisee' => true,
+        ]);
         $facture->recalculerTotal();
 
         JournalActivite::enregistrer($facture->dossier, "Ligne de facture ajoutée : {$data['designation']}", 'facturation');
@@ -313,18 +322,103 @@ class FactureController extends Controller
         $this->assertLignesModifiables($facture);
 
         $data = $request->validate([
-            'designation' => ['required', 'string', 'max:255'],
-            'quantite'    => ['required', 'integer', 'min:1'],
-            'montant'     => ['required', 'numeric', 'min:0'],
+            'designation'   => ['required', 'string', 'max:255'],
+            'quantite'      => ['required', 'integer', 'min:1'],
+            'montant'       => ['required', 'numeric', 'min:0'],
+            // La remise telle qu'elle a été **exprimée** : son type et sa valeur. Le montant
+            // qui en résulte n'est pas posté — il se calcule, et deux sources divergeraient.
+            'remise_type'   => ['nullable', Rule::enum(TypeRemise::class)],
+            'remise_valeur' => ['nullable', 'numeric', 'min:0', 'required_with:remise_type'],
         ]);
 
-        $avant = $ligne->only(['designation', 'quantite', 'montant']);
-        $ligne->update($data);
+        $remise = $this->remiseValidee($ligne, $data);
+
+        $avant = $ligne->only(['designation', 'quantite', 'montant', 'remise_type', 'remise_valeur']);
+        $ligne->update([...$data, ...$remise]);
         $facture->recalculerTotal();
 
-        JournalActivite::enregistrer($facture->dossier, "Ligne de facture modifiée : {$data['designation']}", 'facturation', ['avant' => $avant, 'apres' => $data]);
+        JournalActivite::enregistrer(
+            $facture->dossier,
+            $this->libelleModificationLigne($ligne, $avant),
+            'facturation',
+            ['avant' => $avant, 'apres' => $ligne->only(['designation', 'quantite', 'montant', 'remise_type', 'remise_valeur'])],
+        );
 
         return back()->with('success', 'Ligne mise à jour.');
+    }
+
+    /**
+     * Contrôle la remise demandée et la rend sous sa forme persistable.
+     *
+     * Trois refus, chacun pour une raison différente :
+     *
+     *   - **ligne non remisable** : un débours est de l'argent que l'étude avance pour le
+     *     client — elle paie 180 000 GNF au greffe quoi qu'il arrive. Le refuser côté serveur
+     *     et pas seulement à l'écran : une règle ne peut pas ne vivre que dans le formulaire ;
+     *   - **pourcentage au-delà de 100** : une ligne ne peut pas être remisée plus qu'elle ne vaut ;
+     *   - **montant au-delà du brut** : idem, et le message dit le plafond.
+     *
+     * @param  array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function remiseValidee(LigneFacture $ligne, array $data): array
+    {
+        $type = $data['remise_type'] ?? null;
+
+        // Retirer la remise est toujours permis, même sur une ligne devenue non remisable.
+        if (! $type || ($data['remise_valeur'] ?? 0) <= 0) {
+            return ['remise_type' => null, 'remise_valeur' => null];
+        }
+
+        if (! $ligne->remiseAutorisee()) {
+            throw ValidationException::withMessages([
+                'remise_valeur' => ["Cette ligne n'accepte pas de remise : c'est un débours, que l'étude verse intégralement à un tiers. Ouvrez la remise sur son barème si c'est voulu."],
+            ]);
+        }
+
+        $type   = $type instanceof TypeRemise ? $type : TypeRemise::from($type);
+        $valeur = (float) $data['remise_valeur'];
+
+        // Le brut est calculé sur les **nouvelles** quantité et montant, pas sur les anciennes :
+        // l'utilisateur peut changer les trois d'un coup.
+        $brut = round(((int) $data['quantite']) * ((float) $data['montant']), 2);
+
+        if ($type === TypeRemise::Pourcentage && $valeur > 100) {
+            throw ValidationException::withMessages([
+                'remise_valeur' => ['Une remise ne peut pas dépasser 100 %.'],
+            ]);
+        }
+
+        if ($type === TypeRemise::Montant && $valeur > $brut) {
+            throw ValidationException::withMessages([
+                'remise_valeur' => [sprintf(
+                    'La remise ne peut pas dépasser le montant de la ligne (%s GNF).',
+                    number_format($brut, 0, ',', ' '),
+                )],
+            ]);
+        }
+
+        return ['remise_type' => $type->value, 'remise_valeur' => $valeur];
+    }
+
+    /** Le journal dit ce qui a changé, et nomme la remise quand il y en a une. */
+    private function libelleModificationLigne(LigneFacture $ligne, array $avant): string
+    {
+        $base = "Ligne de facture modifiée : {$ligne->designation}";
+
+        if ($ligne->remiseMontant() > 0) {
+            return $base . sprintf(
+                ' — remise de %s GNF (%s %%)',
+                number_format($ligne->remiseMontant(), 0, ',', ' '),
+                rtrim(rtrim(number_format($ligne->remisePourcentage(), 2, ',', ' '), '0'), ','),
+            );
+        }
+
+        if (($avant['remise_type'] ?? null) !== null) {
+            return $base . ' — remise retirée';
+        }
+
+        return $base;
     }
 
     public function destroyLigne(LigneFacture $ligne)

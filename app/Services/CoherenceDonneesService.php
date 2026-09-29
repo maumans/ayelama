@@ -38,8 +38,18 @@ class CoherenceDonneesService
         ['naissance' => 'ger.date_naissance',            'delivree' => 'ger.piece_delivree_le',            'expire' => 'ger.piece_expire_le'],
         ['naissance' => 'acq.date_naissance',            'delivree' => 'acq.piece_delivree_le',            'expire' => 'acq.piece_expire_le'],
         ['naissance' => 'gerant_entrant.date_naissance', 'delivree' => 'gerant_entrant.piece_delivree_le', 'expire' => 'gerant_entrant.piece_expire_le'],
+        ['naissance' => 'liquidateur.date_naissance', 'delivree' => 'liquidateur.piece_delivree_le', 'expire' => 'liquidateur.piece_expire_le'],
         ['naissance' => 'date_naissance',                'delivree' => 'piece_delivree_le',                'expire' => 'piece_expire_le'],
         ['naissance' => 'soc.president_date_naissance',  'delivree' => null,                               'expire' => null],
+        // Sous-espace du représentant (2026-09-24). Sa pièce d'identité mérite les mêmes
+        // contrôles que celle des parties : c'est elle qui l'identifie au moment où il signe.
+        // Ordre et contenu calqués sur PREFIXES_REPRESENTATION dans questionnaires.js, d'où
+        // ces entrées sont **générées** côté JS — CoherenceDonneesTest verrouille l'égalité.
+        ['naissance' => 'pp.repr_date_naissance',   'delivree' => 'pp.repr_piece_delivree_le',   'expire' => 'pp.repr_piece_expire_le'],
+        ['naissance' => 'ger.repr_date_naissance',  'delivree' => 'ger.repr_piece_delivree_le',  'expire' => 'ger.repr_piece_expire_le'],
+        ['naissance' => 'acq.repr_date_naissance',  'delivree' => 'acq.repr_piece_delivree_le',  'expire' => 'acq.repr_piece_expire_le'],
+        ['naissance' => 'loc.repr_date_naissance',  'delivree' => 'loc.repr_piece_delivree_le',  'expire' => 'loc.repr_piece_expire_le'],
+        ['naissance' => 'repr_date_naissance',      'delivree' => 'repr_piece_delivree_le',      'expire' => 'repr_piece_expire_le'],
     ];
 
     /**

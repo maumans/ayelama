@@ -209,8 +209,19 @@ class ClientProjectionTest extends TestCase
             'donnees_prefixe' => 'pp',
         ]);
 
-        $this->assertFalse($this->service()->reprojeter($dossier->fresh()));
-        $this->assertSame('Saisi à la main', $dossier->fresh()->questionnaire->donnees['pp.prenom_nom']);
+        $this->service()->reprojeter($dossier->fresh());
+        $donnees = $dossier->fresh()->questionnaire->donnees;
+
+        // Aucune identité projetée — c'est la garantie de ce test, et elle tient.
+        $this->assertSame('Saisi à la main', $donnees['pp.prenom_nom']);
+
+        // ⚠️ Ce test affirmait aussi que `reprojeter()` renvoyait `false`. Ce n'est plus vrai
+        // depuis la représentation (2026-09-24) : la **mention de comparution** s'écrit pour
+        // toute partie localisée, avec ou sans fiche. Sans fiche il n'y a pas d'identité à
+        // projeter, mais il y a toujours une façon de comparaître à restituer — et un acte qui
+        // tairait « ici représenté par… » serait faux. Le retour vaut donc « quelque chose a
+        // changé », pas « une identité a été écrasée ».
+        $this->assertSame('A ce, présent', $donnees['pp.comparution']);
     }
 
     public function test_un_dossier_cloture_nest_jamais_reprojete(): void

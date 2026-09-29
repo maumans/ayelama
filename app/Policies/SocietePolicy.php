@@ -17,8 +17,12 @@ use App\Models\User;
  * impraticable.
  *
  * Pas de `delete` : supprimer une fiche référencée par des dossiers casserait leur
- * projection `soc.*`, donc leurs actes. Une société qui n'a plus lieu d'être proposée est
- * désactivée (`actif = false`), pas supprimée.
+ * projection `soc.*`, donc leurs actes. Une société qui a cessé d'exister porte le statut
+ * {@see \App\Enums\StatutSociete::Radiee}, elle n'est pas supprimée.
+ *
+ * Ce paragraphe affirmait jusqu'au 2026-09-28 qu'elle était « désactivée (`actif = false`) ».
+ * La colonne existait, mais rien ne l'écrivait jamais : le commentaire décrivait un mécanisme
+ * inexistant, ce qui est exactement la façon dont un défaut se propage au lieu de s'arrêter.
  */
 class SocietePolicy
 {

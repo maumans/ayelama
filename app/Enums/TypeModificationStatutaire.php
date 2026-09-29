@@ -386,6 +386,49 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     }
 
     /**
+     * Clés de `donnees` portant la sélection — implémentation de {@see VarianteTypeActe}.
+     *
+     * Deux clés : la migration de données du 2026-08-11 convertit `modif.type` (choix unique)
+     * en `modif.types` (tableau), mais un brouillon en cours de saisie ou un import peut encore
+     * porter l'ancienne forme. L'ordre est celui du repli.
+     *
+     * @return array<int, string>
+     */
+    public static function clesQuestionnaire(): array
+    {
+        return ['modif.types', 'modif.type'];
+    }
+
+    /**
+     * Alias de {@see depuisLibelles()} sous le nom du contrat {@see VarianteTypeActe}.
+     *
+     * Le nom historique est conservé : il est appelé depuis une dizaine d'endroits et parle le
+     * vocabulaire de ce cas précis (« libellés » — les questionnaires enregistrent le libellé
+     * affiché, pas un slug).
+     *
+     * @return array<int, self>
+     */
+    public static function depuisDonnees(mixed $valeur): array
+    {
+        return self::depuisLibelles($valeur);
+    }
+
+    /**
+     * Documents imposés par la règle 9 du compte rendu de juillet 2026 — implémentation de
+     * {@see VarianteTypeActe}.
+     *
+     * Rend une liste, contrairement à {@see VarianteDissolution} : ici la référence écrite
+     * existe et le document la tabule explicitement. Alias de {@see documentsRequis()}, dont le
+     * nom reste celui employé par l'écran Processus.
+     *
+     * @return array<string, string>
+     */
+    public function documentsReference(): ?array
+    {
+        return $this->documentsRequis();
+    }
+
+    /**
      * Types de modification d'un dossier, depuis `donnees['modif.types']`.
      *
      * Accepte un **tableau** (forme actuelle) comme une **chaîne** (ancien `modif.type`,

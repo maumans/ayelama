@@ -39,6 +39,9 @@ class ReglesGestionBaremeSeeder extends Seeder
     /** Le type d'acte de modification de statuts, seul concerné par les tarifs de modification. */
     private const CODE_MODIFICATION = 'SOC-MOD';
 
+    /** Dissolution — exclue du tarif greffe, faute de montant documenté. */
+    private const CODE_DISSOLUTION = 'SOC-DIS';
+
     /**
      * Tarifs de **modification statutaire** — `SOC-MOD` uniquement.
      *
@@ -95,10 +98,17 @@ class ReglesGestionBaremeSeeder extends Seeder
     ];
 
     /**
-     * Enregistrement au greffe — s'applique à **tous** les types d'acte de société.
+     * Enregistrement au greffe — constitutions et modifications.
      *
      * Une constitution comme une modification passent au Tribunal de Commerce (règle 8 :
      * toutes les modifications impactent le RCCM, sans exception).
+     *
+     * ⚠️ **Pas la dissolution**, depuis le 2026-09-28. Non que la radiation échappe au RCCM —
+     * elle y passe certainement — mais parce que le compte rendu de juillet 2026 ne dit rien
+     * de son tarif, et que ces 180 000 GNF sont **son** chiffre, pour ses deux cas. L'étendre à
+     * un troisième reviendrait à facturer un montant que personne n'a communiqué, en le
+     * présentant comme sourcé. Une omission visible se corrige en une ligne ; un montant
+     * inventé se découvre sur une facture.
      */
     private const TARIF_GREFFE = [
         'organisme'    => 'Greffe',
@@ -115,8 +125,14 @@ class ReglesGestionBaremeSeeder extends Seeder
         $typesSociete = TypeActe::where('categorie', 'societe')->get();
 
         foreach ($typesSociete as $type) {
+            if ($type->code === self::CODE_DISSOLUTION) {
+                continue;
+            }
+
             $this->appliquer($type, self::TARIF_GREFFE);
         }
+
+        $this->desactiverTarifGreffeDissolution($typesSociete);
 
         $modification = $typesSociete->firstWhere('code', self::CODE_MODIFICATION);
         if ($modification) {
@@ -127,6 +143,29 @@ class ReglesGestionBaremeSeeder extends Seeder
 
         $this->corrigerAncienTarifGreffe();
         $this->desactiverTarifsModificationHorsPerimetre($typesSociete);
+    }
+
+    /**
+     * Retire le tarif greffe posé sur la dissolution par les versions antérieures.
+     *
+     * Désactivé et non supprimé, comme les deux autres corrections de ce seeder : une facture
+     * émise le référence, et son montant doit rester explicable. Idempotent.
+     */
+    private function desactiverTarifGreffeDissolution($typesSociete): void
+    {
+        $dissolution = $typesSociete->firstWhere('code', self::CODE_DISSOLUTION);
+
+        if (! $dissolution) {
+            return;
+        }
+
+        Bareme::where('type_acte_id', $dissolution->id)
+            ->where('organisme', 'Greffe')
+            ->where('libelle', self::TARIF_GREFFE['libelle'])
+            ->update([
+                'actif'       => false,
+                'description' => 'Désactivé le 2026-09-28 : ce tarif est celui du CR de juillet 2026 pour les constitutions et les modifications. Aucun montant n\'est documenté pour une dissolution.',
+            ]);
     }
 
     private function appliquer(TypeActe $type, array $tarif): void

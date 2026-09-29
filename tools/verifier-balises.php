@@ -15,16 +15,32 @@
  */
 
 $racine    = dirname(__DIR__);
-$liste     = $racine . '/docs/kit-modeles/balises-resolvables.txt';
-$source    = $racine . '/resources/js/data/questionnaires.js';
+$liste = $racine . '/docs/kit-modeles/balises-resolvables.txt';
+
+// Toutes les sources dont la liste dérive. `questionnaires.js` était la seule vérifiée : un
+// cas ajouté au catalogue des données au retour, ou une balise ajoutée au générateur, laissait
+// le garde-fou vert sur une liste périmée — et une liste périmée est pire qu'aucune liste.
+$sources = [
+    $racine . '/resources/js/data/questionnaires.js',
+    $racine . '/tools/generer-balises-resolvables.mjs',
+    $racine . '/app/Enums/DonneeAuRetour.php',
+];
 
 if (!is_file($liste)) {
-    fwrite(STDERR, "Liste de référence absente.\nLancez : node tools/generer-balises-resolvables.mjs\n");
+    fwrite(STDERR, "Liste de référence absente.
+Lancez : node tools/generer-balises-resolvables.mjs
+");
     exit(2);
 }
-if (is_file($source) && filemtime($source) > filemtime($liste)) {
-    fwrite(STDERR, "questionnaires.js a changé depuis la dernière génération de la liste.\nRelancez : node tools/generer-balises-resolvables.mjs\n");
-    exit(2);
+
+foreach ($sources as $source) {
+    if (is_file($source) && filemtime($source) > filemtime($liste)) {
+        $nom = basename($source);
+        fwrite(STDERR, "{$nom} a changé depuis la dernière génération de la liste.
+Relancez : node tools/generer-balises-resolvables.mjs
+");
+        exit(2);
+    }
 }
 
 $connues = array_flip(array_filter(array_map('trim', file($liste))));

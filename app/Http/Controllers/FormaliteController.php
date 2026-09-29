@@ -6,7 +6,9 @@ use App\Enums\RoleUtilisateur;
 use App\Enums\StatutFormalite;
 use App\Models\DocumentFichier;
 use App\Models\Dossier;
+use App\Http\Requests\EnregistrerRetourFormaliteRequest;
 use App\Models\Formalite;
+use App\Services\EnregistrementRetourFormalite;
 use App\Models\JournalActivite;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -222,38 +224,107 @@ class FormaliteController extends Controller
     }
 
     /**
-     * Flux guidé "Enregistrer un retour" (maquette 3) : résultat positif ou rejeté,
-     * référence du document reçu. Le déblocage des démarches dépendantes (ex. Greffe
-     * après réception du RCCM) est purement dérivé — Formalite::estBloquee() relit
-     * le statut de la démarche dont on dépend, aucune donnée supplémentaire à mettre à jour.
+     * Enregistrer le retour d'une formalité : résultat, date, données délivrées par l'autorité.
+     *
+     * Le déblocage des démarches dépendantes (ex. Greffe après réception du RCCM) est purement
+     * dérivé — `Formalite::estBloquee()` relit le statut de la démarche dont on dépend, aucune
+     * donnée supplémentaire à mettre à jour.
+     *
+     * **Restauré le 2026-09-29.** Ce docblock décrivait « résultat positif ou rejeté, référence
+     * du document reçu » alors que la méthode ne validait plus qu'une date : les deux champs
+     * avaient été retirés le 2026-08-14 sans que le commentaire suive. Conséquences vécues —
+     * `StatutFormalite::Rejete` était devenu **inatteignable** alors que
+     * `DossierStepService::verifierFormalites()` gardait son message « À corriger et
+     * redéposer », et `reference_document_recu` n'était plus écrite par personne.
+     *
+     * S'y ajoute ce qui manquait depuis toujours : la **capture des données** que l'autorité
+     * délivre. Mesuré avant la passe — 27 formalités sur 29 portaient bien leurs pièces, mais
+     * 12 numéros RCCM ou NIF sur 14 n'atteignaient jamais le registre.
      */
-    public function retour(Request $request, Formalite $formalite)
-    {
+    public function retour(
+        EnregistrerRetourFormaliteRequest $request,
+        Formalite $formalite,
+        EnregistrementRetourFormalite $enregistrement,
+    ) {
         $this->authorize('gererFormalites', $formalite->dossier);
 
-        $data = $request->validate([
-            'date_retour'             => ['required', 'date'],
-        ]);
+        $data = $request->validated();
 
-            $piecesManquantes = $formalite->pieces()->where('est_fourni', false)->exists();
-            if ($piecesManquantes) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'pieces' => ['Toutes les pièces requises doivent être marquées fournies avant d\'enregistrer le retour.'],
-                ]);
-            }
+        // ── Rejet ────────────────────────────────────────────────────────────
+        // ⚠️ **Le contrôle des pièces ne s'applique pas ici.** Un rejet n'apporte pas les
+        // pièces attendues — c'est sa définition même. L'exiger rendrait le rejet
+        // inenregistrable, et c'est mécaniquement ce que produisait le contrôle inconditionnel
+        // de la version précédente.
+        if ($data['resultat'] === 'rejete') {
+            $formalite->update([
+                'statut' => StatutFormalite::Rejete,
+                // La date est posée quand même : l'organisme a répondu, et c'est depuis elle
+                // que court le délai de correction.
+                'retour_at'   => $data['date_retour'],
+                'motif_rejet' => $data['motif_rejet'],
+            ]);
+
+            JournalActivite::enregistrer(
+                $formalite->dossier,
+                "Retour rejeté : {$formalite->labelAffiche()} — {$data['motif_rejet']}",
+                'formalite',
+                ['formalite_id' => $formalite->id],
+                $request->user(),
+            );
+
+            return back()->with('error', 'Rejet enregistré — la démarche est à corriger et redéposer.');
+        }
+
+        // ── Retour positif ───────────────────────────────────────────────────
+        if ($formalite->pieces()->where('est_fourni', false)->exists()) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'pieces' => ['Toutes les pièces requises doivent être marquées fournies avant d\'enregistrer le retour.'],
+            ]);
+        }
+
+        $saisies = $request->donneesSaisies();
 
         $formalite->update([
-            'statut'                  => 'retour_recu',
+            'statut'                  => StatutFormalite::RetourRecu,
             'retour_at'               => $data['date_retour'],
+            'reference_document_recu' => $data['reference_document_recu'] ?? null,
+            'motif_rejet'             => null,
+            // Fusion et non remplacement : une donnée captée lors d'un premier enregistrement
+            // ne doit pas disparaître parce que le formulaire ne la portait plus — le cas se
+            // présente dès qu'un administrateur retire une donnée du barème après coup.
+            'donnees_recues'          => [...($formalite->donnees_recues ?? []), ...$saisies],
         ]);
+
+        $bilan = $enregistrement->appliquer($formalite->fresh(), $saisies, $request->user());
 
         JournalActivite::enregistrer(
             $formalite->dossier,
             "Retour positif enregistré : {$formalite->labelAffiche()}",
-            'formalite'
+            'formalite',
+            ['formalite_id' => $formalite->id],
+            $request->user(),
         );
 
-        return back()->with('success', 'Retour enregistré.');
+        return back()->with('success', $this->messageDeRetour($bilan));
+    }
+
+    /**
+     * Ce que l'utilisateur doit savoir après coup — un message, jamais un silence.
+     *
+     * @param array{appliquees: array, divergentes: array, sansDestination: array} $bilan
+     */
+    private function messageDeRetour(array $bilan): string
+    {
+        if ($bilan['divergentes'] !== []) {
+            return 'Retour enregistré. ⚠️ Une valeur reçue diverge de la fiche société : '
+                . "la fiche n'a pas été modifiée, arbitrez depuis le registre.";
+        }
+
+        if ($bilan['appliquees'] !== []) {
+            return 'Retour enregistré — la fiche société a été complétée.';
+        }
+
+        return 'Retour enregistré.';
     }
 
     /**

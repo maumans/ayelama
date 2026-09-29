@@ -34,7 +34,7 @@ enum EtapeDossier: string
             self::Signature        => 'Signature',
             self::Formalites       => 'Formalités',
             self::Expedition       => 'Expédition',
-            self::Cloture          => 'Clôturé',
+            self::Cloture          => 'Archivé',
         };
     }
 

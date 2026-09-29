@@ -102,4 +102,36 @@ class NombreEnLettres
         
         return (string) $n; // Fallback pour très grands nombres
     }
+
+    /**
+     * Jour + mois en lettres majuscules, **sans l'année** — « VINGT-QUATRE SEPTEMBRE ».
+     *
+     * Forme attendue par la formule notariale « L'AN ${annee_lettres} ; LE … », où l'année est
+     * déjà posée sur sa propre ligne et ne doit pas être répétée.
+     *
+     * Le 1er du mois se dit **PREMIER**, jamais « UN » : convention notariale.
+     *
+     * Vivait en privé dans ActesGeneratorService. Remontée ici le 2026-09-24 parce que
+     * MentionComparutionService en a besoin pour viser une procuration « en date du … », et
+     * qu'une seconde implémentation aurait fini par diverger sur le cas du premier du mois.
+     */
+    public static function dateJourMois(\DateTimeInterface $date): string
+    {
+        $mois = [
+            1 => 'JANVIER',   2 => 'FÉVRIER',  3 => 'MARS',      4 => 'AVRIL',
+            5 => 'MAI',       6 => 'JUIN',      7 => 'JUILLET',   8 => 'AOÛT',
+            9 => 'SEPTEMBRE', 10 => 'OCTOBRE', 11 => 'NOVEMBRE', 12 => 'DÉCEMBRE',
+        ];
+
+        $jour = (int) $date->format('j');
+
+        return ($jour === 1 ? 'PREMIER' : self::convertir((float) $jour, ''))
+            . ' ' . $mois[(int) $date->format('n')];
+    }
+
+    /** Date complète en lettres — « VINGT-QUATRE SEPTEMBRE DEUX MILLE VINGT-SIX ». */
+    public static function dateComplete(\DateTimeInterface $date): string
+    {
+        return self::dateJourMois($date) . ' ' . self::convertir((float) $date->format('Y'), '');
+    }
 }

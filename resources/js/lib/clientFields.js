@@ -60,19 +60,80 @@ const SUFFIXES_DATE = new Set(['date_naissance', 'piece_delivree_le', 'piece_exp
 const valeurQuestionnaire = (suffixe, valeur) =>
     SUFFIXES_DATE.has(suffixe) ? (isoDateToFR(valeur) || valeur) : valeur;
 
+/**
+ * Sous-espaces d'une section de personne — aujourd'hui le seul est celui du représentant.
+ *
+ * Déclaré une fois, et retiré avant toute consultation de `SUFFIXES_IDENTITE` : ajouter les
+ * seize `repr_*` au Set serait la même duplication, en plus petit et plus facile à laisser
+ * diverger. Miroir de ClientProjectionService::PREFIXE_REPRESENTANT.
+ */
+const SOUS_PREFIXES_PERSONNE = ['repr_'];
+
+/** Le sous-préfixe d'un champ, et le suffixe qui reste une fois celui-ci retiré. */
+function decomposer(fieldId) {
+    const brut = fieldId.includes('.') ? fieldId.split('.').slice(1).join('.') : fieldId;
+    const sousPrefixe = SOUS_PREFIXES_PERSONNE.find(p => brut.startsWith(p)) ?? '';
+
+    return { sousPrefixe, suffixe: brut.slice(sousPrefixe.length) };
+}
+
 export function estChampIdentite(fieldId) {
-    const suffixe = fieldId.includes('.') ? fieldId.split('.').slice(1).join('.') : fieldId;
-    return SUFFIXES_IDENTITE.has(suffixe);
+    return SUFFIXES_IDENTITE.has(decomposer(fieldId).suffixe);
+}
+
+/**
+ * Les suffixes portés par une fiche client, exposés en lecture.
+ *
+ * Consommé par `tools/generer-balises-resolvables.mjs`, qui doit déclarer le sous-espace du
+ * représentant (`${pp.repr_*}`) comme résolvable : la projection y écrit **plus** de clés que le
+ * schéma n'en déclare de champs — `repr_nom`, `repr_adresse`, `repr_identite_notariale`… —
+ * et `verifier-balises.php` les dirait sinon inconnues, laissant croire à l'étude qu'elles
+ * n'existent pas.
+ *
+ * Aucune duplication nouvelle : ce Set est déjà le miroir JS assumé de
+ * ClientProjectionService::SUFFIXES_*, et ClientProjectionTest verrouille la correspondance.
+ */
+export function suffixesIdentite() {
+    return [...SUFFIXES_IDENTITE];
+}
+
+/**
+ * De quelle personne ce champ décrit-il l'identité ?
+ *
+ * `'partie'` ou `'representant'`. Nécessaire parce que masquer les champs d'identité « dès qu'un
+ * client est lié » ne peut plus se décider globalement : rattacher une fiche au **représenté** ne
+ * doit pas masquer les champs du **représentant**, qui n'en a pas encore.
+ */
+export function personneDuChamp(fieldId) {
+    return decomposer(fieldId).sousPrefixe === 'repr_' ? 'representant' : 'partie';
+}
+
+/**
+ * Ce champ appartient-il au mécanisme de représentation ?
+ *
+ * La case, le motif, le sous-espace du représentant et les caractéristiques du titre. Sert au
+ * formulaire client public, qui doit les exclure en bloc — voir getPublicIntakeFields().
+ */
+export function estChampRepresentation(fieldId) {
+    const brut = fieldId.includes('.') ? fieldId.split('.').slice(1).join('.') : fieldId;
+
+    return brut === 'est_represente'
+        || brut === 'representation_motif'
+        || SOUS_PREFIXES_PERSONNE.some(p => brut.startsWith(p));
 }
 
 // Remplit les champs d'un bloc scalaire préfixé (ex. prefix='pp' → pp.civilite, pp.prenom_nom…)
 // à partir d'un client. Ne renseigne que les champs qui existent réellement dans ce bloc
 // (fieldIds) et pour lesquels le client a une valeur — pas d'écrasement avec du vide.
-export function mapClientToPrefixedFields(client, prefix, fieldIds) {
+export function mapClientToPrefixedFields(client, prefix, fieldIds, sousPrefixe = '') {
     const idSet = new Set(fieldIds);
     const values = {};
     const set = (suffix, value) => {
-        const id = `${prefix}.${suffix}`;
+        const id = `${prefix}.${sousPrefixe}${suffix}`;
+        // ⚠️ `valeurQuestionnaire` reçoit le suffixe **nu**, pas la clé complète : elle
+        // consulte SUFFIXES_DATE, où `repr_date_naissance` ne figure pas. Avec la clé
+        // préfixée, la date repartirait en ISO dans un acte authentique — le défaut que
+        // lib/dates.js documente en tête.
         if (idSet.has(id) && value !== null && value !== undefined && value !== '') {
             values[id] = valeurQuestionnaire(suffix, value);
         }
@@ -134,12 +195,14 @@ export function mapClientToPrefixedFields(client, prefix, fieldIds) {
 
 // Idem, mais pour un item de bloc répétable (associé, gérant, actionnaire…) dont les
 // clés ne sont PAS préfixées (ex. { nom, nationalite, adresse, cni }).
-export function mapClientToRepeatableItem(client, fieldIds) {
+export function mapClientToRepeatableItem(client, fieldIds, sousPrefixe = '') {
     const idSet = new Set(fieldIds);
     const item = {};
-    const set = (id, value) => {
+    const set = (suffixe, value) => {
+        const id = `${sousPrefixe}${suffixe}`;
+        // Même remarque que ci-dessus : le suffixe nu pour la conversion de date.
         if (idSet.has(id) && value !== null && value !== undefined && value !== '') {
-            item[id] = valeurQuestionnaire(id, value);
+            item[id] = valeurQuestionnaire(suffixe, value);
         }
     };
 

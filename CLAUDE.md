@@ -31,6 +31,9 @@ périmètre**, sans qu'il faille le demander :
 | une liste fermée (formes, régimes, situations) | la constante PHP **et** son miroir dans `questionnaires.js`, plus le test de parité |
 | une conversion de format | **le sens inverse** existe presque toujours |
 | une règle de validation de fiche | la même cohérence côté questionnaire, et réciproquement |
+| les **pièces exigées d'un rôle** | `Partie::JEU_PAR_ROLE` / `ROLES_SANS_PIECES` / `PIECES_REQUISES` **et** `resources/js/lib/piecesRequises.js` — le JS ne doit porter aucun nom de rôle ni de jeu ; `PiecesRequisesParRoleTest` le vérifie |
+| un champ de `parties` envoyé par le frontend | `StoreDossierRequest::partiesRules()` — non validé = **écarté par `validated()`**, donc jamais persisté, en silence |
+| la **représentation** d'une partie (procuration, tutelle, représentant légal) | `Partie` (colonnes + jeux de pièces), `MotifRepresentation`, `ClientProjectionService::valeursRepresentation()` **et** `MentionComparutionService` — le sous-espace `repr_*` doit rester masqué en saisie, sinon il est tapé puis écrasé |
 | un `match` exhaustif d'enum PHP | son équivalent JS, qui n'a **aucun** filet (`ETAPE_ORDER`, `ETAPE_TAB`, `getStepBlockers`) |
 
 ### Mesurer, pas supposer

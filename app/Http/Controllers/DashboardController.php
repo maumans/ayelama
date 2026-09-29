@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Enums\CategorieActe;
 use App\Enums\EtapeDossier;
+use App\Enums\StatutSociete;
 use App\Models\Courrier;
+use App\Models\Societe;
 use App\Models\Dossier;
 use App\Models\Formalite;
 use App\Models\JournalActivite;
@@ -89,6 +91,20 @@ class DashboardController extends Controller
             ->sortBy('ordre')
             ->values();
 
+        // Un seul calcul d'échéance dans tout le projet (Societe::echeancesLiquidation),
+        // partagé avec la commande d'alerte et l'écran du registre. Deux calculs divergeraient.
+        $enLiquidation = Societe::statut([
+            StatutSociete::EnLiquidation,
+            StatutSociete::LiquidationCloturee,
+        ])->get();
+
+        $liquidations = [
+            'total'  => $enLiquidation->count(),
+            'retard' => $enLiquidation
+                ->filter(fn (Societe $s) => collect($s->echeancesLiquidation())->contains('enRetard', true))
+                ->count(),
+        ];
+
         return Inertia::render('Dashboard', [
             'stats' => [
                 'enCours'            => $enCours,
@@ -100,6 +116,11 @@ class DashboardController extends Controller
                                             ->whereYear('created_at', now()->year)->count(),
                 'clos'               => Dossier::where('etape', EtapeDossier::Cloture)->count(),
                 'courriersEnAttente' => Courrier::brouillon()->count(),
+                // Liquidations en cours : elles ne vivent dans aucun dossier — le dossier de
+                // dissolution est clos depuis des mois et celui de clôture n'est pas ouvert.
+                // Sans cette tuile, rien sur le tableau de bord ne les rappellerait.
+                'liquidations'       => $liquidations['total'],
+                'liquidationsRetard' => $liquidations['retard'],
             ],
             'fileAttente'     => $fileAttente,
             'alertesUrgentes' => $alertesUrgentes,

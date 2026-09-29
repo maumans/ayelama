@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\TypeModificationStatutaire;
+use App\Enums\DonneeAuRetour;
 use App\Models\Dossier;
 use App\Models\DocumentFichier;
 use App\Models\JournalActivite;
@@ -256,6 +257,39 @@ class ActesGeneratorService
             ];
         }
 
+        // Type **décliné** mais sans règle écrite : la boucle ci-dessus ne tourne pas (`retenus`
+        // est nul), si bien qu'un dossier de dissolution n'affichait strictement rien — ni acte,
+        // ni manque. Ses deux gabarits sont des marque-places (`est_actif = false`, fichier
+        // absent), et un marque-place inactif était donc indiscernable d'une procédure achevée.
+        //
+        // **Portée volontairement restreinte** aux types déclinés sans référence. Mesuré le
+        // 2026-09-28 : 54 des 69 modèles sont inactifs, répartis sur 22 des 24 types. Étendre ce
+        // signalement à tous les types aurait rendu bavardes les créations, ventes et baux d'un
+        // coup — SOC-SA afficherait sept actes manquants. Le bruit aurait noyé le signal. La
+        // restriction n'est pas arbitraire : un type sans variante n'a **pas** de liste attendue,
+        // ses actes sont par définition ceux de ses gabarits actifs (voir `processus()`).
+        if ($retenus === null && VariantesTypeActe::existePour($typeActe->code)) {
+            foreach ($modeles->where('est_actif', false) as $modele) {
+                if (! $this->sertUneVariante($modele, $typeActe, $variantes)) {
+                    continue;
+                }
+
+                $role = $modele->type_document;
+
+                if ($role === null || in_array($role, $typesCouverts, true)) {
+                    continue;
+                }
+
+                $prevus[]        = [
+                    'nom'           => $modele->nom,
+                    'type_document' => $role,
+                    'modele'        => null,
+                    'a_gabarit'     => false,
+                ];
+                $typesCouverts[] = $role;
+            }
+        }
+
         return $prevus;
     }
 
@@ -325,18 +359,11 @@ class ActesGeneratorService
      */
     private function variantesDuDossier(Dossier $dossier): array
     {
-        if (! VariantesTypeActe::existePour($dossier->typeActe?->code)) {
-            return [];
-        }
-
-        return array_map(
-            fn (TypeModificationStatutaire $t) => $t->valeur(),
-            TypeModificationStatutaire::depuisLibelles(
-                $dossier->questionnaire?->donnees['modif.types']
-                    ?? $dossier->questionnaire?->donnees['modif.type']
-                    ?? null,
-            ),
-        );
+        // Délègue au registre depuis le 2026-09-28 : cette méthode nommait `modif.types` en dur
+        // et ne pouvait donc rendre que des modifications statutaires, alors que sa garde
+        // `existePour()` laissait déjà entendre qu'elle traitait tous les types déclinés. Un
+        // dossier de dissolution y recevait [] et voyait passer *tous* les gabarits du type.
+        return VariantesTypeActe::valeursDuDossier($dossier);
     }
 
     /**
@@ -477,27 +504,101 @@ class ActesGeneratorService
             return $configures;
         }
 
-        if ($typeActe->code !== 'SOC-MOD') {
+        // `!== 'SOC-MOD'` codé en dur jusqu'au 2026-09-28. La référence écrite est désormais
+        // portée par la variante elle-même (`documentsReference()`), ce qui distingue deux cas
+        // que le code en dur confondait :
+        //
+        //   - le type ne se décline pas (vente, bail, hypothèque) → `null`, tous ses gabarits ;
+        //   - le type se décline mais **aucune règle écrite ne dit quels documents produire**
+        //     → `null` également, et c'est le cas de la dissolution. Le compte rendu de
+        //     juillet 2026 n'en parle pas ; inventer une liste la ferait afficher comme
+        //     faisant foi par l'écran Processus.
+        $reference = $this->documentsReferencePourVariantes($typeActe, $variantes);
+
+        if ($reference === null) {
             return null;
         }
 
-        $types = array_filter(array_map(
-            fn (string $v) => TypeModificationStatutaire::tryFrom($v),
-            $variantes,
-        ));
-
-        if ($types === []) {
-            // Aucun type reconnu : ne rien produire plutôt que tout produire. L'avancement en
-            // Édition est de toute façon refusé par ReglesSocieteService tant que le type
-            // n'est pas précisé — ce cas ne devrait pas se présenter, mais s'il se présente,
-            // un dossier vide est plus lisible qu'un dossier rempli d'actes hors sujet.
+        if ($reference === []) {
+            // Le type a une référence écrite, mais aucune variante reconnue n'a été décidée :
+            // ne rien produire plutôt que tout produire. L'avancement en Édition est de toute
+            // façon refusé par ReglesSocieteService tant que la variante n'est pas précisée —
+            // ce cas ne devrait pas se présenter, mais s'il se présente, un dossier vide est
+            // plus lisible qu'un dossier rempli d'actes hors sujet.
             return self::TYPES_DOCUMENTS_INCONDITIONNELS;
         }
 
         return [
-            ...array_keys(TypeModificationStatutaire::documentsRequisPour($types)),
+            ...array_keys($reference),
             ...self::TYPES_DOCUMENTS_INCONDITIONNELS,
         ];
+    }
+
+    /**
+     * Documents imposés par une référence écrite, pour des variantes déjà résolues en valeurs.
+     *
+     * Distingue trois retours, et la distinction porte tout le sens :
+     *
+     *   - `null` — aucune référence écrite pour ce type d'acte (il ne se décline pas, ou ses
+     *     variantes n'en déclarent aucune). L'appelant retombe sur les gabarits rattachés.
+     *   - `[]`   — une référence existe, mais aucune variante reconnue n'est décidée.
+     *   - une liste — l'union des exigences des variantes décidées.
+     *
+     * Pendant de {@see VariantesTypeActe::documentsReferencePour()}, qui part d'un dossier ;
+     * celle-ci part de valeurs techniques, forme dont dispose la génération d'actes.
+     *
+     * @param  array<int, string> $variantes
+     * @return array<string, string>|null
+     */
+    private function documentsReferencePourVariantes(TypeActe $typeActe, array $variantes): ?array
+    {
+        if (! VariantesTypeActe::existePour($typeActe->code)) {
+            return null;
+        }
+
+        $resolues = array_filter(array_map(
+            fn (string $v) => VariantesTypeActe::resoudre($typeActe->code, $v),
+            $variantes,
+        ));
+
+        // Aucune variante décidée : on ne peut pas conclure depuis les seules variantes, donc on
+        // interroge le type d'acte — déclare-t-il une référence, quelle que soit la variante ?
+        if ($resolues === []) {
+            foreach (VariantesTypeActe::pour($typeActe->code) as $variante) {
+                if ($variante->documentsReference() !== null) {
+                    return [];
+                }
+            }
+
+            return null;
+        }
+
+        $documents = null;
+
+        foreach ($resolues as $variante) {
+            $reference = $variante->documentsReference();
+
+            if ($reference === null) {
+                continue;
+            }
+
+            $documents = [...($documents ?? []), ...$reference];
+        }
+
+        // Une union non vide doit rester triée comme la règle écrite l'ordonne, pas comme le
+        // clerc a coché les cases — même raison que `documentsRequisPour()`.
+        if ($documents !== null && $resolues !== []) {
+            $modifications = array_filter(
+                $resolues,
+                fn ($v) => $v instanceof TypeModificationStatutaire,
+            );
+
+            if (count($modifications) === count($resolues)) {
+                $documents = TypeModificationStatutaire::documentsRequisPour(array_values($modifications));
+            }
+        }
+
+        return $documents;
     }
 
     /**
@@ -505,6 +606,196 @@ class ActesGeneratorService
      * habille le dossier, elle ne dépend d'aucune résolution.
      */
     private const TYPES_DOCUMENTS_INCONDITIONNELS = ['page_garde'];
+
+    /**
+     * Mentions propres à une société dissoute : l'état accolé à la dénomination, et la durée
+     * réduite de l'article 5 des statuts.
+     *
+     * **Pourquoi dériver plutôt que saisir.** Les deux actes de référence de l'étude (dossier
+     * L'OR D'AFRIQUE, décembre 2023) divergent sur la mention — « (EN COURS DE LIQUIDATION) »
+     * au procès-verbal, « (EN LIQUIDATION) » à l'insertion, pour la même société au même
+     * moment. Et le calcul de durée du procès-verbal est faux : constitution le 24/08/2021,
+     * durée « réduite à deux ans quatre (04) mois » et expirant « le 04 Décembre 2023 » — or
+     * 24/08/2021 + 2 ans 4 mois donne le 24/12/2023, et l'écart réel jusqu'au 04/12/2023 est de
+     * 2 ans 3 mois et 10 jours. Vingt jours d'écart, dans un acte authentique.
+     *
+     * Une valeur calculée depuis deux dates ne peut pas se tromper de vingt jours.
+     *
+     * @param array<string, mixed> $donnees
+     */
+    private function remplirMentionsDissolution(TemplateProcessor $tp, Dossier $dossier, array $donnees): void
+    {
+        // Mention d'état, depuis le **statut de la fiche** et non depuis le questionnaire : elle
+        // change quand la société change d'état, pas quand un clerc la retape.
+        if (!isset($donnees['soc.mention_liquidation'])) {
+            $dossier->loadMissing('societe');
+            $tp->setValue('soc.mention_liquidation', $dossier->societe?->statut->mentionActe() ?? '');
+        }
+
+        // Durée statutaire initiale en toutes lettres : l'acte écrit « quatre-vingt-dix-neuf
+        // (99) années ». `_lettres` n'est dérivé d'office que pour les dates et les suffixes
+        // `_chiffres` ; `soc.duree` n'est ni l'un ni l'autre.
+        // ⚠️ En **minuscules**, contrairement aux autres `_lettres` du moteur, que
+        // `NombreEnLettres` rend en capitales. Ce n'est pas une incohérence : les capitales sont
+        // la convention des **montants** (« LA SOMME DE CINQ MILLIONS »), ces deux mentions-ci
+        // sont de la prose courante — l'acte écrit « fixée à quatre-vingt-dix-neuf (99) années »
+        // et « réduite à deux ans quatre mois ». Une balise en capitales au milieu d'une phrase
+        // se verrait, et le rédacteur du modèle n'a aucun moyen de la rabaisser.
+        $duree = $donnees['soc.duree'] ?? null;
+        if (filled($duree) && !isset($donnees['soc.duree_lettres'])) {
+            $tp->setValue('soc.duree_lettres', mb_strtolower(NombreEnLettres::convertir((int) $duree, ''), 'UTF-8'));
+        }
+
+        // Durée écoulée entre la constitution et la prise d'effet — la phrase de l'article 5.
+        // La date d'effet peut être différée ; à défaut, c'est celle de l'assemblée.
+        $constitution = $this->dateFrancaise($donnees['soc.date_constitution'] ?? null);
+        $effet        = $this->dateFrancaise($donnees['dissolution.date_effet'] ?? null)
+            ?? $this->dateFrancaise($donnees['dissolution.date_assemblee'] ?? null);
+
+        if ($constitution && $effet && $effet > $constitution && !isset($donnees['dissolution.duree_reduite'])) {
+            $tp->setValue('dissolution.duree_reduite', $this->dureeEnLettres($constitution->diff($effet)));
+            $tp->setValue('dissolution.date_expiration', $effet->format('d/m/Y'));
+        }
+    }
+
+    /**
+     * Balises `${retour.*}` — ce que les organismes ont effectivement délivré.
+     *
+     * **Espace de noms distinct de `soc.*`**, et la distinction porte du sens : `${soc.rccm}`
+     * est ce que le **questionnaire** dit de la société, `${retour.rccm_numero}` ce que le
+     * greffe a **délivré sur ce dossier**. Un acte peut légitimement citer l'un ou l'autre. Et
+     * ni l'un ni l'autre n'est `${pm.rccm}`, qui est le RCCM d'une **partie** personne morale.
+     *
+     * ⚠️ **Ces balises sont vides dans les actes déjà produits, et c'est structurel.** Les
+     * actes sont générés à l'entrée en **Édition** ; la formalité revient à l'étape
+     * **Formalités**, deux étapes plus tard. Une insertion au journal produite en Édition ne
+     * peut donc pas porter un numéro RCCM qui n'existait pas encore. Elles servent à deux
+     * choses : un acte **régénéré** après le retour, et les dossiers suivants de la même
+     * société — qui, eux, lisent `${soc.*}` depuis la fiche désormais renseignée.
+     *
+     * `EnregistrementRetourFormalite` signale au retour les actes à régénérer ; il ne les
+     * régénère pas — `regenererDocument()` écraserait une correction faite à la main.
+     *
+     * La précédence habituelle s'applique : une valeur déjà présente dans `donnees` l'emporte,
+     * ce qui laisse la porte ouverte à une saisie manuelle exceptionnelle.
+     *
+     * @param array<string, mixed> $donnees
+     */
+    private function remplirDonneesAuRetour(TemplateProcessor $tp, Dossier $dossier, array $donnees): void
+    {
+        $dossier->loadMissing('formalites');
+
+        // La valeur la plus récemment revenue l'emporte : deux formalités peuvent rapporter la
+        // même donnée (une déclaration modificative après une immatriculation), et c'est la
+        // dernière qui décrit l'état courant.
+        $formalites = $dossier->formalites
+            ->filter(fn ($f) => filled($f->donnees_recues))
+            ->sortBy(fn ($f) => $f->retour_at?->timestamp ?? 0);
+
+        $valeurs = [];
+
+        foreach ($formalites as $formalite) {
+            foreach ($formalite->donnees_recues as $cle => $valeur) {
+                if (filled($valeur)) {
+                    $valeurs[$cle] = $valeur;
+                }
+            }
+        }
+
+        foreach (DonneeAuRetour::depuis(array_keys($valeurs)) as $donnee) {
+            $cle = $donnee->baliseCle();
+
+            if (isset($donnees[$cle])) {
+                continue;
+            }
+
+            $valeur = $valeurs[$donnee->value];
+
+            // `donnees_recues` stocke les dates en **ISO** (c'est du stockage structuré) ; un
+            // acte les veut en JJ/MM/AAAA. La conversion se fait ici, à l'unique endroit où la
+            // valeur sort — c'est le contrat de `resources/js/lib/dates.js`.
+            if ($donnee->type() === 'date') {
+                $date = $this->dateISO($valeur);
+
+                if (! $date) {
+                    continue;
+                }
+
+                $tp->setValue($cle, $date->format('d/m/Y'));
+                $tp->setValue($cle . '_jma', $date->format('d/m/Y'));
+                $tp->setValue($cle . '_lettres', $this->dateJourMoisEnLettres($date) . ' ' . NombreEnLettres::convertir((float) $date->year, ''));
+
+                continue;
+            }
+
+            $tp->setValue($cle, htmlspecialchars((string) $valeur, ENT_XML1 | ENT_COMPAT, 'UTF-8'));
+        }
+    }
+
+    /** Lit une date **ISO**, telle que `donnees_recues` la stocke. */
+    private function dateISO(mixed $valeur): ?\Illuminate\Support\Carbon
+    {
+        if (blank($valeur) || !is_string($valeur)) {
+            return null;
+        }
+
+        try {
+            return \Illuminate\Support\Carbon::createFromFormat('Y-m-d', substr(trim($valeur), 0, 10))->startOfDay();
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Lit une date de `donnees`, qui les porte en **JJ/MM/AAAA**.
+     *
+     * ⚠️ `createFromFormat('d/m/Y')` explicitement, jamais `Carbon::parse` : c'est lui qui a
+     * inversé sept dates au jour et au mois (décision #40).
+     */
+    private function dateFrancaise(mixed $valeur): ?\Illuminate\Support\Carbon
+    {
+        if (blank($valeur) || !is_string($valeur)) {
+            return null;
+        }
+
+        try {
+            return \Illuminate\Support\Carbon::createFromFormat('d/m/Y', trim($valeur))->startOfDay();
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    /**
+     * « deux ans, trois mois et dix jours » — les composantes nulles sont omises.
+     *
+     * Omettre les zéros n'est pas une coquetterie : « deux ans, zéro mois et zéro jour » dans un
+     * acte authentique se remarque.
+     */
+    private function dureeEnLettres(\DateInterval $ecart): string
+    {
+        $morceaux = [];
+
+        foreach ([['y', 'an', 'ans'], ['m', 'mois', 'mois'], ['d', 'jour', 'jours']] as [$cle, $singulier, $pluriel]) {
+            $n = (int) $ecart->{$cle};
+
+            if ($n === 0) {
+                continue;
+            }
+
+            // Minuscules : voir la note de `remplirMentionsDissolution()` — cette durée s'insère
+            // dans une phrase, pas dans une mention de montant.
+            $morceaux[] = mb_strtolower(NombreEnLettres::convertir($n, ''), 'UTF-8') . ' ' . ($n > 1 ? $pluriel : $singulier);
+        }
+
+        if ($morceaux === []) {
+            return 'zéro jour';
+        }
+
+        // « a, b et c » : la dernière composante se sépare par « et », pas par une virgule.
+        $derniere = array_pop($morceaux);
+
+        return $morceaux === [] ? $derniere : implode(', ', $morceaux) . ' et ' . $derniere;
+    }
 
     public function genererDocument(Dossier $dossier, string $templatePath, string $outputName): string
     {
@@ -681,19 +972,13 @@ class ActesGeneratorService
     // Jour + mois en lettres, sans l'année — utilisé dans les templates qui affichent
     // déjà l'année séparément via ${annee_lettres} (ex. « L'AN ... ; LE ... ; ») pour
     // éviter de la répéter deux fois dans le même acte.
+    //
+    // Le corps a été remonté dans NombreEnLettres le 2026-09-24 : MentionComparutionService
+    // vise lui aussi des dates en lettres (« une procuration en date du … »), et deux
+    // implémentations auraient fini par diverger sur le premier du mois.
     private function dateJourMoisEnLettres(\Illuminate\Support\Carbon $date): string
     {
-        $mois = [
-            1 => 'JANVIER',   2 => 'FÉVRIER',  3 => 'MARS',      4 => 'AVRIL',
-            5 => 'MAI',       6 => 'JUIN',      7 => 'JUILLET',   8 => 'AOÛT',
-            9 => 'SEPTEMBRE', 10 => 'OCTOBRE', 11 => 'NOVEMBRE', 12 => 'DÉCEMBRE',
-        ];
-
-        $jourLettres = $date->day === 1
-            ? 'PREMIER'
-            : NombreEnLettres::convertir((float) $date->day, '');
-
-        return $jourLettres . ' ' . $mois[$date->month];
+        return NombreEnLettres::dateJourMois($date);
     }
 
     private function remplirQuestionnaire(TemplateProcessor $tp, Dossier $dossier): void
@@ -780,6 +1065,18 @@ class ActesGeneratorService
                 $tp->setValue("{$pfx}.adresse", htmlspecialchars($adresse, ENT_XML1 | ENT_COMPAT, 'UTF-8'));
             }
         }
+
+        // ── Dissolution : mentions et durées que l'acte écrit mais que nul ne saisit ──
+        //
+        // Ajouté le 2026-09-28 après lecture de deux actes réels de l'étude. Ces trois valeurs
+        // sont **dérivées** et non demandées : elles se déduisent de la fiche société et de la
+        // date d'effet, et les faire saisir revenait à demander un calcul — que l'acte étudié
+        // a d'ailleurs raté.
+        $this->remplirMentionsDissolution($tp, $dossier, $donnees);
+
+        // Ce que les organismes ont délivré — numéro RCCM, NIF, quittance… Voir
+        // `remplirDonneesAuRetour()` pour la raison d'un espace de noms distinct.
+        $this->remplirDonneesAuRetour($tp, $dossier, $donnees);
 
         // Terme du bail (baux habitation/commercial/construction) : les modèles écrivent
         // « … commence à courir le [date_prise_effet] pour se terminer le [date_fin] », mais

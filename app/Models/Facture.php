@@ -114,7 +114,7 @@ class Facture extends Model
      */
     public function versArray(): array
     {
-        $this->loadMissing(['lignes', 'paiements.recu', 'paiements.enregistrePar', 'dossier.typeActe']);
+        $this->loadMissing(['lignes.bareme', 'paiements.recu', 'paiements.enregistrePar', 'dossier.typeActe']);
 
         return [
             'id'                => $this->id,
@@ -130,12 +130,23 @@ class Facture extends Model
             // bouton d'encaissement — même règle que le contrôle serveur.
             'peutRecevoirPaiement' => $this->peutRecevoirPaiement(),
             'estTropPercue'        => $this->estTropPercue(),
-            'lignes'            => $this->lignes->map(fn ($l) => [
+            'totalBrut'         => $this->totalBrut(),
+            'totalRemises'      => $this->totalRemises(),
+            'lignes'            => $this->lignes->map(fn (LigneFacture $l) => [
                 'id'          => $l->id,
                 'designation' => $l->designation,
                 'quantite'    => $l->quantite,
                 'montant'     => (float) $l->montant,
+                'montantBrut' => $l->montantBrut(),
                 'total'       => $l->total(),
+                // La remise sous ses deux formes : celle qui a été saisie, et l'autre —
+                // l'écran les lie, l'utilisateur en saisit une et voit la seconde.
+                'remiseType'        => $l->remise_type?->value,
+                'remiseValeur'      => $l->remise_valeur !== null ? (float) $l->remise_valeur : null,
+                'remiseMontant'     => $l->remiseMontant(),
+                'remisePourcentage' => $l->remisePourcentage(),
+                'remiseAutorisee'   => $l->remiseAutorisee(),
+                'remiseDepasse'     => $l->remiseDepasseLaLigne(),
             ]),
             'paiements' => $this->paiements->map(fn ($p) => [
                 'id'             => $p->id,
@@ -161,13 +172,36 @@ class Facture extends Model
         ];
     }
 
+    /** Somme des lignes **avant** remise. */
+    public function totalBrut(): float
+    {
+        $this->loadMissing('lignes');
+
+        return round($this->lignes->sum(fn (LigneFacture $l) => $l->montantBrut()), 2);
+    }
+
+    /** Total des remises accordées, toutes lignes confondues. */
+    public function totalRemises(): float
+    {
+        $this->loadMissing('lignes');
+
+        return round($this->lignes->sum(fn (LigneFacture $l) => $l->remiseMontant()), 2);
+    }
+
     /**
-     * Recalcule le total à partir des lignes.
+     * Recalcule le total à partir des lignes, **remises déduites**.
+     *
+     * ⚠️ Calculé en PHP et non plus par `SUM(quantite * montant)` en SQL : une remise peut être
+     * un montant ou un pourcentage, avec un plafonnement au brut, et reproduire cette logique
+     * en expression SQL l'aurait dupliquée — deux calculs du même total finissent par diverger,
+     * et celui-ci décide de ce que le client doit. Une facture compte sept lignes en moyenne :
+     * le coût est nul.
      */
     public function recalculerTotal(): self
     {
-        $total = $this->lignes()->sum(\DB::raw('quantite * montant'));
-        $this->update(['total_chiffres' => $total]);
+        $this->load('lignes');
+
+        $this->update(['total_chiffres' => round($this->lignes->sum(fn (LigneFacture $l) => $l->total()), 2)]);
 
         return $this;
     }

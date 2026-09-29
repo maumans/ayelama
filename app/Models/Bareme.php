@@ -14,7 +14,8 @@ class Bareme extends Model
         'condition_modification',
         'description', 'actif', 'ordre',
         'genere_formalite', 'depend_de_bareme_id', 'type_impot',
-        'retour_attendu', 'delai_heures', 'pieces_requises',
+        'remise_autorisee',
+        'retour_attendu', 'delai_heures', 'pieces_requises', 'donnees_au_retour',
     ];
 
     protected function casts(): array
@@ -25,7 +26,13 @@ class Bareme extends Model
             'quantite_defaut'  => 'integer',
             'actif'            => 'boolean',
             'genere_formalite' => 'boolean',
+            // Les honoraires de l'étude se remisent, un débours non : elle verse au tiers
+            // l'intégralité de ce qu'elle facture. Copié sur la ligne à la génération.
+            'remise_autorisee' => 'boolean',
             'pieces_requises'  => 'array',
+            // Ce que l'autorité **délivre** au retour, par opposition à `retour_attendu` qui
+            // nomme le **papier**. Voir App\Enums\DonneeAuRetour.
+            'donnees_au_retour' => 'array',
         ];
     }
 
@@ -79,15 +86,9 @@ class Bareme extends Model
             return false;
         }
 
-        $dossier->loadMissing('questionnaire');
-
         return in_array(
             $condition,
-            TypeModificationStatutaire::depuisLibelles(
-                $dossier->questionnaire?->donnees['modif.types']
-                    ?? $dossier->questionnaire?->donnees['modif.type']
-                    ?? null,
-            ),
+            \App\Support\VariantesTypeActe::duDossier($dossier),
             true,
         );
     }

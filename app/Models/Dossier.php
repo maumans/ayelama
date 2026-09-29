@@ -20,6 +20,27 @@ class Dossier extends Model
         'date_signature_client', 'date_signature_notaire',
     ];
 
+    /**
+     * Défaire les liens de représentation entre parties **avant** de supprimer le dossier.
+     *
+     * `parties.dossier_id` est en cascade, et `parties.represente_par_partie_id` est une clé
+     * étrangère **auto-référente** en `ON DELETE SET NULL`. MySQL supporte mal la combinaison :
+     * il lui arrive de refuser la cascade tant qu'une ligne du lot en référence une autre.
+     *
+     * Le hook `deleting` de Partie ne protège pas ce cas : une cascade au niveau base ne
+     * déclenche **aucun** événement Eloquent. Il faut donc délier ici, depuis le dossier, avant
+     * que la cascade ne parte — et cela vaut pour les deux moteurs, sans dépendre de ce que
+     * SQLite tolère en test.
+     */
+    protected static function booted(): void
+    {
+        static::deleting(function (self $dossier) {
+            Partie::where('dossier_id', $dossier->id)
+                ->whereNotNull('represente_par_partie_id')
+                ->update(['represente_par_partie_id' => null]);
+        });
+    }
+
     protected function casts(): array
     {
         return [
@@ -173,7 +194,7 @@ class Dossier extends Model
     }
 
     /**
-     * Pièce écrite qui atteste l'accord du client et conditionne la sortie de l'Initialisation.
+     * Pièce écrite qui atteste l'accord du client, et ce que l'Initialisation en exige.
      *
      * Elle **dépend du type de dossier**. Pour une constitution, l'étude imprime la fiche du
      * dossier, la fait signer et la téléverse. Pour une **modification de statuts**, cela n'a pas
@@ -181,36 +202,30 @@ class Dossier extends Model
      * Le procès-verbal que l'étude rédige, lui, n'arrive qu'à l'Édition — trop tard pour garder
      * l'Initialisation.
      *
-     * ⚠️ La `categorie` reste `accord_client` dans les deux cas, délibérément : c'est le *créneau
+     * Ce raisonnement, écrit ici pour la modification, vaut mot pour mot pour une **dissolution**
+     * — et personne ne l'avait transposé : jusqu'au 2026-09-28 un dossier de dissolution
+     * réclamait une fiche de recueil imprimée, et restait bloqué dessus.
+     *
+     * ⚠️ La `categorie` reste `accord_client` dans tous les cas, délibérément : c'est le *créneau
      * technique* de cette pièce. En introduire une seconde obligerait à la classer dans
      * {@see \App\Enums\RubriqueCloture::pourDocument()} (elle tomberait sinon dans « Actes », alors
      * qu'elle est fournie et non produite), à l'exclure de l'onglet Actes et à doubler le contrôle
      * bloquant. C'est le **nom** du document qui porte le sens, et il est déjà propre à chaque
      * dossier.
      *
-     * @return array{categorie: string, nom: string, titre: string, instructions: string, imprimable: bool}
+     * Le contenu vit désormais dans {@see \App\Support\AccordsInitialisation}, seul endroit à
+     * modifier, qui porte aussi le **niveau d'exigence** ({@see \App\Enums\ExigenceAccord}) — une
+     * pièce peut être bloquante, simplement attendue, ou sans objet. Cette méthode reste le point
+     * d'entrée : ses quatre appelants n'ont pas changé.
+     *
+     * @return array{categorie: string, nom: string, titre: string, instructions: string,
+     *               imprimable: bool, exigence: \App\Enums\ExigenceAccord, aVerifier: bool}
      */
     public function pieceAccordAttendue(): array
     {
         $this->loadMissing('typeActe');
 
-        if ($this->typeActe?->code === 'SOC-MOD') {
-            return [
-                'categorie'    => 'accord_client',
-                'nom'          => "Décision d'assemblée des associés",
-                'titre'        => "Décision d'assemblée des associés",
-                'instructions' => "Téléversez la décision écrite des associés qui engage cette modification — convocation, projet de résolution, ou procès-verbal remis par le client. Le dossier ne pourra pas passer en certification sans elle.",
-                'imprimable'   => false,
-            ];
-        }
-
-        return [
-            'categorie'    => 'accord_client',
-            'nom'          => 'Accord client — questionnaire signé',
-            'titre'        => 'Accord client sur le questionnaire',
-            'instructions' => "Imprimez la fiche dossier, faites-la signer par le client, puis téléversez ici le document signé. Le dossier ne pourra pas passer en certification sans cet accord.",
-            'imprimable'   => true,
-        ];
+        return \App\Support\AccordsInitialisation::pour($this->typeActe);
     }
 
     /**

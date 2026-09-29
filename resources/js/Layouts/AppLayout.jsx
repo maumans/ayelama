@@ -5,7 +5,7 @@ import {
     LayoutDashboard, FolderOpen, ClipboardCheck, Building2,
     FileText, Users, Mail, Settings, Search, Archive,
     ChevronLeft, ChevronRight, LogOut, User,
-    Menu, Link2, Banknote, Gift
+    Menu, Link2, Banknote, Gift, Landmark
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -129,6 +129,9 @@ function buildNavItems(can, notifications) {
         { href: '/modeles',    label: "Modèles d'actes",   icon: FileText,        show: true },
         { href: '/ged',        label: 'GED',                icon: Archive,         show: true },
         { href: '/repertoire', label: 'Répertoire',        icon: Users,           show: true },
+        // Registre des sociétés : distinct du Répertoire, qui liste les personnes. C'est ici
+        // que se suivent les liquidations en cours — elles ne vivent dans aucun dossier.
+        { href: '/societes',   label: 'Sociétés',          icon: Landmark,        show: true },
         { href: '/anniversaires', label: 'Anniversaires',  icon: Gift,            show: true },
         { href: '/courriers',  label: 'Courriers',         icon: Mail,            show: true },
         { href: '/demandes',   label: 'Demandes clients',  icon: Link2,           show: can?.creerDossier },

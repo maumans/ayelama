@@ -98,8 +98,38 @@ class ListesMatrimonialesTest extends TestCase
         $lignes = explode("
 ", file_get_contents(resource_path('js/data/questionnaires.js')));
 
+        // Les commentaires sont **blanchis** avant analyse, pas seulement ceux en `//`.
+        // Sans cela, un docbloc qui cite le nom d'une constante — « le préfixe est déjà inscrit
+        // dans TRIPLETS_GEO » — était compté comme un usage et faisait échouer le test sur de la
+        // prose. Un garde-fou qui crie au loup finit désactivé : on le rend plus précis, jamais
+        // plus permissif. Les lignes sont conservées (vidées, pas supprimées) pour que les
+        // numéros signalés restent ceux du fichier.
+        $codeSeul = $lignes;
+        $dansBloc = false;
+        foreach ($codeSeul as $i => $ligne) {
+            $nue = ltrim($ligne);
+
+            if ($dansBloc) {
+                $codeSeul[$i] = '';
+                if (str_contains($ligne, '*/')) {
+                    $dansBloc = false;
+                }
+                continue;
+            }
+
+            if (str_starts_with($nue, '//')) {
+                $codeSeul[$i] = '';
+                continue;
+            }
+
+            if (str_starts_with($nue, '/*')) {
+                $codeSeul[$i] = '';
+                $dansBloc = !str_contains($ligne, '*/');
+            }
+        }
+
         $declarations = [];
-        foreach ($lignes as $numero => $ligne) {
+        foreach ($codeSeul as $numero => $ligne) {
             if (preg_match('/^(?:export )?const ([A-Za-z_$][\w$]*)\s*=/', $ligne, $c)) {
                 $declarations[$c[1]] = $numero + 1;
             }
@@ -110,7 +140,7 @@ class ListesMatrimonialesTest extends TestCase
         $fautives = [];
 
         foreach ($declarations as $nom => $ligneDeclaration) {
-            foreach ($lignes as $numero => $ligne) {
+            foreach ($codeSeul as $numero => $ligne) {
                 if ($numero + 1 >= $ligneDeclaration) {
                     break;
                 }

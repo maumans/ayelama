@@ -118,12 +118,26 @@ class User extends Authenticatable
         return $this->hasRole(RoleUtilisateur::Administrateur);
     }
 
+    /**
+     * Initiales, dérivées du nom quand la colonne est vide.
+     *
+     * ⚠️ `mb_substr` et non `$w[0]` : l'indexation d'une chaîne PHP rend un **octet**, et la
+     * première lettre d'un prénom accentué — Éric, Élodie, Étienne — en occupe deux. On
+     * obtenait donc un demi-caractère, et `json_encode()` renvoyait `false` : toute réponse
+     * portant ces initiales partait en 500, sans que le message nomme le nom en cause.
+     *
+     * Trouvé le 2026-09-24 par un test qui échouait au hasard, selon les noms que Faker
+     * tirait en locale `fr_FR`. Zéro cas en base à cette date : le défaut était latent, pas
+     * actif. Même correction sur Partie::getInitialesAttribute().
+     */
     public function getInitialesAttribute($value): string
     {
-        if ($value) return strtoupper($value);
-        return strtoupper(
-            collect(explode(' ', $this->name))
-                ->map(fn($w) => $w[0] ?? '')
+        if ($value) return mb_strtoupper($value);
+
+        return mb_strtoupper(
+            collect(explode(' ', $this->name ?? ''))
+                ->map(fn ($mot) => mb_substr($mot, 0, 1))
+                ->filter()
                 ->take(2)
                 ->join('')
         );

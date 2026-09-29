@@ -159,6 +159,25 @@ class DemandeController extends Controller
             ...StoreDossierRequest::partiesRules(),
         ]);
 
+        // Troisième appelant de `partiesRules()`, et le seul qui n'héritait pas du contrôle de
+        // cohérence des liens de représentation — celui-ci ne s'exprime pas champ par champ, il
+        // faut voir le tableau entier.
+        //
+        // Le formulaire public ne produit jamais de représentation (getPublicIntakeFields
+        // l'exclut par construction), donc aucune demande réelle n'en porte aujourd'hui. Mais
+        // cette route accepte aussi un tableau `parties` envoyé par le clerc au moment de la
+        // conversion : une clé pointant nulle part y passerait sans un mot, et
+        // `resoudreRepresentations()` laisserait la partie non représentée en silence. Une règle
+        // ne peut pas ne vivre que dans le formulaire.
+        $verificateur = \Illuminate\Support\Facades\Validator::make(
+            $request->all(),
+            StoreDossierRequest::partiesRules(),
+        );
+        StoreDossierRequest::validerRepresentations($verificateur);
+        if ($verificateur->errors()->isNotEmpty()) {
+            throw new \Illuminate\Validation\ValidationException($verificateur);
+        }
+
         $dossier = $dossierController->creerDossier([
             'type_acte_id'  => $demande->type_acte_id,
             'objet'         => $validated['objet'],

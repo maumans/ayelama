@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Concerns\HasTypeDocumentLabel;
-use App\Enums\TypeModificationStatutaire;
 use App\Support\VariantesTypeActe;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -69,13 +68,15 @@ class DocumentAttendu extends Model
      */
     public static function reference(?string $codeTypeActe, ?string $variante): ?array
     {
-        if ($codeTypeActe !== 'SOC-MOD') {
-            return null;
-        }
-
-        $cas = VariantesTypeActe::resoudre($codeTypeActe, $variante);
-
-        return $cas instanceof TypeModificationStatutaire ? $cas->documentsRequis() : null;
+        // `!== 'SOC-MOD'` codé en dur jusqu'au 2026-09-28 : la question est désormais posée à la
+        // variante, qui est la seule à savoir si une règle écrite la régit.
+        //
+        // La dissolution répond `null` **délibérément** : le compte rendu de juillet 2026 ne
+        // mentionne ni dissolution, ni liquidation, ni radiation. Lui fabriquer une « référence
+        // légale » ferait afficher une invention comme faisant foi par l'écran Processus, et
+        // `divergeDeLaReference()` la défendrait ensuite contre les corrections de l'étude —
+        // une contrainte inventée est pire qu'une contrainte absente.
+        return VariantesTypeActe::resoudre($codeTypeActe, $variante)?->documentsReference();
     }
 
     /**

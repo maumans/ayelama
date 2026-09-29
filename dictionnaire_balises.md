@@ -25,7 +25,7 @@
 | [Bail](#8-bloc-bail) | `bail.` | Contrat de bail habitation, pro, à construction |
 | [Courrier](#9-bloc-courrier) | `cr.` | Les 13 courriers de transmission |
 | [Facture](#10-bloc-facture) | `fac.` | Notes de frais, bordereaux |
-| [Dissolution](#dissolution) | `dissolution.` + `liquidateur.` | Acte de dissolution |
+| [Dissolution et liquidation](#dissolution-et-liquidation) | `dissolution.` + `liquidateur.` + `cloture.` | Dissolution anticipée, puis clôture de la liquidation — **deux dossiers** |
 | [Modification de statuts](#10-bis-blocs-modification-de-statuts) | `modif.` + `ag.` + `gerant_sortant.` / `gerant_entrant.` | Acte de cession, PV d'AGE, statuts mis à jour, DNSV, déclaration RCCM |
 
 ---
@@ -209,17 +209,94 @@
 
 ---
 
-## Dissolution
+## Dissolution et liquidation
+
+Une dissolution-liquidation se traite en **deux dossiers**, distingués par
+`${dissolution.phase}` : l'assemblée qui dissout et nomme le liquidateur, puis — des mois ou
+des années plus tard — celle qui approuve les comptes et donne quitus. Les balises de la
+phase 2 sont vides dans un dossier de phase 1, et réciproquement.
+
+⚠️ **Changement du 2026-09-28** : `${liquidateur.nom}` est remplacé par
+`${liquidateur.prenom_nom}`, et le bloc liquidateur porte désormais l'état civil et la pièce
+d'identité complets — c'est lui qui représente la société pendant toute la liquidation et qui
+signe les actes. `${liquidateur.adresse}` reste disponible, recomposée depuis le quartier, la
+commune et la ville. Aucun modèle en service n'était concerné : les deux gabarits de
+dissolution étaient des marque-places sans fichier.
+
+### Phase 1 — Dissolution anticipée
 
 | Balise | Description | Marqueurs à remplacer |
 |--------|------------|----------------------|
 | `${soc.rccm}` | Numéro RCCM de la société dissoute | `RCCM N° …………` |
+| `${dissolution.phase}` | Dissolution anticipée / Clôture de la liquidation | — |
 | `${dissolution.date_assemblee}` | Date de l'assemblée de dissolution | `EN DATE DU …………` |
 | `${dissolution.raison}` | Raison / motif de dissolution | `POUR LES MOTIFS SUIVANTS : …………` |
 | `${dissolution.type}` | Amiable / Judiciaire | `(TYPE DE DISSOLUTION)` |
-| `${liquidateur.nom}` | Nom du liquidateur | `LIQUIDATEUR : …………` |
-| `${liquidateur.qualite}` | Qualité du liquidateur | `EN SA QUALITÉ DE …………` |
-| `${liquidateur.adresse}` | Adresse du liquidateur | `DEMEURANT …………` |
+
+### Phase 1 — Associé unique requérant
+
+Le procès-verbal comparaît « A LA REQUETE DE : Monsieur …, agissant en qualité de gérant », puis
+« **A ce, non présent, mais représenté par** Monsieur …, en vertu des pouvoirs qui lui ont été
+conférés … aux termes d'une procuration ». D'où le préfixe `pp.*`, qui porte déjà toute
+l'identité, le sous-espace `pp.repr_*` du mandataire, et surtout :
+
+| Balise | Description |
+|--------|------------|
+| `${pp.civilite}` / `${pp.prenom_nom}` | Identité, ou dénomination si l'associé est une société |
+| `${pp.qualite}` | Qualité à l'acte (« gérant de la Société ») |
+| `${pp.comparution}` | **Phrase entière** de comparution — « A ce, présent » ou « ici représenté par … en vertu d'une procuration du … ». Composée par le moteur : un modèle Word n'a pas de conditionnel |
+| `${pp.repr_*}` | Le mandataire, si l'associé est représenté |
+
+### Phase 1 — Liquidateur
+
+Bloc complet d'identité, dérivé de celui du gérant : toutes les balises `${ger.*}` existent en
+`${liquidateur.*}` (état civil, résidence, pièce d'identité). Les principales :
+
+| Balise | Description | Marqueurs à remplacer |
+|--------|------------|----------------------|
+| `${liquidateur.civilite}` | M. / Mme / Mlle | — |
+| `${liquidateur.prenom_nom}` | Nom et prénoms du liquidateur | `LIQUIDATEUR : …………` |
+| `${liquidateur.qualite}` | Qualité (associé, tiers désigné) | `EN SA QUALITÉ DE …………` |
+| `${liquidateur.adresse}` | Adresse recomposée (quartier, commune, ville) | `DEMEURANT …………` |
+| `${liquidateur.piece_type}` / `${liquidateur.piece_numero}` | Pièce d'identité | `TITULAIRE DE LA CNI N° …………` |
+| `${liquidateur.pouvoirs}` | Pouvoirs conférés par l'assemblée | `AVEC LES POUVOIRS SUIVANTS : …………` |
+| `${liquidateur.type_personne}` | Personne physique ou morale | — |
+| `${liquidateur.forme}` / `${liquidateur.rccm}` | Si le liquidateur est un cabinet | `LE CABINET ………… SARLU` |
+| `${liquidateur.representant_legal}` | « Le Cabinet … **représenté par** Monsieur … » | `REPRESENTE PAR …………` |
+| `${liquidateur.duree_mandat_chiffres}` | Durée du mandat, en mois | `POUR UNE DUREE DE ………… MOIS` |
+| `${liquidateur.duree_mandat_lettres}` | La même, en toutes lettres (dérivée) | `trois (03) mois` |
+| `${liquidateur.remuneration}` | Rémunération décidée | `SA REMUNERATION SERA …………` |
+
+⚠️ **Le liquidateur peut être une société** — c'est le cas de l'acte de référence. Les balises
+`forme`, `rccm` et `representant_legal` ne se remplissent que si la fiche liée est une personne
+morale ; `${liquidateur.prenom_nom}` porte alors la dénomination.
+
+### Phase 1 — Siège de la liquidation et mentions dérivées
+
+| Balise | Description |
+|--------|------------|
+| `${dissolution.date_effet}` | Date d'effet de la dissolution (à défaut, celle de l'assemblée) |
+| `${dissolution.siege_ville}` / `_commune` / `_quartier` | **Siège de la liquidation**, distinct du siège social |
+| `${dissolution.rccm_modificatif}` | N° de déclaration modificative — vide jusqu'au retour du greffe |
+| `${soc.mention_liquidation}` | « (EN LIQUIDATION) », « (RADIÉE) »… **dérivée du statut de la fiche** |
+| `${soc.duree_lettres}` | Durée statutaire initiale en toutes lettres — « quatre-vingt-dix-neuf » |
+| `${dissolution.duree_reduite}` | Durée écoulée, **calculée** — « deux ans, trois mois et onze jours » |
+| `${dissolution.date_expiration}` | Date à laquelle la durée réduite expire |
+
+⚠️ Les quatre dernières sont **dérivées à la génération**, jamais saisies. `duree_reduite` se
+calcule depuis `soc.date_constitution` et la date d'effet : l'acte de référence de l'étude s'y
+trompait de vingt jours, et un calcul ne s'y trompe pas.
+
+### Phase 2 — Clôture de la liquidation
+
+| Balise | Description | Marqueurs à remplacer |
+|--------|------------|----------------------|
+| `${cloture.date_assemblee}` | Date de l'assemblée de clôture | `EN DATE DU …………` |
+| `${cloture.quitus}` | Quitus donné au liquidateur (Oui / Non) | — |
+| `${cloture.boni_chiffres}` | Boni de liquidation en chiffres | `SOIT ………… GNF` |
+| `${cloture.boni_lettres}` | Boni en toutes lettres (dérivé) | `SOIT LA SOMME DE …………` |
+| `${cloture.boni_formate}` | Boni avec séparateurs de milliers (dérivé) | `………… GNF` |
+| `${cloture.observations}` | Observations de l'assemblée | — |
 
 ---
 
@@ -570,13 +647,13 @@
 |--------|------------|-----------|
 | `${ligne.designation}` | Désignation de la ligne | `DÉSIGNATION`, `………………………` |
 | `${ligne.quantite}` | Quantité | `QTE`, `1` |
-| `${ligne.montant}` | Montant de la ligne en GNF | `MONTANT`, `… GNF` |
+| `${ligne.montant}` | **Total de la ligne** en GNF (quantité × montant unitaire, **remise déduite**) — pas le prix unitaire | `MONTANT`, `… GNF` |
 
 ### 10.4 Total
 
 | Balise | Description | Type | Marqueurs à remplacer |
 |--------|------------|------|-----------------------|
-| `${fac.total_chiffres}` | Total TTC en GNF | Montant (calculé) | `TOTAL : … GNF`, `MONTANT TOTAL EN CHIFFRE` |
+| `${fac.total_chiffres}` | Total TTC en GNF, **remises comprises** — somme des `${ligne.montant}` | Montant (calculé) | `TOTAL : … GNF`, `MONTANT TOTAL EN CHIFFRE` |
 | `${fac.total_lettres}` | Total en lettres majuscules | **Auto** | `MONTANT TOTAL EN LETTRE`, `(TOTAL EN TOUTES LETTRES) FRANCS GUINÉENS` |
 
 ---
@@ -794,6 +871,83 @@ Conséquences pour la normalisation :
 > (Expédition ou Clôture), puis statuts du dossier de constitution. Là encore, aucun gabarit à
 > normaliser : c'est le texte réel de cette société qui sert de base, et l'historique du dossier
 > indique lequel a été retenu.
+
+## 12 ter. Bloc REPRÉSENTATION — quand une partie ne comparaît pas elle-même
+
+> Ajouté le 25/09/2026.
+
+Le **représenté reste la partie à l'acte** : c'est lui l'associé, c'est lui qui souscrit. Le
+représentant comparaît « ès qualités ». Les balises ci-dessous décrivent donc un **mode de
+comparution** de la personne, et vivent dans **son** espace de nommage.
+
+### La balise à poser dans tous les cas
+
+| Balise | Contenu |
+|---|---|
+| `${pp.comparution}` | La phrase entière, rédigée par le serveur |
+
+Elle vaut pour **toute** personne, représentée ou non — c'est tout l'intérêt : `TemplateProcessor`
+n'a aucun conditionnel, un modèle ne peut donc pas choisir entre deux formulations. Elle rend :
+
+- `A ce, présent` quand la personne comparaît elle-même (accordé au féminin si la civilité l'indique) ;
+- `ici représenté par Monsieur Mamadou BAH, demeurant à Almamya, Kaloum, Conakry, titulaire de la
+  CNI CEDEAO n° GN0987654, en vertu d'une procuration sous seing privé en date du DOUZE MARS DEUX
+  MILLE VINGT-SIX, laquelle demeurera annexée aux présentes après mention.`
+
+Rédaction type dans le modèle :
+
+```
+${pp.civilite} ${pp.prenom_nom}, né(e) le ${pp.date_naissance} à ${pp.ne_a},
+de nationalité ${pp.nationalite}, demeurant à ${pp.adresse}, titulaire de la
+${pp.piece_type} n° ${pp.piece_numero}, ${pp.comparution}
+```
+
+### Le sous-espace du représentant, pour composer autrement
+
+`${pp.comparution}` est une **commodité**. Un modèle qui veut sa propre mise en forme dispose de
+l'identité complète du représentant, préfixée `repr_` :
+
+| Balise | Contenu |
+|---|---|
+| `${pp.repr_civilite}` · `${pp.repr_prenom_nom}` · `${pp.repr_nom}` | Identité |
+| `${pp.repr_ne_a}` · `${pp.repr_date_naissance}` · `${pp.repr_nationalite}` | État civil |
+| `${pp.repr_adresse}` · `${pp.repr_quartier}` · `${pp.repr_commune}` · `${pp.repr_demeurant_ville}` | Domicile |
+| `${pp.repr_piece_type}` · `${pp.repr_piece_numero}` · `${pp.repr_piece_delivree_le}` · `${pp.repr_piece_expire_le}` | Pièce d'identité |
+| `${pp.repr_motif}` | « Procuration », « Représentation légale (tutelle, curatelle) », « Représentant légal d'une personne morale » |
+| `${pp.repr_qualite}` | « Tuteur », « Curateur », « Directeur Général »… — vide pour une procuration |
+| `${pp.repr_titre_forme}` | « Sous seing privé », « Notariée », « Sous seing privé, signature légalisée », « Consulaire » |
+| `${pp.repr_titre_date}` | Date du titre, en JJ/MM/AAAA |
+| `${pp.repr_titre_autorite}` | Notaire, autorité de légalisation, poste consulaire |
+| `${pp.repr_titre_reference}` | N° de répertoire ou de jugement |
+
+Toutes les variantes automatiques s'appliquent : `${pp.repr_titre_date_lettres}` rend
+« DOUZE MARS DEUX MILLE VINGT-SIX », `${pp.repr_date_naissance_jma}` la date en chiffres.
+
+### Dans un bloc répétable
+
+Mêmes balises, **à plat et sans point**, à l'intérieur du bloc :
+
+```
+${associes}
+Monsieur ${associes.nom}, …, ${associes.comparution}
+${/associes}
+```
+
+soit `${associes.comparution}`, `${associes.repr_prenom_nom}`, `${associes.repr_titre_date}`…
+
+### Ce qu'il ne faut pas confondre
+
+⚠️ `${pp.representant_legal}` et `${bq.representant_nom}` **existent déjà** et désignent autre
+chose : le représentant **statutaire** inscrit sur la fiche d'une personne morale, un attribut de
+la fiche. Le sous-espace `repr_*` désigne la personne qui **comparaît à cet acte-ci**. Les deux
+peuvent coexister sur la même partie, et ne disent pas la même chose.
+
+⚠️ Quand une représentation **organique** est déclarée, la projection écrase
+`${…representant_legal}` / `${…representant_nom}` / `${…representant_qualite}` avec l'identité du
+représentant réellement désigné : les modèles non normalisés qui les emploient impriment donc la
+donnée autoritaire sans être touchés.
+
+---
 
 ## 13. Procédure de normalisation d'un modèle
 

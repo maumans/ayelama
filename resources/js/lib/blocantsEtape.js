@@ -36,6 +36,12 @@ function estRempli(valeur) {
  * vers une liste vide, sans dire que le recours (ajouter le lieu) était juste en dessous.
  */
 function raisonChampVide(field, nbOptionsGeo = undefined) {
+    // Raison rédigée par le champ lui-même, quand le générique dirait moins que la conséquence.
+    // « Champ obligatoire » ne dit pas *pourquoi* la date d'une procuration l'est — l'acte la
+    // vise « en date du… ». Mécanisme général plutôt qu'un `if` par champ : le schéma est le
+    // seul endroit qui sait ce que le champ signifie.
+    if (field.raisonSiVide) return field.raisonSiVide;
+
     const geo = roleGeo(field.id);
 
     if (geo) {

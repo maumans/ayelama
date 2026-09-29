@@ -20,6 +20,7 @@ Barre latérale, repliable. Onze entrées, dont certaines n'apparaissent que sel
 | **Modèles d'actes** | tous | — |
 | **GED** | tous | — |
 | **Répertoire** | tous | — |
+| **Sociétés** | tous | — |
 | **Anniversaires** | tous | — |
 | **Courriers** | tous | — |
 | **Demandes clients** | ceux qui peuvent ouvrir un dossier | — |
@@ -69,7 +70,7 @@ Quatre blocs :
 
 - un **bandeau de statistiques** ;
 - le **pipeline des dossiers** : le nombre de dossiers à chaque étape (Édition, Certification,
-  Signature, Formalités, Expédition, Clôturés), présenté comme une chaîne ;
+  Signature, Formalités, Expédition, Archivés), présenté comme une chaîne ;
 - la **file d'attente** : les dossiers qui attendent une action, avec un **filtre** ;
 - les **alertes urgentes** : échéances proches ou dépassées, formalités urgentes ;
 - l'**activité récente** : les derniers gestes posés dans l'étude, horodatés ;
@@ -84,7 +85,7 @@ Les échéances sont exprimées en relatif (« dans 3 jours », « il y a 2 jour
 
 ### D.1 Liste des dossiers (`/dossiers`)
 
-**Quatre compteurs** en tête : Total, En cours, En retard, Clôturés ce mois.
+**Quatre compteurs** en tête : Total, En cours, En retard, Archivés ce mois.
 
 **Filtres** : recherche libre (référence ou objet), étape, catégorie, tri. Un bouton réinitialise
 tous les filtres. La liste est paginée.
@@ -210,10 +211,19 @@ automatiquement** : toutes les données du dossier sont définitives à ce stade
 
 - **Note de frais / Facture** : les lignes, chacune modifiable ou supprimable ; ajout d'une ligne ;
   téléchargement du PDF.
+- **Remise sur une ligne** : la fenêtre de modification propose deux champs liés — **en montant**
+  ou **en pourcentage**. Saisir l'un remplit l'autre ; c'est la forme saisie qui est conservée.
+  L'option n'apparaît que sur les lignes dont le barème l'autorise : par défaut les **honoraires**
+  de l'étude, jamais les **débours** qu'elle reverse à un tiers. Sur une ligne non remisable,
+  l'écran explique pourquoi au lieu de masquer l'option.
 - **Paiements** : enregistrer un encaissement, le modifier, le supprimer, **générer le reçu**
   (téléchargeable et prévisualisable).
 
-Un paiement ne peut pas dépasser le total facturé.
+Un paiement ne peut pas dépasser le total facturé. Réciproquement, dès qu'un paiement existe les
+lignes ne sont plus modifiables — remise comprise.
+
+Le pied de facture n'affiche « Sous-total avant remise » et « Remises accordées » que s'il y a
+effectivement une remise.
 
 #### Onglet « Clôture »
 
@@ -338,6 +348,48 @@ pas abouti ; elle devient **client** à la clôture du dossier.
 
 ---
 
+## I bis. Sociétés (`/societes`)
+
+Le **registre des sociétés** : distinct du Répertoire, qui liste les personnes.
+
+Chaque ligne porte la dénomination, le sigle, la forme juridique, le numéro RCCM, le nombre de
+dossiers ouverts sur cette société, et surtout son **statut** :
+
+| Statut | Ce qu'il signifie |
+|---|---|
+| **Active** | Société en activité. |
+| **En liquidation** | La dissolution a été prononcée ; les opérations de liquidation sont en cours. |
+| **Liquidation clôturée** | Les comptes sont approuvés ; la radiation au RCCM reste à constater. |
+| **Radiée** | La société a cessé d'exister. |
+
+Le statut change **tout seul** quand un dossier de dissolution ou de clôture arrive à
+l'Expédition — c'est-à-dire quand les formalités sont revenues et que la décision est opposable.
+Une seule exception : la **radiation**, qui se constate à la main par le bouton « Radier », parce
+qu'elle n'est prouvée que par la pièce délivrée par le greffe. Le bouton n'apparaît que sur une
+liquidation clôturée.
+
+### La colonne « Prochaine échéance »
+
+Une liquidation dure des mois, parfois des années. Pendant ce temps il n'y a aucun dossier ouvert
+pour le rappeler : c'est l'angle mort que cette colonne couvre. Elle affiche l'échéance la plus
+proche (fin du mandat du liquidateur, clôture, radiation) et la passe en rouge si elle est
+dépassée. Un courriel est envoyé chaque matin sur les échéances proches ou dépassées.
+
+> ⚠️ **« délai à vérifier »** — cette mention apparaît sous chaque échéance, et elle est
+> importante. Les délais utilisés (trois ans pour la clôture, un mois pour la radiation) sont
+> des **hypothèses de travail** qui n'ont pas encore été validées par le notaire. Ils
+> **n'empêchent jamais** d'avancer un dossier : ce sont des rappels, pas des règles. Dès que
+> l'étude aura confirmé les délais réels, ils se corrigent dans les paramètres et la mention
+> disparaît.
+
+Deux filtres : la recherche (dénomination, sigle, RCCM, NIF) et le statut.
+
+Ce que cet écran **ne fait pas** : il n'ouvre pas de fiche détaillée et ne permet pas de modifier
+une société. La correction d'une fiche se fait depuis l'assistant de création de dossier, au
+moment où l'on rattache la société.
+
+---
+
 ## J. Anniversaires (`/anniversaires`)
 
 Liste des anniversaires des clients à venir, pour permettre à l'étude d'entretenir la relation.
@@ -458,8 +510,16 @@ Le cœur du calcul automatique de la note de frais. Un barème porte :
 - une **condition** : certains barèmes ne s'appliquent qu'à un type de modification statutaire
   précis ;
 - s'il **génère une formalité**, et si un **retour est attendu**, sous quel délai ;
+- les **informations à saisir au retour** : RCCM, NIF, date d'immatriculation, journal et date de
+  parution, n° de dépôt au greffe, n° de quittance. C'est ce réglage qui fait apparaître les
+  champs correspondants dans la fenêtre « Retour reçu », et qui alimente la fiche société ;
+- si sa ligne **peut recevoir une remise** — coché d'origine sur les honoraires de l'étude,
+  décoché sur les débours, qu'elle reverse intégralement à un tiers ;
 - les **pièces requises** pour la démarche ;
 - une dépendance éventuelle à un autre barème.
+
+> Les **informations à saisir au retour** et le **droit de remise** sont recopiés **au moment où la formalité ou la ligne est créée**.
+> Modifier un barème ne réécrit donc pas les dossiers déjà ouverts.
 
 L'**assiette** dépend de la catégorie d'acte :
 

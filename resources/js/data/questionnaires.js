@@ -48,6 +48,184 @@ export const PIECES_TYPES = [
     'Permis de conduire'
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Représentation d'une partie à l'acte
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ Déclaré **avant** les schémas qui le consomment : les littéraux ci-dessous s'évaluent à
+// l'initialisation du module, et une constante référencée depuis eux mais déclarée plus bas est
+// dans sa zone morte temporelle. `vite build` ne le signale pas, et la page devient blanche.
+//
+// Le représenté reste la partie à l'acte ; le représentant comparaît « ès qualités ». Ces champs
+// décrivent donc un **mode de comparution**, pas une personne de plus — c'est pourquoi ils vivent
+// dans la section de la personne représentée, et non dans une section à part.
+
+// Miroir de App\Enums\MotifRepresentation — verrouillé par PiecesRequisesParRoleTest.
+// Les questionnaires étant statiques, la liste ne peut pas venir de PHP : la duplication est
+// inévitable, donc gardée.
+export const MOTIFS_REPRESENTATION = [
+    'Procuration',
+    'Représentation légale (tutelle, curatelle)',
+    "Représentant légal d'une personne morale",
+];
+
+/**
+ * Comment nommer le représentant à l'écran, selon le motif.
+ *
+ * Miroir de `MotifRepresentation::labelRepresentant()`. Le rôle en base reste `mandataire` pour
+ * les trois motifs — un seul rôle, la distinction vivant sur le lien — mais l'afficher tel quel
+ * devant un tuteur serait faux. Le libellé se dérive donc du motif au moment du rendu.
+ */
+export const LIBELLE_REPRESENTANT_PAR_MOTIF = {
+    'Procuration': 'Mandataire',
+    'Représentation légale (tutelle, curatelle)': 'Tuteur / curateur',
+    "Représentant légal d'une personne morale": 'Représentant légal',
+};
+
+/** Le libellé du représentant, avec un repli tant que le motif n'est pas choisi. */
+export function libelleRepresentant(motif) {
+    return LIBELLE_REPRESENTANT_PAR_MOTIF[motif] ?? 'Représentant';
+}
+
+/** Libellé affiché → valeur stockée en base. Converti au moment du payload, nulle part ailleurs. */
+export const MOTIF_REPRESENTATION_PAR_LIBELLE = {
+    'Procuration': 'procuration',
+    'Représentation légale (tutelle, curatelle)': 'legale',
+    "Représentant légal d'une personne morale": 'organique',
+};
+
+// Miroir de App\Enums\FormeTitreRepresentation.
+export const FORMES_TITRE_REPRESENTATION = [
+    'Sous seing privé',
+    'Notariée',
+    'Sous seing privé, signature légalisée',
+    'Consulaire',
+];
+
+export const FORME_TITRE_PAR_LIBELLE = {
+    'Sous seing privé': 'sous_seing_prive',
+    'Notariée': 'notariee',
+    'Sous seing privé, signature légalisée': 'legalisee',
+    'Consulaire': 'consulaire',
+};
+
+// Préfixes des sections de personne qui reçoivent le bloc. Déclaré ici et consommé par
+// `blocRepresentation()`, `TRIPLETS_GEO` et `PAIRES_DATES` : le devbook enregistre déjà que
+// `gerant_entrant.*`, bloc dérivé, n'avait ni cascade géo ni contrôle de dates parce que personne
+// ne l'avait inscrit dans ces deux tables. Elles sont donc **générées**, pas tapées.
+// `null` = item de bloc répétable, dont les clés sont à plat.
+export const PREFIXES_REPRESENTATION = ['pp', 'ger', 'acq', 'loc', null];
+
+const EST_REPRESENTE = (prefixe) => ({
+    field: prefixe ? `${prefixe}.est_represente` : 'est_represente',
+    equals: true,
+});
+
+const MOTIF_EST = (prefixe, libelle) => ({
+    all: [
+        EST_REPRESENTE(prefixe),
+        { field: prefixe ? `${prefixe}.representation_motif` : 'representation_motif', equals: libelle },
+    ],
+});
+
+/**
+ * Les champs de représentation, pour un préfixe donné.
+ *
+ * `prefixe = null` produit les clés à plat d'un item de bloc répétable (`repr_prenom_nom`), avec
+ * un point pour une section scalaire (`pp.repr_prenom_nom`) : le sous-espace suit la forme de son
+ * hôte, comme le reste du schéma.
+ *
+ * ⚠️ `repr_*` et non `representant_*` : ces derniers existent déjà dans `SUFFIXES_MORALE` de
+ * ClientProjectionService, où ils désignent le représentant **statutaire** d'une fiche personne
+ * morale. Réemployer le nom ferait porter deux sens à la même clé, dans un fichier qui alimente
+ * des actes authentiques.
+ */
+export function blocRepresentation(prefixe = null, { section = null, showIfSection = null } = {}) {
+    const cle = (id) => (prefixe ? `${prefixe}.${id}` : id);
+    const conditionner = (showIf) => {
+        if (!showIfSection) return showIf;
+        // Le bloc lui-même peut être conditionnel (gerant_entrant.*) : la condition de section
+        // s'**ajoute**, elle ne remplace pas.
+        const existantes = showIf?.all ?? (showIf ? [showIf] : []);
+        return { all: [showIfSection, ...existantes] };
+    };
+
+    const champs = [
+        { id: cle('est_represente'), label: 'Se fait représenter à l\'acte', type: 'checkbox',
+          note: 'La personne ne comparaît pas elle-même : un mandataire signe pour elle.' },
+
+        { id: cle('representation_motif'), label: 'À quel titre', type: 'select',
+          options: MOTIFS_REPRESENTATION, required: true, showIf: EST_REPRESENTE(prefixe) },
+
+        // Identité du représentant. Masquée dès qu'une fiche client lui est rattachée — voir
+        // estChampIdentite() et SOUS_PREFIXES_PERSONNE dans lib/clientFields.js.
+        { id: cle('repr_civilite'), label: 'Civilité du représentant', type: 'select',
+          options: ['M.', 'Mme', 'Mlle'], showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_prenom_nom'), label: 'Nom et prénoms du représentant', type: 'text',
+          placeholder: 'Mamadou BAH', required: true, showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_ne_a'), label: 'Né(e) à', type: 'text', placeholder: 'Conakry', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_date_naissance'), label: 'Date de naissance', type: 'date', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_nationalite'), label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_demeurant_ville'), label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_commune'), label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_quartier'), label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_pays'), label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', readonly: true, showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_piece_type'), label: "Type de pièce d'identité", type: 'text',
+          datalist: PIECES_TYPES, placeholder: 'CNI CEDEAO / Passeport', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_piece_numero'), label: 'Numéro de pièce', type: 'text',
+          placeholder: 'GN00123456', required: true, mono: true, showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_piece_delivree_le'), label: 'Pièce délivrée le', type: 'date', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_piece_delivree_a'), label: 'Délivrée à', type: 'text', placeholder: 'Conakry', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_piece_expire_le'), label: 'Expire le', type: 'date', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_telephone'), label: 'Téléphone', type: 'tel', placeholder: '622 XX XX XX', showIf: EST_REPRESENTE(prefixe) },
+        { id: cle('repr_email'), label: 'Email', type: 'email', placeholder: 'email@exemple.com', showIf: EST_REPRESENTE(prefixe) },
+
+        // Le titre. Ce qui suit dépend du motif : une procuration se vise par sa forme et sa
+        // date, une tutelle par la décision qui l'institue, un gérant par les statuts.
+        { id: cle('repr_titre_forme'), label: 'Forme de la procuration', type: 'select',
+          options: FORMES_TITRE_REPRESENTATION, required: true,
+          showIf: MOTIF_EST(prefixe, 'Procuration') },
+        { id: cle('repr_titre_date'), label: 'Date de la procuration', type: 'date', required: true,
+          raisonSiVide: "Renseignez la date : l'acte vise la procuration « en date du… »",
+          showIf: MOTIF_EST(prefixe, 'Procuration') },
+        { id: cle('repr_titre_autorite'), label: 'Établie par', type: 'text',
+          placeholder: 'Maître / mairie / poste consulaire',
+          note: 'Le notaire, l\'autorité de légalisation ou le poste consulaire qui l\'a reçue.',
+          showIf: MOTIF_EST(prefixe, 'Procuration') },
+
+        // Une seule qualité, une seule colonne (`parties.representation_qualite`). Deux champs
+        // — un par motif — auraient obligé le payload à choisir lequel lire, et les deux
+        // auraient fini par diverger. La condition porte donc sur « pas une procuration »
+        // plutôt que sur chacun des deux autres motifs : un mandataire sur procuration agit au
+        // nom du mandant, sans qualité propre.
+        { id: cle('repr_qualite'), label: 'Qualité du représentant', type: 'text',
+          placeholder: 'Tuteur / Curateur / Gérant / Directeur général', required: true,
+          raisonSiVide: 'Précisez la qualité — elle est reprise telle quelle dans l\'acte',
+          showIf: { all: [
+              EST_REPRESENTE(prefixe),
+              // Le motif doit être choisi : sans cette condition, `undefined !== 'Procuration'`
+              // suffirait à afficher un champ obligatoire avant même qu'on sache s'il
+              // s'applique — et il bloquerait l'étape sans raison lisible.
+              { field: prefixe ? `${prefixe}.representation_motif` : 'representation_motif' },
+              { field: prefixe ? `${prefixe}.representation_motif` : 'representation_motif',
+                equals: 'Procuration', not: true },
+          ] } },
+
+        { id: cle('repr_titre_reference'), label: 'Décision qui institue la mesure', type: 'text',
+          placeholder: 'Référence du jugement ou de l\'ordonnance',
+          // ⚠️ Facultatif tant que l'étude n'a pas dit quel document guinéen établit une tutelle.
+          // Voir Partie::PIECES_A_CONFIRMER : la pièce correspondante ne bloque pas non plus.
+          note: 'Facultatif : la forme exacte reste à arbitrer avec l\'étude.',
+          showIf: MOTIF_EST(prefixe, 'Représentation légale (tutelle, curatelle)') },
+    ];
+
+    return champs.map((champ, i) => ({
+        ...champ,
+        ...(champ.showIf ? { showIf: conditionner(champ.showIf) } : {}),
+        ...(i === 0 && section ? { section } : {}),
+    }));
+}
+
 
 const SOC_BASE = [
     { id: 'soc.denomination', label: 'Dénomination sociale', type: 'text', placeholder: 'Ex : Faya Distribution SARLU', required: true, section: 'Société', publicIntake: true },
@@ -103,6 +281,9 @@ const PP_ASSOCIE_UNIQUE = [
     { id: 'pp.piece_expire_le', label: 'Expire le', type: 'date', placeholder: '01/01/2030', required: false },
     { id: 'pp.telephone', label: 'Téléphone', type: 'tel', placeholder: '622 XX XX XX', required: false },
     { id: 'pp.email', label: 'Email', type: 'email', placeholder: 'email@exemple.com', required: false },
+    // En queue de section : la représentation est un mode de comparution de cette personne,
+    // pas une personne de plus. Elle reste repliée tant que la case n'est pas cochée.
+    ...blocRepresentation('pp'),
 ];
 
 // Gérant (personne physique)
@@ -151,6 +332,10 @@ const ASSOCIE_SCHEMA = [
     { id: 'piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: false },
     { id: 'piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: false },
     { id: 'piece_expire_le', label: 'Expire le', type: 'date', placeholder: '01/01/2030', required: false },
+    // Clés à plat : dans un item de bloc, le sous-espace s'écrit `repr_*` sans point.
+    // PERSONNE_REPEATABLE en hérite par son `filter`, donc CEDANT_SCHEMA, CESSIONNAIRE_SCHEMA et
+    // SOUSCRIPTEUR_SCHEMA l'obtiennent via schemaPersonne() — sans double insertion.
+    ...blocRepresentation(null),
 ];
 
 // Schéma d'un gérant dans un bloc répétable (SARL multi-gérants)
@@ -248,6 +433,155 @@ const GERANT_ENTRANT_FIELDS = [
     })),
     { id: 'gerant_entrant.duree_mandat', label: 'Durée du mandat', type: 'text', placeholder: 'Indéterminée / 4 ans', required: false, showIf: SHOW_IF_GERANT },
     { id: 'gerant_entrant.pouvoirs', label: 'Pouvoirs conférés', type: 'textarea', placeholder: 'Pouvoirs les plus étendus pour agir au nom de la société…', required: false, showIf: SHOW_IF_GERANT },
+];
+
+// ── Dissolution : conditions de phase et bloc liquidateur ──────────────────
+//
+// `dissolution.phase` porte la variante du type d'acte `SOC-DIS` (miroir de
+// `App\Enums\VarianteDissolution`). Les deux conditions ci-dessous sont les seules à la lire :
+// déclarées une fois, elles ne peuvent pas diverger entre les champs qu'elles gouvernent.
+const SHOW_IF_DISSOLUTION = { field: 'dissolution.phase', equals: 'Dissolution anticipée' };
+const SHOW_IF_CLOTURE     = { field: 'dissolution.phase', equals: 'Clôture de la liquidation' };
+
+/**
+ * Bloc de personne **bimodale** — physique ou morale — dérivé de GER_FIELDS.
+ *
+ * Écrit le 2026-09-28 après lecture de deux actes réels de l'étude (`PV DECISION ASSOCIE.docx`
+ * et `MY_INSERTION.doc`, dossier L'OR D'AFRIQUE) : le liquidateur nommé y est **le Cabinet
+ * TEDSOM SARLU**, une société, « représenté par Monsieur … ». Le bloc liquidateur, dérivé du
+ * gérant, ne savait décrire qu'une personne physique — il ne pouvait donc pas produire cet acte.
+ *
+ * Un seul helper pour deux emplacements (le requérant et le liquidateur) : redéclarer les
+ * dix-sept mentions d'état civil une quatrième fois était le défaut que la dérivation de
+ * `GERANT_ENTRANT_FIELDS` avait déjà évité.
+ *
+ * Convention reprise d'`ASSOCIE_SCHEMA`, qui résout le même problème dans un bloc répétable :
+ * une civilité qui inclut « Société », **un** champ de nom qui sert de dénomination, et les
+ * mentions propres à chaque nature sous condition. Les champs d'état civil passent tous en
+ * facultatif — les exiger bloquerait une personne morale, qui n'en a aucun.
+ *
+ * ⚠️ N'inscrit **pas** le rôle dans `Partie::ROLES_ADMETTANT_PERSONNE_MORALE` : cette constante
+ * ne gouverne que le **jeu de pièces**, et le liquidateur est délibérément sans pièces. La
+ * projection, elle, bascule sur le type du client, pas sur le rôle — elle écrit donc déjà
+ * `denomination`, `forme`, `rccm` et `representant_legal` dès qu'une fiche morale est liée.
+ */
+const PHYSIQUE_SEULEMENT = [
+    'ne_a', 'date_naissance', 'situation_matrimoniale',
+    'piece_type', 'piece_numero', 'piece_delivree_le', 'piece_delivree_a', 'piece_expire_le',
+];
+
+function personneBimodale(prefixe, { section, clientRole, libelleCivilite, libelleNom, showIfSection = null }) {
+    const cle = (id) => `${prefixe}.${id}`;
+    const et = (condition) => (showIfSection
+        ? { all: [showIfSection, ...(condition ? [condition] : [])] }
+        : condition);
+
+    const EST_PHYSIQUE = { field: cle('type_personne'), equals: 'Personne physique' };
+    const EST_MORALE   = { field: cle('type_personne'), equals: 'Personne morale' };
+
+    const identite = GER_FIELDS.map((f, i) => {
+        const id = f.id.replace(/^ger\./, `${prefixe}.`);
+        const suffixe = f.id.replace(/^ger\./, '');
+        const physiqueSeulement = PHYSIQUE_SEULEMENT.includes(suffixe);
+
+        return {
+            ...f,
+            id,
+            // Tout l'état civil devient facultatif : une personne morale n'a ni date de
+            // naissance ni pièce d'identité, et les exiger la rendrait impossible à saisir.
+            required: i <= 1 ? f.required : false,
+            showIf: et(physiqueSeulement ? EST_PHYSIQUE : null),
+            ...(i === 0 ? { label: libelleCivilite, section, clientRole, options: ['M.', 'Mme', 'Mlle', 'Société'] } : {}),
+            ...(i === 1 ? { label: libelleNom } : {}),
+        };
+    });
+
+    return [
+        // Déclaré juste après la civilité et le nom : c'est lui qui commande tout le reste.
+        { id: cle('type_personne'), label: 'Nature', type: 'select', options: ['Personne physique', 'Personne morale'], required: true, showIf: et(null) },
+        ...identite,
+        { id: cle('forme'), label: 'Forme juridique', type: 'text', placeholder: 'SARL, SA…', required: false, showIf: et(EST_MORALE) },
+        { id: cle('rccm'), label: 'Numéro RCCM', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: false, mono: true, showIf: et(EST_MORALE) },
+        // « Le Cabinet TEDSOM SARLU **représenté par Monsieur …** » : c'est le représentant
+        // légal de la société nommée, pas un mandataire sous procuration — à ne pas confondre
+        // avec le sous-espace `repr_*`, qui décrit une représentation à l'acte.
+        { id: cle('representant_legal'), label: 'Représentant légal', type: 'text', placeholder: 'Ibrahima DIALLO', required: false, showIf: et(EST_MORALE) },
+        { id: cle('representant_qualite'), label: 'Qualité du représentant légal', type: 'text', placeholder: 'Gérant', required: false, showIf: et(EST_MORALE) },
+    ];
+}
+
+// Liquidateur — dérivé de GER_FIELDS par substitution de préfixe, comme GERANT_ENTRANT_FIELDS.
+//
+// Le bloc ne comptait auparavant que trois champs libres : `liquidateur.nom`,
+// `liquidateur.qualite` et une `liquidateur.adresse` en texte libre. C'est pourtant le
+// dirigeant qui signe les actes de liquidation et représente la société : il lui faut le même
+// état civil et la même pièce d'identité qu'à un gérant, sans quoi l'acte ne peut pas
+// l'identifier.
+//
+// Cela corrige au passage une dérivation morte d'`ActesGeneratorService`, qui recomposait
+// `liquidateur.adresse` depuis un quartier, une commune et une ville qui **n'existaient pas**
+// dans ce questionnaire. Les trois champs géo existent désormais, et avec eux la cascade du
+// référentiel de lieux — à condition de les inscrire en clair dans TRIPLETS_GEO, ce que la
+// dérivation ne fait pas d'elle-même (c'est le défaut qu'a connu `gerant_entrant.*`).
+//
+// ⚠️ `liquidateur.nom` devient `liquidateur.prenom_nom`, par cohérence avec tous les autres
+// blocs de personne. Aucune donnée n'est perdue : mesuré le 2026-09-28, la base ne contient
+// aucun dossier SOC-DIS, et les deux gabarits Word du type sont des marque-places sans fichier.
+const LIQUIDATEUR_FIELDS = [
+    ...personneBimodale('liquidateur', {
+        section: 'Liquidateur',
+        clientRole: 'liquidateur',
+        libelleCivilite: 'Civilité du liquidateur',
+        libelleNom: 'Nom et prénoms / Dénomination du liquidateur',
+        showIfSection: SHOW_IF_DISSOLUTION,
+    }),
+    { id: 'liquidateur.qualite', label: 'Qualité du liquidateur', type: 'text', placeholder: 'Associé / Tiers désigné / Cabinet', required: true, showIf: SHOW_IF_DISSOLUTION },
+    // « nommé pour une durée de trois (03) mois à compter de la dissolution » (PV du 05/12/2023).
+    //
+    // ⚠️ Saisi, et non paramétré globalement : cette durée est **décidée par l'assemblée**, acte
+    // par acte. C'est ce que le seul acte réel disponible établit, et c'est ce qui invalidait le
+    // premier modèle — un seuil unique dans les paramètres aurait figé une décision variable.
+    // Les trois mois sont l'usage observé sur ce dossier, pas une règle vérifiée.
+    // ⚠️ Suffixe `_chiffres` délibéré : c'est lui qui fait dériver `_lettres` et `_formate` par
+    // le moteur. L'acte écrit « une durée de trois (03) mois » — il lui faut les deux formes, et
+    // un nom en `_mois` n'en aurait produit aucune.
+    { id: 'liquidateur.duree_mandat_chiffres', label: 'Durée du mandat (mois)', type: 'number', placeholder: '3', required: false, mono: true, showIf: SHOW_IF_DISSOLUTION,
+      note: "À compter de la dissolution. Laisser vide si le mandat court « pour la durée de la liquidation »." },
+    { id: 'liquidateur.remuneration', label: 'Rémunération du liquidateur', type: 'text', placeholder: 'Prévue ultérieurement', required: false, showIf: SHOW_IF_DISSOLUTION },
+    { id: 'liquidateur.pouvoirs', label: 'Pouvoirs conférés', type: 'textarea', placeholder: "Pouvoirs les plus étendus pour réaliser l'actif et apurer le passif…", required: false, showIf: SHOW_IF_DISSOLUTION },
+];
+
+/**
+ * Requérant de l'acte — l'associé unique, ou son mandataire.
+ *
+ * Absent jusqu'au 2026-09-28, et c'était un manque de fond : le PV réel comparaît « A LA REQUETE
+ * DE : Monsieur …, Administrateur de Société, agissant en qualité de gérant de la Société », puis
+ * « **A ce, non présent, mais représenté par** Monsieur …, en vertu des pouvoirs qui lui ont été
+ * conférés […] aux termes d'une procuration établie en date du 04 Décembre 2023 ». Sans partie
+ * déclarée, ni la comparution ni la procuration ne pouvaient s'accrocher à quoi que ce soit.
+ *
+ * Préfixe `pp` — celui de la première personne physique d'un acte, déjà employé par la vente, le
+ * bail et la donation. Il est déjà inscrit dans `PREFIXES_REPRESENTATION`, `TRIPLETS_GEO` et
+ * `PAIRES_DATES` : aucune table dérivée à compléter, et la cascade géo comme les contrôles de
+ * dates fonctionnent d'emblée.
+ *
+ * Rôle `associe_unique` : il existe déjà, admet la personne morale et porte le jeu de pièces des
+ * associés. ⚠️ **Limite assumée** — une dissolution décidée par **plusieurs** associés demanderait
+ * un bloc répétable. Aucun acte de ce type n'a été fourni, et le PV disponible est écrit d'un bout
+ * à l'autre pour un associé unique : inventer la forme plurielle serait deviner.
+ */
+const REQUERANT_DISSOLUTION_FIELDS = [
+    ...personneBimodale('pp', {
+        section: 'Associé unique (requérant)',
+        clientRole: 'associe_unique',
+        libelleCivilite: "Civilité de l'associé unique",
+        libelleNom: 'Nom et prénoms / Dénomination',
+        showIfSection: SHOW_IF_DISSOLUTION,
+    }),
+    { id: 'pp.qualite', label: "Qualité à l'acte", type: 'text', placeholder: 'Gérant de la société / Associé unique', required: false, showIf: SHOW_IF_DISSOLUTION },
+    // La procuration du PV : « non présent, mais représenté par … ». Le sous-espace `pp.repr_*`
+    // et `${pp.comparution}` en découlent.
+    ...blocRepresentation('pp', { showIfSection: SHOW_IF_DISSOLUTION }),
 ];
 
 // Bailleur (personne physique) — Bail
@@ -447,19 +781,78 @@ export const QUESTIONNAIRES = {
 
     // ── Dissolution ─────────────────────────────────────────────────────────
     dissolution: [
-        { id: 'soc.denomination', label: 'Dénomination de la société dissoute', type: 'text', placeholder: 'Faya Distribution SARLU', required: true, section: 'Société dissoute', publicIntake: true },
+
+        // ── 1. Société dissoute — rattachée au registre ──────────────────────
+        // `societePicker` ajouté le 2026-09-28. Son absence était la **cause directe** des
+        // incohérences constatées sur L'OR D'AFRIQUE : les sept champs `soc.*` étaient
+        // ressaisis à la main d'un dossier à l'autre, d'où un capital à 23,9 millions sur une
+        // pièce et 23,9 milliards sur la suivante. La fiche est la source de vérité
+        // (décision #33) ; le questionnaire n'en est qu'une projection.
+        { id: 'soc.denomination', label: 'Dénomination de la société dissoute', type: 'text', placeholder: 'Faya Distribution SARLU', required: true, section: 'Société dissoute', societePicker: true, publicIntake: true },
         { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: FORMES_SOCIETE, required: true, publicIntake: true },
         { id: 'soc.rccm', label: 'Numéro RCCM', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true, publicIntake: true },
         { id: 'soc.capital_chiffres', label: 'Capital social (GNF)', type: 'number', placeholder: '50 000 000', required: true, mono: true, publicIntake: true },
         { id: 'soc.siege_ville', label: 'Ville du siège', type: 'text', placeholder: 'Conakry', required: true, publicIntake: true },
         { id: 'soc.siege_commune', label: 'Commune du siège', type: 'text', placeholder: 'Kaloum', required: true, publicIntake: true },
         { id: 'soc.siege_quartier', label: 'Quartier du siège', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
-        { id: 'dissolution.date_assemblee', label: "Date de l'assemblée de dissolution", type: 'date', placeholder: '01/07/2026', required: true, section: 'Décision de dissolution', publicIntake: true },
-        { id: 'dissolution.raison', label: 'Raison de dissolution', type: 'textarea', placeholder: 'Décision des associés / Objet réalisé / Autres…', required: true, publicIntake: true },
-        { id: 'dissolution.type', label: 'Type de dissolution', type: 'select', options: ['Amiable', 'Judiciaire'], required: true, publicIntake: true },
-        { id: 'liquidateur.nom', label: 'Nom du liquidateur', type: 'text', placeholder: 'Ibrahima DIALLO', required: true, section: 'Liquidateur', clientRole: 'liquidateur' },
-        { id: 'liquidateur.qualite', label: 'Qualité du liquidateur', type: 'text', placeholder: 'Associé / Tiers désigné', required: true },
-        { id: 'liquidateur.adresse', label: 'Adresse du liquidateur', type: 'text', placeholder: 'Quartier, Commune, Ville', required: false },
+
+        // ── 2. Phase — la variante du type d'acte ────────────────────────────
+        // Une dissolution-liquidation se traite en **deux dossiers** : l'assemblée qui dissout
+        // et nomme le liquidateur, puis, des mois ou des années plus tard, celle qui approuve
+        // les comptes et donne quitus. Ce champ dit lequel des deux on ouvre — donc quels actes
+        // produire et quel statut poser sur la fiche société.
+        //
+        // ⚠️ Pas de `publicIntake`, comme `modif.types` : qualifier juridiquement une opération
+        // n'appartient pas au client. Le miroir PHP est `VarianteDissolution`, et
+        // `ParitesVariantesSocieteTest` vérifie que les deux libellés coïncident — sans quoi la
+        // phase choisie ne déclencherait strictement rien, en silence.
+        { id: 'dissolution.phase', label: 'Phase de la procédure', type: 'select', required: true, section: 'Phase de la procédure',
+          options: ['Dissolution anticipée', 'Clôture de la liquidation'],
+          note: "Deux assemblées, deux dossiers : la dissolution nomme le liquidateur, la clôture approuve ses comptes." },
+
+        // ── 3. Décision de dissolution (phase 1) ─────────────────────────────
+        { id: 'dissolution.date_assemblee', label: "Date de l'assemblée de dissolution", type: 'date', placeholder: '01/07/2026', required: true, section: 'Décision de dissolution', showIf: SHOW_IF_DISSOLUTION, publicIntake: true },
+        // « prononce, par anticipation, la dissolution […] **à compter de ce jour** » : l'effet
+        // peut être différé de la date d'assemblée, et c'est lui qui fait courir la liquidation
+        // et le mandat du liquidateur. Laissé facultatif — vide, l'effet est celui du jour de
+        // l'assemblée, ce que l'acte réel écrit.
+        { id: 'dissolution.date_effet', label: "Date d'effet de la dissolution", type: 'date', placeholder: '01/07/2026', required: false, showIf: SHOW_IF_DISSOLUTION,
+          note: "Vide : la dissolution prend effet le jour de l'assemblée." },
+        { id: 'dissolution.raison', label: 'Raison de dissolution', type: 'textarea', placeholder: 'Décision des associés / Objet réalisé / Autres…', required: true, showIf: SHOW_IF_DISSOLUTION, publicIntake: true },
+        { id: 'dissolution.type', label: 'Type de dissolution', type: 'select', options: ['Amiable', 'Judiciaire'], required: true, showIf: SHOW_IF_DISSOLUTION, publicIntake: true },
+
+        // « L'associé unique fixe le siège de la liquidation au siège social du Cabinet …,
+        // situé au quartier Kipé Mosquée, Commune de Ratoma, Conakry » : une adresse **distincte
+        // du siège social** de la société dissoute, celle où la liquidation se tient. Triplet
+        // géo, donc inscrit en clair dans TRIPLETS_GEO pour bénéficier du référentiel de lieux.
+        { id: 'dissolution.siege_ville', label: 'Ville du siège de liquidation', type: 'text', placeholder: 'Conakry', required: false, showIf: SHOW_IF_DISSOLUTION },
+        { id: 'dissolution.siege_commune', label: 'Commune du siège de liquidation', type: 'text', placeholder: 'Ratoma', required: false, showIf: SHOW_IF_DISSOLUTION },
+        { id: 'dissolution.siege_quartier', label: 'Quartier du siège de liquidation', type: 'text', placeholder: 'Kipé Mosquée', required: false, showIf: SHOW_IF_DISSOLUTION },
+
+        // ── 4. Associé unique requérant (phase 1) ────────────────────────────
+        ...REQUERANT_DISSOLUTION_FIELDS,
+
+        // ── 5. Liquidateur (phase 1) ─────────────────────────────────────────
+        ...LIQUIDATEUR_FIELDS,
+
+        // ── 6. Formalités (renseigné au retour du greffe) ────────────────────
+        // L'insertion attend « La déclaration modificative au Registre du Commerce et du Crédit
+        // Mobilier a été faite sous le numéro RCCM-GN-TCC.2023……… ». Ce numéro n'existe qu'une
+        // fois la formalité revenue : le champ reste donc vide à l'Édition, et se complète
+        // ensuite. Facultatif par construction — l'exiger bloquerait avant même le dépôt.
+        { id: 'dissolution.rccm_modificatif', label: 'N° de déclaration modificative RCCM', type: 'text', placeholder: 'RCCM-GN-TCC.2026-XXXX', required: false, mono: true, section: 'Formalités',
+          note: 'Renseigné au retour du greffe. Repris dans l\'insertion au journal.' },
+
+        // ── 7. Clôture de la liquidation (phase 2) ───────────────────────────
+        // Contenu **délibérément minimal**. Rapport du liquidateur, comptes détaillés, mali de
+        // liquidation : ces mentions viendront du gabarit `.docx` quand l'étude le fournira,
+        // c'est lui qui dicte les balises. Déclarer ici des champs qu'aucun acte ne consomme
+        // ferait saisir pour rien — et laisserait croire que la procédure est couverte.
+        { id: 'cloture.date_assemblee', label: "Date de l'assemblée de clôture", type: 'date', placeholder: '01/07/2029', required: true, section: 'Clôture de la liquidation', showIf: SHOW_IF_CLOTURE },
+        { id: 'cloture.quitus', label: 'Quitus donné au liquidateur', type: 'select', options: ['Oui', 'Non'], required: true, showIf: SHOW_IF_CLOTURE },
+        { id: 'cloture.boni_chiffres', label: 'Boni de liquidation (GNF)', type: 'number', placeholder: '0', required: false, mono: true, showIf: SHOW_IF_CLOTURE,
+          note: "Laisser vide ou à zéro s'il n'y a ni boni ni mali." },
+        { id: 'cloture.observations', label: 'Observations', type: 'textarea', placeholder: "Opérations de liquidation, sort des archives sociales…", required: false, showIf: SHOW_IF_CLOTURE },
     ],
 
     // ── Vente immobilière avec titre foncier ────────────────────────────────
@@ -702,7 +1095,11 @@ export const QUESTIONNAIRES = {
         { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: FORMES_SOCIETE, required: true, publicIntake: true },
         { id: 'soc.rccm', label: 'Numéro RCCM actuel', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true, publicIntake: true },
         { id: 'soc.nif', label: 'NIF', type: 'text', placeholder: '000123456', required: false, mono: true, publicIntake: true },
-        { id: 'soc.date_constitution', label: 'Date de constitution', type: 'date', placeholder: '15/03/2020', required: false, publicIntake: true },
+        // Précisé le 2026-09-29 : c'est la date d'**immatriculation au RCCM**, celle que l'acte
+        // cite (« immatriculée sous le numéro …, en date du … »), et celle depuis laquelle
+        // court la durée statutaire. Elle se remplit désormais toute seule au retour de la
+        // formalité APIP — voir App\Enums\DonneeAuRetour::RccmDate.
+        { id: 'soc.date_constitution', label: "Date d'immatriculation au RCCM", type: 'date', placeholder: '15/03/2020', required: false, publicIntake: true },
         { id: 'soc.capital_chiffres', label: 'Capital social actuel (GNF)', type: 'number', placeholder: '50 000 000', required: true, mono: true, publicIntake: true },
         { id: 'soc.nombre_parts', label: 'Nombre de parts actuel', type: 'number', placeholder: '100', required: false, mono: true, publicIntake: true },
         { id: 'soc.valeur_nominale_chiffres', label: "Valeur nominale d'une part (GNF)", type: 'number', placeholder: '500 000', required: false, mono: true, publicIntake: true },
@@ -906,9 +1303,31 @@ export const QUESTIONNAIRES = {
 // société conditionnels au type de modification décidé, sans logique ad hoc dans le rendu.
 // ─────────────────────────────────────────────────────────────────────────────
 export function getVisibleFields(fields, values) {
-    return fields.filter(field => {
-        const { showIf } = field;
-        if (!showIf) return true;
+    return fields.filter(field => estVisible(field.showIf, values));
+}
+
+/**
+ * Une condition `showIf` est-elle satisfaite ?
+ *
+ * Extraite de `getVisibleFields()` pour pouvoir être **récursive** : la forme `{ all: [...] }`
+ * conjugue plusieurs conditions. Les champs propres à un motif de représentation en exigent deux
+ * — « la personne se fait représenter » ET « le motif est celui-ci ». Sans conjonction, décocher
+ * la case laisserait le motif en valeur dans `formValues` et ses champs affichés : la famille de
+ * défaut que `purgerChampsInvisibles()` décrit déjà.
+ *
+ * Volontairement **pas transitive** (un champ visible dont la condition désigne un champ lui-même
+ * masqué reste visible). Ce serait sans doute la sémantique juste, et cela réparerait toute la
+ * famille d'un coup — mais c'est un changement de comportement sur les 16 questionnaires, à
+ * mesurer avant d'adopter, pas à glisser dans cette passe.
+ */
+function estVisible(showIf, values) {
+    if (!showIf) return true;
+
+    if (showIf.all !== undefined) {
+        return showIf.all.every(condition => estVisible(condition, values));
+    }
+
+    {
         const current = values[showIf.field];
 
         if (showIf.equals !== undefined) {
@@ -930,7 +1349,7 @@ export function getVisibleFields(fields, values) {
             return showIf.not ? current.length === 0 : current.length > 0;
         }
         return showIf.not ? !current : !!current;
-    });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1016,8 +1435,23 @@ export const TRIPLETS_GEO = [
     // une commune en texte libre pendant que le bloc « gérant » d'à côté proposait le référentiel.
     // Un préfixe dérivé se déclare ici comme les autres : la dérivation ne l'inscrit pas d'elle-même.
     { ville: 'gerant_entrant.demeurant_ville', commune: 'gerant_entrant.commune',        quartier: 'gerant_entrant.quartier' },
+    // Même cas, même piège : `liquidateur.*` est dérivé de GER_FIELDS par substitution de
+    // préfixe, donc ses champs géo existent sans figurer ici. Sans cette ligne, le liquidateur
+    // serait le seul dirigeant du projet à saisir sa commune en texte libre.
+    { ville: 'liquidateur.demeurant_ville',  commune: 'liquidateur.commune',            quartier: 'liquidateur.quartier' },
+    // Siège **de la liquidation**, distinct du siège social de la société dissoute.
+    { ville: 'dissolution.siege_ville',      commune: 'dissolution.siege_commune',      quartier: 'dissolution.siege_quartier' },
     // Blocs répétables (associés, gérants) : les champs y sont nommés sans préfixe.
     { ville: 'demeurant_ville',              commune: 'commune',                        quartier: 'quartier' },
+    // Sous-espace du représentant. Écrit en clair, comme PAIRES_DATES et pour la même raison :
+    // ces tables sont relues par regex, ligne par ligne, par les tests de parité. L'oubli — le
+    // défaut qu'a connu `gerant_entrant.*` — est fermé par
+    // `test_tout_prefixe_de_representation_a_ses_controles_de_dates_et_sa_cascade_geo`.
+    { ville: 'pp.repr_demeurant_ville',      commune: 'pp.repr_commune',                quartier: 'pp.repr_quartier' },
+    { ville: 'ger.repr_demeurant_ville',     commune: 'ger.repr_commune',               quartier: 'ger.repr_quartier' },
+    { ville: 'acq.repr_demeurant_ville',     commune: 'acq.repr_commune',               quartier: 'acq.repr_quartier' },
+    { ville: 'loc.repr_demeurant_ville',     commune: 'loc.repr_commune',               quartier: 'loc.repr_quartier' },
+    { ville: 'repr_demeurant_ville',         commune: 'repr_commune',                   quartier: 'repr_quartier' },
 ];
 
 /**
@@ -1046,10 +1480,25 @@ export const PAIRES_DATES = [
     { naissance: 'ger.date_naissance',             delivree: 'ger.piece_delivree_le',             expire: 'ger.piece_expire_le' },
     { naissance: 'acq.date_naissance',             delivree: 'acq.piece_delivree_le',             expire: 'acq.piece_expire_le' },
     { naissance: 'gerant_entrant.date_naissance',  delivree: 'gerant_entrant.piece_delivree_le',  expire: 'gerant_entrant.piece_expire_le' },
+    // Bloc dérivé lui aussi (voir LIQUIDATEUR_FIELDS) : ses dates n'existent en clair nulle part.
+    { naissance: 'liquidateur.date_naissance',     delivree: 'liquidateur.piece_delivree_le',     expire: 'liquidateur.piece_expire_le' },
     // Blocs répétables (associés, gérants, souscripteurs) : champs nommés sans préfixe.
     { naissance: 'date_naissance',                 delivree: 'piece_delivree_le',                 expire: 'piece_expire_le' },
     // Le président d'une SASU n'a qu'une date de naissance déclarée.
     { naissance: 'soc.president_date_naissance',   delivree: null,                                expire: null },
+    // Sous-espace du représentant : sa pièce d'identité mérite les mêmes contrôles de cohérence
+    // que celle des parties — c'est elle qui l'identifie au moment où il signe.
+    //
+    // ⚠️ Écrit en clair et non généré depuis PREFIXES_REPRESENTATION, bien que ce soit la même
+    // liste : `CoherenceDonneesTest` extrait cette table **ligne par ligne, par regex**, pour la
+    // confronter à son miroir PHP (`CoherenceDonneesService::GROUPES_DATES`). Une expression
+    // générée y serait illisible, et la parité — qui est le vrai garde-fou — cesserait d'être
+    // vérifiée. Un test dédié affirme que ces préfixes sont bien ceux de PREFIXES_REPRESENTATION.
+    { naissance: 'pp.repr_date_naissance',   delivree: 'pp.repr_piece_delivree_le',   expire: 'pp.repr_piece_expire_le' },
+    { naissance: 'ger.repr_date_naissance',  delivree: 'ger.repr_piece_delivree_le',  expire: 'ger.repr_piece_expire_le' },
+    { naissance: 'acq.repr_date_naissance',  delivree: 'acq.repr_piece_delivree_le',  expire: 'acq.repr_piece_expire_le' },
+    { naissance: 'loc.repr_date_naissance',  delivree: 'loc.repr_piece_delivree_le',  expire: 'loc.repr_piece_expire_le' },
+    { naissance: 'repr_date_naissance',      delivree: 'repr_piece_delivree_le',      expire: 'repr_piece_expire_le' },
 ];
 
 /**

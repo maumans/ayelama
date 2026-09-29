@@ -94,15 +94,32 @@ class ModificationSocieteTest extends TestCase
 
     // ── Règles 8 et 9 : impact et documents, les sept types ───────────────────
 
-    public function test_les_sept_types_de_modification_existent(): void
+    /**
+     * Comptait sept cas ; l'enum en porte **neuf** depuis l'ajout de la dénomination sociale et
+     * de la forme juridique. Le test était rouge dans l'arbre commité — remis au vert le
+     * 2026-09-28, et reformulé pour ne plus pouvoir périmer de la même façon.
+     *
+     * Une liste nommée plutôt qu'un nombre : elle dit *lesquels* doivent exister, ce qui est la
+     * garantie utile (aucun cas ne disparaît en silence), et ajouter un dixième cas ne la met
+     * pas en échec sans raison.
+     */
+    public function test_les_types_de_modification_attendus_existent_tous(): void
     {
-        // La diminution de capital manquait : les notes de l'étude la traitent explicitement,
-        // et son asymétrie avec l'augmentation (pas de DNSV) est le motif de son ajout.
-        $this->assertCount(7, TypeModificationStatutaire::cases());
-        $this->assertInstanceOf(
-            TypeModificationStatutaire::class,
-            TypeModificationStatutaire::from('capital_diminution'),
-        );
+        // La diminution de capital manquait à l'origine : les notes de l'étude la traitent
+        // explicitement, et son asymétrie avec l'augmentation (pas de DNSV) motive son ajout.
+        $attendus = [
+            'denomination_sociale', 'forme_juridique',
+            'gerant_statutaire', 'gerant_non_statutaire', 'siege_social',
+            'capital_augmentation', 'capital_diminution', 'capital_cession', 'objet_social',
+        ];
+
+        foreach ($attendus as $valeur) {
+            $this->assertInstanceOf(
+                TypeModificationStatutaire::class,
+                TypeModificationStatutaire::tryFrom($valeur),
+                "Le type de modification « {$valeur} » a disparu de l'enum.",
+            );
+        }
     }
 
     public function test_regle8_toutes_les_modifications_impactent_le_rccm(): void
