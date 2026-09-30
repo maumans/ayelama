@@ -340,6 +340,29 @@ class Societe extends Model
     }
 
     /**
+     * Projection restreinte aux colonnes nommées — le sens inverse de la correspondance.
+     *
+     * Sert au comblement d'un questionnaire déjà ouvert après un retour de formalité
+     * ({@see \App\Services\EnregistrementRetourFormalite}) : seules les colonnes que le retour
+     * vient d'écrire doivent voyager. Projeter toute la fiche à cette occasion remplirait des
+     * clés sans rapport — mesuré le 2026-09-30 : un simple retour de NIF aurait rempli
+     * `soc.objet_social`, `soc.duree` et neuf autres clés dans les dossiers ouverts, pour une
+     * raison que personne n'aurait pu relier à l'événement.
+     *
+     * L'inverse vit ici, avec la table qu'il parcourt : le déduire dans le service aurait été
+     * une seconde lecture de `CHAMPS_QUESTIONNAIRE`, donc une divergence de plus en attente.
+     *
+     * @param  array<int, string> $colonnes
+     * @return array<string, mixed>
+     */
+    public function versQuestionnairePourColonnes(array $colonnes): array
+    {
+        $cles = array_keys(array_intersect(self::CHAMPS_QUESTIONNAIRE, $colonnes));
+
+        return array_intersect_key($this->versQuestionnaire(), array_flip($cles));
+    }
+
+    /**
      * Dossier constitutif de la société, versé au registre.
      *
      * Nécessaire pour les sociétés que l'étude **n'a pas constituées** : il n'existe alors ni
@@ -560,6 +583,31 @@ class Societe extends Model
      *
      * @return \Illuminate\Support\Collection<int, Partie>
      */
+    /**
+     * Les personnes connues de la société, sous la forme attendue par les écrans.
+     *
+     * Deux contrôleurs en ont besoin — `SocieteController::show()` pour le sélecteur de
+     * l'assistant, `DossierController::show()` pour le modal d'édition du questionnaire — et
+     * le front en tire les mêmes propositions dans les deux cas
+     * ({@see candidatsDuRegistre} dans lib/partiesPayload.js). Recopier la projection aurait
+     * suffi à ce que les deux écrans finissent par proposer des choses différentes.
+     *
+     * @return array<int, array{partie_id: int, client_id: ?int, nom: ?string, role: string, client: ?\App\Models\Client}>
+     */
+    public function personnesConnuesPourEcran(): array
+    {
+        return $this->associesConnus()
+            ->map(fn (Partie $partie) => [
+                'partie_id' => $partie->id,
+                'client_id' => $partie->client_id,
+                'nom'       => $partie->nom,
+                'role'      => $partie->role,
+                'client'    => $partie->client,
+            ])
+            ->values()
+            ->all();
+    }
+
     public function associesConnus()
     {
         if (!$this->dossier_id) {

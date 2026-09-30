@@ -31,7 +31,7 @@ import { ClotureTab } from '@/Components/Dossiers/ClotureTab';
 /** Ancre DOM de la carte « Parties & pièces » (onglet Informations). */
 const ANCRE_PIECES_PARTIES = 'pieces-parties';
 import { mapClientToPrefixedFields, buildPartieFields, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
-import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles, roleRepresentant } from '@/lib/partiesPayload';
+import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles, roleRepresentant, champsDuRole, candidatsDuRegistre } from '@/lib/partiesPayload';
 import { piecesRequisesPour } from '@/lib/piecesRequises';
 import { isoDateToFR, frDateToISO } from '@/lib/dates';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -238,7 +238,10 @@ function attachPartieIds(fields, values, parties) {
     return next;
 }
 
-function ModalEditQuestionnaire({ open, onClose, dossier }) {
+// `societe` est passee en prop et non lue depuis usePage() : ce composant recoit deja son
+// dossier ainsi, et un second canal de lecture pour la meme page rendrait les deux
+// sources divergentes au premier rafraichissement partiel (`router.reload({ only })`).
+function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
     const questKey  = TYPE_ACTE_CODE_MAP[dossier.typeActe?.code];
     const fields    = QUESTIONNAIRES[questKey] ?? [];
     const [formValues, setFormValues] = useState(dossier.questionnaire ?? {});
@@ -278,7 +281,8 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
 
     const applyClientToSection = (group, client) => {
         const prefix = group.fields[0].id.split('.')[0];
-        const fieldIds = group.fields.map(f => f.id);
+        // Le schéma **complet** du rôle, pas le groupe rendu : voir champsDuRole().
+        const fieldIds = champsDuRole(allFields, group.clientRole);
         const mapped = mapClientToPrefixedFields(client, prefix, fieldIds);
         setFormValues(prev => ({ ...prev, ...mapped }));
         setClientLinks(prev => ({ ...prev, [group.clientRole]: client }));
@@ -287,7 +291,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
     /** Même projection, au sous-préfixe près — miroir de Create.jsx. */
     const applyClientToRepresentant = (group, client) => {
         const prefix = group.fields[0].id.split('.')[0];
-        const fieldIds = group.fields.map(f => f.id);
+        const fieldIds = champsDuRole(allFields, group.clientRole);
         const mapped = mapClientToPrefixedFields(client, prefix, fieldIds, 'repr_');
         setFormValues(prev => ({ ...prev, ...mapped }));
         setClientLinks(prev => ({ ...prev, [roleRepresentant(group.clientRole)]: client }));
@@ -427,6 +431,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier }) {
                                             champsManquants={champsIdentiteManquants(group)}
                                             saisieLibre={!!saisieLibreRoles[group.clientRole]}
                                             onToggleSaisieLibre={(v) => toggleSaisieLibre(group.clientRole, v)}
+                                            suggestionsRegistre={candidatsDuRegistre(societe?.personnesConnues, group.clientRole)}
                                         />
 
                                         {/* Le représentant, quand la personne se fait représenter.
@@ -2481,7 +2486,10 @@ function getStepBlockers(dossier) {
             // `CIBLES_BLOCANTS` n'ajoute qu'un bouton quand on sait où mener ; une clé inconnue
             // s'affiche **sans** bouton plutôt que de disparaître.
             for (const anomalie of dossier.blocantsMetier ?? []) {
-                b.push({ texte: anomalie.texte, ...(CIBLES_BLOCANTS[anomalie.cle] ?? {}) });
+                // La carte statique d'abord, l'anomalie ensuite : quand le serveur fournit sa
+                // propre sortie (`lien`, `action`), elle prime sur la cible par défaut du
+                // code — c'est lui qui sait que la correction se fait dans un autre dossier.
+                b.push({ ...(CIBLES_BLOCANTS[anomalie.cle] ?? {}), ...anomalie });
             }
 
             return b;
@@ -3426,17 +3434,33 @@ export default function DossierShow() {
                                                                 {/* Bouton explicite et non simple soulignement : le
                                                                     lien passait inaperçu, et l'utilisateur ne voyait pas
                                                                     par où lever le blocage — signalé en usage réel. */}
-                                                                {item.tab ? (
+                                                                {(item.lien || item.tab) ? (
                                                                     <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                                                                         <span>{item.texte}</span>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => allerAuBlocage(item)}
-                                                                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-white"
-                                                                        >
-                                                                            {item.action ?? 'Corriger'}
-                                                                            <ArrowRight className="h-3 w-3" />
-                                                                        </button>
+                                                                        {/* `lien` prime sur `tab` : quand la correction se fait
+                                                                            dans un **autre** dossier, aucun onglet d'ici n'y mène.
+                                                                            Le blocage d'une clôture de liquidation renvoie ainsi
+                                                                            vers le dossier de dissolution qui n'a pas encore été
+                                                                            expédié — il nommait l'action « Voir le registre »,
+                                                                            qui invitait à corriger le statut à la main. */}
+                                                                        {item.lien ? (
+                                                                            <Link
+                                                                                href={item.lien}
+                                                                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-white"
+                                                                            >
+                                                                                {item.action ?? 'Ouvrir'}
+                                                                                <ArrowRight className="h-3 w-3" />
+                                                                            </Link>
+                                                                        ) : (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => allerAuBlocage(item)}
+                                                                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-white"
+                                                                            >
+                                                                                {item.action ?? 'Corriger'}
+                                                                                <ArrowRight className="h-3 w-3" />
+                                                                            </button>
+                                                                        )}
                                                                     </span>
                                                                 ) : item.texte}
                                                             </li>
@@ -4121,6 +4145,7 @@ export default function DossierShow() {
                         open={editQuestOpen}
                         onClose={() => setEditQuestOpen(false)}
                         dossier={dossier}
+                        societe={societe}
                     />
                     <ModalAjouterPersonne
                         open={ajoutPersonneOpen}

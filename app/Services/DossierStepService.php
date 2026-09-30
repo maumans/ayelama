@@ -350,8 +350,16 @@ class DossierStepService
 
         foreach ([$this->reglesSociete->anomalies($dossier), $this->reglesRepresentation->anomalies($dossier)] as $source) {
             foreach ($source as $cle => $messages) {
-                foreach ((array) $messages as $texte) {
-                    $blocants[] = ['cle' => $cle, 'texte' => $texte];
+                foreach ((array) $messages as $message) {
+                    // Un message est une chaîne, ou un tableau qui porte en plus sa **sortie**
+                    // (`lien`, `action`). L'écran mappe la clé vers un onglet via
+                    // `CIBLES_BLOCANTS`, ce qui suffit tant que la correction se fait dans ce
+                    // dossier-ci — mais pas quand elle se fait **ailleurs** : le dossier de
+                    // clôture d'une liquidation renvoie vers le dossier de dissolution, qui
+                    // n'est pas un onglet. Extension additive : une chaîne reste une chaîne.
+                    $blocants[] = is_array($message)
+                        ? ['cle' => $cle, ...$message]
+                        : ['cle' => $cle, 'texte' => $message];
                 }
             }
         }

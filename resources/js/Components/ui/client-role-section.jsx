@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pencil, RefreshCw, Users, IdCard, MapPin, Phone, Mail, PenLine, X, AlertTriangle } from 'lucide-react';
+import { Pencil, RefreshCw, Users, IdCard, MapPin, Phone, Mail, PenLine, X, AlertTriangle, Building2 } from 'lucide-react';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { clientDisplayName, adresseComposite } from '@/lib/clientFields';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,9 @@ export function ClientRoleSection({
     saisieLibre = false,
     onToggleSaisieLibre,
     readOnly = false,
+    depuisRegistre = false,
+    suggestionsRegistre = [],
+    onSelectRegistre,
     children,
 }) {
     const [changement, setChangement] = useState(false);
@@ -76,6 +79,17 @@ export function ClientRoleSection({
                     onChanger={() => setChangement(true)}
                     onUnlink={onUnlink}
                 />
+                {/* Un rattachement que le clerc n'a pas fait doit le dire. Le registre ne
+                    connaît que les associés du dossier **de constitution** : après une cession
+                    de parts, la personne proposée peut ne plus être la bonne. Mieux vaut une
+                    ligne à vérifier qu'un préremplissage muet. */}
+                {depuisRegistre && (
+                    <p className="flex items-start gap-1.5 text-xs text-slate-500">
+                        <Building2 className="mt-0.5 h-3 w-3 shrink-0 text-seal-hover" />
+                        Rattaché depuis le registre — seule personne connue de la société pour ce
+                        rôle. Vérifiez qu'elle intervient toujours à ce titre&nbsp;; sinon, détachez-la.
+                    </p>
+                )}
                 {/* Seules les données propres à l'acte restent saisissables ici
                     (nombre de parts, fonction…) — l'identité vient de la fiche. */}
                 {children}
@@ -91,6 +105,45 @@ export function ClientRoleSection({
                         ? <>Désignez la personne qui tient le rôle de <span className="font-medium text-slate-700">{roleLabel.toLowerCase()}</span> — choisissez-la parmi les clients du dossier, cherchez-la dans le répertoire, ou créez sa fiche.</>
                         : 'Choisissez la personne parmi les clients du dossier, le répertoire, ou créez sa fiche.'}
                 </p>
+
+                {/* ── Ce que le registre sait déjà, proposé **ici** ────────────────────
+                    Les personnes du dossier constitutif étaient affichées dans la carte de la
+                    société, tout en haut : les verser au rôle demandait de remonter, cliquer,
+                    redescendre et re-cliquer. Quatre gestes et deux endroits pour une
+                    information que la base porte. Le rattachement d'office
+                    (`rolesARattacherDoffice`) couvre le cas sans ambiguïté ; dès qu'il y a
+                    plusieurs candidats il s'abstient — délibérément — et c'est précisément là
+                    que la proposition doit se trouver, au moment du choix.
+
+                    Proposées, jamais imposées : la liste du registre est celle du dossier de
+                    **constitution**, et un associé d'origine peut avoir cédé ses parts. */}
+                {suggestionsRegistre.length > 0 && (
+                    <div className="mb-3 rounded-lg border border-seal/25 bg-seal/5 p-2.5">
+                        <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                            <Building2 className="h-3 w-3 text-seal-hover" />
+                            Connues de cette société
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {suggestionsRegistre.map(personne => (
+                                <button
+                                    key={personne.partie_id ?? personne.client?.id}
+                                    type="button"
+                                    onClick={() => { (onSelectRegistre ?? onSelect)?.(personne.client); setChangement(false); }}
+                                    title={`Désigner ${personne.nom} comme ${roleLabel?.toLowerCase() ?? 'titulaire de ce rôle'}`}
+                                    className="inline-flex items-center gap-1 rounded-full border border-seal/40 bg-white px-2.5 py-1 text-xs text-slate-700 transition-colors hover:bg-seal/10"
+                                >
+                                    <Users className="h-3 w-3 text-seal-hover" />
+                                    {personne.nom}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="mt-1.5 text-[11px] text-slate-400">
+                            D'après le dossier de constitution — vérifiez que la personne intervient
+                            toujours à ce titre.
+                        </p>
+                    </div>
+                )}
+
                 <ClientPicker
                     placeholder={roleLabel ? `Rechercher un client existant (${roleLabel})…` : 'Rechercher un client existant…'}
                     linked={null}

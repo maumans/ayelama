@@ -65,6 +65,30 @@ class EnregistrementRetourFormalite
                 continue;
             }
 
+            // ⚠️ **Seule l'immatriculation délivre un numéro RCCM.** Une modification ou une
+            // dissolution rend une *déclaration modificative*, qui a son propre cas
+            // ({@see DonneeAuRetour::DeclarationModificativeNumero}) et, délibérément, aucune
+            // destination — précisément pour ne pas écraser l'identité légale de la société.
+            //
+            // Le garde-fou n'est pas théorique : mesuré le 2026-09-30, les barèmes
+            // « Immatriculation RCCM » et « Obtention NIF » existaient **aussi** sur `SOC-MOD`
+            // et `SOC-DIS` — la migration qui a semé `donnees_au_retour` les a servis par
+            // libellé — et y déclaraient `rccm_numero` / `rccm_date`. Sans effet tant qu'ils
+            // étaient inactifs ; le jour où l'étude en activait un, le numéro rendu pour une
+            // modification entrait dans `societes.rccm_numero` d'une fiche encore vide.
+            // La migration `2026_09_30_100000` les a nettoyés, celle-ci empêche la rechute.
+            //
+            // Le critère est **la donnée, pas une liste de codes** : la fiche porte-t-elle ce
+            // dossier comme dossier constitutif ? `societes.dossier_id` ne vaut `$dossier->id`
+            // que pour la constitution qui a créé la fiche
+            // ({@see DossierController::enregistrerAuRegistreDesSocietes}). Un `match` sur des
+            // codes de type d'acte aurait fallu maintenir à chaque forme ajoutée — or les
+            // types d'acte sont des **données**, créables en exécution.
+            if ($this->reserveALimmatriculation($donnee) && ! $this->estLeDossierConstitutif($formalite, $societe)) {
+                $sansDestination[] = $donnee->value;
+                continue;
+            }
+
             $existante = $societe->{$colonne};
 
             if (blank($existante)) {
@@ -84,6 +108,7 @@ class EnregistrementRetourFormalite
 
         if ($appliquees !== [] && $societe) {
             $societe->update($appliquees);
+            $this->comblerQuestionnairesOuverts($societe->fresh(), array_keys($appliquees), $user);
         }
 
         $this->journaliser($formalite, $societe, $appliquees, $divergentes, $user);
@@ -94,6 +119,107 @@ class EnregistrementRetourFormalite
             'divergentes'     => $divergentes,
             'sansDestination' => $sansDestination,
         ];
+    }
+
+    /**
+     * Données que seule l'immatriculation d'origine délivre.
+     *
+     * `nif` n'en est pas : l'administration fiscale peut en attribuer un après coup à une
+     * société déjà immatriculée, et rien dans les mesures ne dit le contraire. Une contrainte
+     * inventée est pire qu'une contrainte absente.
+     */
+    private function reserveALimmatriculation(DonneeAuRetour $donnee): bool
+    {
+        return in_array($donnee, [DonneeAuRetour::RccmNumero, DonneeAuRetour::RccmDate], true);
+    }
+
+    /** Cette formalité relève-t-elle du dossier qui a fait naître la fiche ? */
+    private function estLeDossierConstitutif(Formalite $formalite, Societe $societe): bool
+    {
+        return $societe->dossier_id !== null
+            && $societe->dossier_id === $formalite->dossier_id;
+    }
+
+    /**
+     * Porte la donnée nouvellement connue dans les questionnaires **déjà ouverts** de la société.
+     *
+     * Sans cela la boucle restait ouverte d'un cran : le numéro entrait bien au registre, mais un
+     * dossier de modification ouvert la veille continuait de le réclamer — sa projection est
+     * figée au rattachement, et rien ne la rejoue.
+     *
+     * ⚠️ **On comble, on ne corrige jamais.** Le devbook pose comme décision assumée que corriger
+     * une fiche société ne reprojette rien : réaligner en silence contournerait le circuit du PV,
+     * de la certification et des formalités. Cette décision reste entière — une clé **déjà
+     * renseignée** n'est pas touchée, même divergente. Remplir un trou n'est pas corriger : la
+     * clé vide ne portait aucune vérité concurrente.
+     *
+     * Ce sont les trois branches de la capture au retour, appliquées dans l'autre sens :
+     * vide → écrire · identique → ne rien faire · **différent → laisser tel quel**.
+     *
+     * ⚠️ **Seules les colonnes que ce retour vient d'écrire voyagent.** Projeter toute la fiche
+     * à cette occasion aurait rempli des clés sans rapport : mesuré sur la base réelle, un
+     * retour de NIF aurait comblé `soc.objet_social`, `soc.duree` et neuf autres dans les
+     * dossiers ouverts — correct sur le fond, mais impossible à relier à l'événement pour qui
+     * lit le journal six mois plus tard. Un effet doit se déduire de sa cause.
+     *
+     * Un dossier **clôturé** n'est jamais touché : son questionnaire est l'instantané qui a servi
+     * à produire des actes archivés.
+     *
+     * Premier appelant de production de {@see Societe::versQuestionnaire()} — la méthode
+     * existait, testée et miroir de `resources/js/lib/societeFields.js`, sans aucun usage : en
+     * écrire une seconde aurait créé la divergence que le miroir existe pour éviter.
+     *
+     * @param array<int, string> $colonnes colonnes que ce retour vient de porter à la fiche
+     */
+    private function comblerQuestionnairesOuverts(Societe $societe, array $colonnes, ?User $user): void
+    {
+        $projection = $societe->versQuestionnairePourColonnes($colonnes);
+
+        if ($projection === []) {
+            return;
+        }
+
+        $dossiers = $societe->dossiers()->enCours()->with('questionnaire')->get();
+
+        foreach ($dossiers as $dossier) {
+            $questionnaire = $dossier->questionnaire;
+
+            if (! $questionnaire) {
+                continue;
+            }
+
+            $donnees = $questionnaire->donnees ?? [];
+            $combles = [];
+
+            foreach ($projection as $cle => $valeur) {
+                // Clé absente et clé vide sont le même cas : le questionnaire ne dit rien.
+                // `blank()` couvre les deux, plus la chaîne d'espaces.
+                if (! blank($donnees[$cle] ?? null)) {
+                    continue;
+                }
+
+                $donnees[$cle] = $valeur;
+                $combles[$cle] = $valeur;
+            }
+
+            if ($combles === []) {
+                continue;
+            }
+
+            $questionnaire->update(['donnees' => $donnees]);
+
+            JournalActivite::enregistrer(
+                $dossier,
+                sprintf(
+                    'Complété depuis le registre après le retour d\'une formalité : %s. '
+                    . 'Les valeurs déjà saisies n\'ont pas été modifiées.',
+                    implode(', ', array_keys($combles)),
+                ),
+                'societe',
+                ['societe_id' => $societe->id, 'champs' => $combles],
+                $user,
+            );
+        }
     }
 
     /**

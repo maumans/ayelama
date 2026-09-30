@@ -194,7 +194,6 @@ ag.secretaire_seance
 ag.type
 annee_lettres
 associes
-associes.adresse
 associes.apport_chiffres
 associes.apport_formate
 associes.apport_lettres
@@ -206,6 +205,7 @@ associes.date_naissance
 associes.date_naissance_jma
 associes.date_naissance_lettres
 associes.demeurant_ville
+associes.email
 associes.est_represente
 associes.forme
 associes.nationalite
@@ -280,6 +280,7 @@ associes.repr_ville
 associes.representant_legal
 associes.representation_motif
 associes.situation_matrimoniale
+associes.telephone
 associes.type_personne
 bail.avance_loyer
 bail.caution_chiffres

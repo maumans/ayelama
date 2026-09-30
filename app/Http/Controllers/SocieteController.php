@@ -195,15 +195,7 @@ class SocieteController extends Controller
 
         return response()->json([
             ...$this->presenter($societe),
-            'personnesConnues' => $societe->associesConnus()
-                ->map(fn (Partie $partie) => [
-                    'partie_id' => $partie->id,
-                    'client_id' => $partie->client_id,
-                    'nom'       => $partie->nom,
-                    'role'      => $partie->role,
-                    'client'    => $partie->client,
-                ])
-                ->values(),
+            'personnesConnues' => $societe->personnesConnuesPourEcran(),
         ]);
     }
 

@@ -67,6 +67,13 @@ class DonneesAuRetourTest extends TestCase
 
         Questionnaire::create(['dossier_id' => $dossier->id, 'donnees' => []]);
 
+        // ⚠️ Le lien **dans les deux sens**, comme en production. `dossiers.societe_id` dit
+        // « ce dossier porte sur cette société » ; `societes.dossier_id` dit « cette fiche est
+        // née de ce dossier », et c'est lui que le garde-fou du RCCM interroge : un numéro
+        // d'immatriculation ne peut venir que du dossier qui a immatriculé. Le fixture ne
+        // posait que le premier, ce qui décrivait une société tombée du ciel.
+        $societe?->update(['dossier_id' => $dossier->id]);
+
         return Formalite::create(array_merge([
             'dossier_id'        => $dossier->id,
             'organisme'         => 'apip',
@@ -425,6 +432,191 @@ class DonneesAuRetourTest extends TestCase
             ['rccm_numero'],
             $formalite->fresh()->donnees_au_retour,
             "Une régénération ne doit pas réécrire l'instantané de la formalité.",
+        );
+    }
+
+    // ═══ Le RCCM ne vient que de l'immatriculation ═══════════════════════
+
+    /**
+     * Une formalité qui n'est pas celle du dossier constitutif ne délivre pas d'identité.
+     *
+     * Mesuré le 2026-09-30 : les barèmes « Immatriculation RCCM » et « Obtention NIF »
+     * existaient aussi sur `SOC-MOD` et `SOC-DIS`, semés par libellé, et y déclaraient
+     * `rccm_numero` / `rccm_date`. Tous inactifs, donc sans dégât — mais le jour où l'étude en
+     * activait un, le numéro rendu par le greffe pour une **modification** entrait dans
+     * `societes.rccm_numero` d'une fiche encore vide. C'est exactement l'écrasement d'identité
+     * que `DonneeAuRetour::DeclarationModificativeNumero` existe pour éviter en n'ayant, elle,
+     * aucune destination.
+     *
+     * La migration a nettoyé la donnée ; ce test empêche la règle de se reperdre.
+     */
+    public function test_un_retour_hors_dossier_constitutif_nentre_pas_didentite_au_registre(): void
+    {
+        // La société existe déjà, née d'un autre dossier : c'est le cas d'une modification.
+        $societe = $this->societe(['dossier_id' => null]);
+        $formalite = $this->formalite(['rccm_numero', 'rccm_date', 'nif'], $societe);
+
+        // On défait le lien que le fixture pose : ce dossier n'est pas le dossier constitutif.
+        $societe->update(['dossier_id' => null]);
+
+        $resultat = app(EnregistrementRetourFormalite::class)->appliquer($formalite->fresh(), [
+            'rccm_numero' => 'GN.TCC.2026.B00001',
+            'rccm_date'   => '2026-09-30',
+            'nif'         => '000987654',
+        ]);
+
+        $societe->refresh();
+
+        $this->assertNull($societe->rccm_numero, "Le RCCM ne doit pas venir d'une formalité qui n'a pas immatriculé.");
+        $this->assertNull($societe->date_constitution, "La date d'immatriculation non plus.");
+        $this->assertContains('rccm_numero', $resultat['sansDestination'], 'Le refus doit être visible, pas silencieux.');
+        $this->assertContains('rccm_date', $resultat['sansDestination']);
+
+        // Le NIF, lui, passe : l'administration fiscale peut en attribuer un après coup, et
+        // rien ne permet d'affirmer le contraire.
+        $this->assertSame('000987654', $societe->nif);
+    }
+
+    public function test_le_dossier_constitutif_porte_bien_le_rccm(): void
+    {
+        $societe = $this->societe();
+        $formalite = $this->formalite(['rccm_numero'], $societe);
+
+        app(EnregistrementRetourFormalite::class)->appliquer($formalite->fresh(), [
+            'rccm_numero' => 'GN.TCC.2026.B00002',
+        ]);
+
+        $this->assertSame('GN.TCC.2026.B00002', $societe->refresh()->rccm_numero);
+    }
+
+    // ═══ Combler les questionnaires déjà ouverts ═════════════════════════
+
+    /**
+     * Le numéro arrivé au registre rejoint les dossiers ouverts — sans rien corriger.
+     *
+     * Sans cela la boucle restait ouverte d'un cran : la fiche apprenait le RCCM, mais un
+     * dossier de modification ouvert la veille continuait de le réclamer, parce que sa
+     * projection est figée au rattachement et que rien ne la rejoue.
+     */
+    public function test_le_questionnaire_dun_dossier_ouvert_est_comble(): void
+    {
+        $societe = $this->societe();
+        $formalite = $this->formalite(['rccm_numero'], $societe);
+
+        // Un second dossier, ouvert, porte sur la même société et ne connaît pas le numéro.
+        $autre = Dossier::create([
+            'reference'    => 'SOC-2026-9001',
+            'type_acte_id' => $formalite->dossier->type_acte_id,
+            'societe_id'   => $societe->id,
+            'etape'        => EtapeDossier::Edition,
+            'redacteur_id' => User::factory()->create()->id,
+            'objet'        => 'Modification ouverte avant le retour',
+        ]);
+        $qAutre = Questionnaire::create([
+            'dossier_id' => $autre->id,
+            'donnees'    => ['soc.denomination' => 'Faya Distribution SARLU', 'soc.rccm' => ''],
+        ]);
+
+        app(EnregistrementRetourFormalite::class)->appliquer($formalite->fresh(), [
+            'rccm_numero' => 'GN.TCC.2026.B00003',
+        ]);
+
+        $this->assertSame(
+            'GN.TCC.2026.B00003',
+            $qAutre->fresh()->donnees['soc.rccm'] ?? null,
+            'Une clé vide devait être comblée depuis le registre.',
+        );
+    }
+
+    /** Une valeur déjà saisie n'est jamais réalignée : combler n'est pas corriger. */
+    public function test_une_valeur_deja_saisie_dans_un_dossier_ouvert_nest_pas_ecrasee(): void
+    {
+        $societe = $this->societe();
+        $formalite = $this->formalite(['rccm_numero'], $societe);
+
+        $autre = Dossier::create([
+            'reference'    => 'SOC-2026-9002',
+            'type_acte_id' => $formalite->dossier->type_acte_id,
+            'societe_id'   => $societe->id,
+            'etape'        => EtapeDossier::Edition,
+            'redacteur_id' => User::factory()->create()->id,
+            'objet'        => 'Dossier portant déjà un numéro',
+        ]);
+        $qAutre = Questionnaire::create([
+            'dossier_id' => $autre->id,
+            'donnees'    => ['soc.rccm' => 'SAISI-A-LA-MAIN'],
+        ]);
+
+        app(EnregistrementRetourFormalite::class)->appliquer($formalite->fresh(), [
+            'rccm_numero' => 'GN.TCC.2026.B00004',
+        ]);
+
+        $this->assertSame(
+            'SAISI-A-LA-MAIN',
+            $qAutre->fresh()->donnees['soc.rccm'],
+            "La décision du devbook tient : on ne réaligne pas en silence une valeur portée.",
+        );
+    }
+
+    /** Un dossier clôturé est un instantané : il a produit des actes archivés. */
+    public function test_un_dossier_cloture_nest_jamais_comble(): void
+    {
+        $societe = $this->societe();
+        $formalite = $this->formalite(['rccm_numero'], $societe);
+
+        $clos = Dossier::create([
+            'reference'    => 'SOC-2026-9003',
+            'type_acte_id' => $formalite->dossier->type_acte_id,
+            'societe_id'   => $societe->id,
+            'etape'        => EtapeDossier::Cloture,
+            'redacteur_id' => User::factory()->create()->id,
+            'objet'        => 'Dossier archivé',
+        ]);
+        $qClos = Questionnaire::create(['dossier_id' => $clos->id, 'donnees' => ['soc.rccm' => '']]);
+
+        app(EnregistrementRetourFormalite::class)->appliquer($formalite->fresh(), [
+            'rccm_numero' => 'GN.TCC.2026.B00005',
+        ]);
+
+        $this->assertSame('', $qClos->fresh()->donnees['soc.rccm'], "Un instantané archivé ne se réécrit pas.");
+    }
+
+    /**
+     * Le comblement porte sur ce qui vient d'arriver, pas sur toute la fiche.
+     *
+     * Mesuré sur la base réelle avant de resserrer : projeter toute la fiche à l'occasion d'un
+     * retour aurait comblé `soc.objet_social`, `soc.duree` et neuf autres clés — correct sur le
+     * fond, mais un effet qu'on ne peut pas relier à sa cause n'est pas lisible dans un journal.
+     */
+    public function test_le_comblement_ne_deborde_pas_sur_les_autres_champs(): void
+    {
+        $societe = $this->societe([
+            'objet_social' => 'Commerce général',
+            'duree'        => 99,
+        ]);
+        $formalite = $this->formalite(['rccm_numero'], $societe);
+
+        $autre = Dossier::create([
+            'reference'    => 'SOC-2026-9004',
+            'type_acte_id' => $formalite->dossier->type_acte_id,
+            'societe_id'   => $societe->id,
+            'etape'        => EtapeDossier::Edition,
+            'redacteur_id' => User::factory()->create()->id,
+            'objet'        => 'Dossier ouvert aux champs vides',
+        ]);
+        $qAutre = Questionnaire::create(['dossier_id' => $autre->id, 'donnees' => []]);
+
+        app(EnregistrementRetourFormalite::class)->appliquer($formalite->fresh(), [
+            'rccm_numero' => 'GN.TCC.2026.B00006',
+        ]);
+
+        $donnees = $qAutre->fresh()->donnees;
+
+        $this->assertSame('GN.TCC.2026.B00006', $donnees['soc.rccm'] ?? null, 'Le RCCM devait arriver.');
+        $this->assertSame(
+            ['soc.rccm'],
+            array_keys($donnees),
+            "Seule la donnée reçue voyage : un retour de RCCM n'a pas à remplir l'objet social.",
         );
     }
 }

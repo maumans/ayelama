@@ -261,28 +261,62 @@ const SOC_COMMISSAIRES_REQUIS = SOC_COMMISSAIRES.map(f =>
     f.id.startsWith('cac_titulaire') ? { ...f, required: true } : f
 );
 
-// Associé unique (personne physique) — SARLU / SASU
+/**
+ * Mentions qu'une personne morale n'a pas : elles passent sous condition dans un bloc bimodal.
+ *
+ * ⚠️ **Déclarée ici, et non près de `rendreBimodal()` qui l'utilise.** `PP_ASSOCIE_UNIQUE`, juste
+ * dessous, appelle `rendreBimodal()` à l'évaluation du module : une `const` déclarée plus bas
+ * serait lue dans sa **zone morte temporelle** et lèverait « Cannot access before
+ * initialization » — une page blanche que `vite build` laisse passer sans un mot. C'est
+ * exactement ce que `ListesMatrimonialesTest` interdit ailleurs dans ce fichier.
+ */
+const PHYSIQUE_SEULEMENT = [
+    'ne_a', 'date_naissance', 'situation_matrimoniale', 'regime_matrimonial',
+    'piece_type', 'piece_numero', 'piece_delivree_le', 'piece_delivree_a', 'piece_expire_le',
+];
+
+/**
+ * Associé unique — SARLU / SASU. **Bimodal depuis le 2026-09-30.**
+ *
+ * Il ne l'était pas, et c'était une impasse mesurable : `Partie::ROLES_ADMETTANT_PERSONNE_MORALE`
+ * admet `associe_unique`, le serveur sait donc exiger les pièces d'un associé société — mais le
+ * formulaire n'avait ni champ « Nature », ni civilité « Société », et réclamait lieu de
+ * naissance, date de naissance et quatre champs de pièce d'identité. **Une SARLU détenue par une
+ * société était insaisissable**, alors que c'est un montage courant.
+ *
+ * ⚠️ `physiqueParDefaut: true`, et ce n'est pas un détail de confort. Les huit `required`
+ * ci-dessous sont **conservés** — une SARLU à associé physique reste aussi exigeante
+ * qu'avant — mais ils passent sous condition, et la condition doit être **tolérante** : les 12
+ * dossiers SARLU/SASU du registre n'ont pas la clé `pp.type_personne`, puisque le champ vient
+ * d'être créé. Une condition stricte y ferait disparaître tout l'état civil déjà saisi.
+ * Voir {@see rendreBimodal}.
+ */
 const PP_ASSOCIE_UNIQUE = [
-    { id: 'pp.civilite', label: 'Civilité', type: 'select', options: ['M.', 'Mme', 'Mlle'], required: true, section: 'Associé unique', clientRole: 'associe_unique' },
-    { id: 'pp.prenom_nom', label: 'Nom et prénoms', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
-    { id: 'pp.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: true },
-    { id: 'pp.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: true },
-    { id: 'pp.nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-    { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
-    { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
-    { id: 'pp.demeurant_ville', label: 'Ville (résidence)', type: 'text', placeholder: 'Conakry', required: true },
-    { id: 'pp.commune', label: 'Commune (résidence)', type: 'text', placeholder: 'Kaloum', required: true },
-    { id: 'pp.quartier', label: 'Quartier (résidence)', type: 'text', placeholder: 'Almamya', required: true },
-    { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
-    { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
-    { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
-    { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: true },
-    { id: 'pp.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: true },
-    { id: 'pp.piece_expire_le', label: 'Expire le', type: 'date', placeholder: '01/01/2030', required: false },
-    { id: 'pp.telephone', label: 'Téléphone', type: 'tel', placeholder: '622 XX XX XX', required: false },
-    { id: 'pp.email', label: 'Email', type: 'email', placeholder: 'email@exemple.com', required: false },
+    ...rendreBimodal([
+        { id: 'pp.civilite', label: 'Civilité', type: 'select', options: ['M.', 'Mme', 'Mlle'], required: true },
+        { id: 'pp.prenom_nom', label: 'Nom et prénoms / Dénomination', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
+        { id: 'pp.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: true },
+        { id: 'pp.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '15/03/1985', required: true },
+        { id: 'pp.nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false },
+        { id: 'pp.situation_matrimoniale', label: 'Situation matrimoniale', type: 'select', options: SITUATIONS_MATRIMONIALES, required: false },
+        { id: 'pp.regime_matrimonial', label: 'Régime matrimonial', type: 'select', options: REGIMES_MATRIMONIAUX, required: false },
+        { id: 'pp.demeurant_ville', label: 'Ville (résidence / siège)', type: 'text', placeholder: 'Conakry', required: true },
+        { id: 'pp.commune', label: 'Commune (résidence / siège)', type: 'text', placeholder: 'Kaloum', required: true },
+        { id: 'pp.quartier', label: 'Quartier (résidence / siège)', type: 'text', placeholder: 'Almamya', required: true },
+        { id: 'pp.pays', label: 'Pays de résidence', type: 'text', placeholder: 'Guinée', required: false, readonly: true },
+        { id: 'pp.piece_type', label: "Type de pièce d'identité", type: 'text', placeholder: 'CNI CEDEAO / Passeport', required: true, datalist: PIECES_TYPES },
+        { id: 'pp.piece_numero', label: 'Numéro de pièce', type: 'text', placeholder: 'GN00123456', required: true, mono: true },
+        { id: 'pp.piece_delivree_le', label: 'Pièce délivrée le', type: 'date', placeholder: '01/01/2020', required: true },
+        { id: 'pp.piece_delivree_a', label: 'Délivrée à', type: 'text', placeholder: 'Conakry', required: true },
+        { id: 'pp.piece_expire_le', label: 'Expire le', type: 'date', placeholder: '01/01/2030', required: false },
+        { id: 'pp.telephone', label: 'Téléphone', type: 'tel', placeholder: '622 XX XX XX', required: false },
+        { id: 'pp.email', label: 'Email', type: 'email', placeholder: 'email@exemple.com', required: false },
+    ], { prefixe: 'pp', section: 'Associé unique', clientRole: 'associe_unique', physiqueParDefaut: true }),
+
     // En queue de section : la représentation est un mode de comparution de cette personne,
     // pas une personne de plus. Elle reste repliée tant que la case n'est pas cochée.
+    // Hors de `rendreBimodal()` à dessein — le sous-espace `repr_*` décrit le mandataire, qui
+    // n'a rien à voir avec la nature de la personne représentée.
     ...blocRepresentation('pp'),
 ];
 
@@ -465,40 +499,65 @@ const SHOW_IF_CLOTURE     = { field: 'dissolution.phase', equals: 'Clôture de l
  * projection, elle, bascule sur le type du client, pas sur le rôle — elle écrit donc déjà
  * `denomination`, `forme`, `rccm` et `representant_legal` dès qu'une fiche morale est liée.
  */
-const PHYSIQUE_SEULEMENT = [
-    'ne_a', 'date_naissance', 'situation_matrimoniale',
-    'piece_type', 'piece_numero', 'piece_delivree_le', 'piece_delivree_a', 'piece_expire_le',
-];
-
-function personneBimodale(prefixe, { section, clientRole, libelleCivilite, libelleNom, showIfSection = null }) {
+/**
+ * Rend bimodal un bloc d'identité déjà préfixé : la même personne peut être physique ou morale.
+ *
+ * Trois gestes, et c'est tout :
+ *
+ *  1. un champ **Nature** est inséré en tête, et c'est **lui** qui porte `section` / `clientRole` ;
+ *  2. les mentions propres aux personnes physiques passent sous condition ;
+ *  3. « Société » rejoint les civilités, et les mentions propres aux personnes morales
+ *     (forme, RCCM, représentant légal et sa qualité) sont ajoutées en queue, sous condition.
+ *
+ * ⚠️ **`section` et `clientRole` sont retirés des champs reçus et portés par « Nature ».**
+ * `groupFieldsBySection()` (lib/partiesPayload.js) ouvre une carte sur le **premier** champ qui
+ * porte `section` : laisser la marque sur la civilité ferait tomber « Nature » — déclaré avant
+ * elle — dans la carte **précédente**. Constaté à l'écran le 2026-09-30, sur la dissolution : le
+ * select « Nature » du requérant s'affichait sous « Décision de dissolution », celui du
+ * liquidateur dans la carte du requérant. Le nettoyage porte sur **tous** les champs reçus, et
+ * pas seulement le premier : `GER_FIELDS[0]` porte `section: 'Gérant'` pour son usage d'origine,
+ * et le spread le recopiait — une carte « Gérant » rouvrait au milieu de la personne.
+ *
+ * Le `prefix` du groupe reste celui du bloc (`partiesPayload.js` lit `fields[0].id`), donc le
+ * payload `parties` n'est pas affecté par ce déplacement.
+ *
+ * ⚠️ `physiqueParDefaut` n'est pas une commodité, c'est une question de **données existantes**.
+ * Avec la condition stricte (`equals: 'Personne physique'`), un bloc dont la clé `type_personne`
+ * n'a jamais existé voit tout son état civil **disparaître** — c'est le cas des 12 dossiers
+ * SARLU/SASU du registre. La forme tolérante (`equals: 'Personne morale', not: true`, supportée
+ * par `estVisible()`) montre l'état civil tant qu'on n'a pas déclaré l'inverse, et rend « Nature »
+ * facultatif : on ne le renseigne que pour dire « c'est une société ». Les blocs répétables et la
+ * dissolution gardent la forme stricte — mesuré, leurs items portent tous la valeur.
+ *
+ * @param champs   champs d'identité, **déjà préfixés**
+ * @param options  prefixe, section, clientRole, showIfSection, physiqueParDefaut
+ */
+function rendreBimodal(champs, { prefixe, section, clientRole, showIfSection = null, physiqueParDefaut = false }) {
     const cle = (id) => `${prefixe}.${id}`;
     const et = (condition) => (showIfSection
         ? { all: [showIfSection, ...(condition ? [condition] : [])] }
         : condition);
 
-    const EST_PHYSIQUE = { field: cle('type_personne'), equals: 'Personne physique' };
-    const EST_MORALE   = { field: cle('type_personne'), equals: 'Personne morale' };
+    const EST_PHYSIQUE = physiqueParDefaut
+        ? { field: cle('type_personne'), equals: 'Personne morale', not: true }
+        : { field: cle('type_personne'), equals: 'Personne physique' };
+    const EST_MORALE = { field: cle('type_personne'), equals: 'Personne morale' };
 
-    const identite = GER_FIELDS.map((f, i) => {
-        const id = f.id.replace(/^ger\./, `${prefixe}.`);
-        const suffixe = f.id.replace(/^ger\./, '');
-        const physiqueSeulement = PHYSIQUE_SEULEMENT.includes(suffixe);
+    const identite = champs.map((f) => {
+        const suffixe = f.id.slice(prefixe.length + 1);
 
         return {
             ...f,
-            id,
-            // Tout l'état civil devient facultatif : une personne morale n'a ni date de
-            // naissance ni pièce d'identité, et les exiger la rendrait impossible à saisir.
-            required: i <= 1 ? f.required : false,
-            showIf: et(physiqueSeulement ? EST_PHYSIQUE : null),
-            ...(i === 0 ? { label: libelleCivilite, section, clientRole, options: ['M.', 'Mme', 'Mlle', 'Société'] } : {}),
-            ...(i === 1 ? { label: libelleNom } : {}),
+            section: null,
+            clientRole: null,
+            showIf: et(PHYSIQUE_SEULEMENT.includes(suffixe) ? EST_PHYSIQUE : f.showIf ?? null),
+            // Une société comparaît sous sa dénomination : la civilité doit pouvoir le dire.
+            ...(suffixe === 'civilite' ? { options: [...(f.options ?? []), 'Société'] } : {}),
         };
     });
 
     return [
-        // Déclaré juste après la civilité et le nom : c'est lui qui commande tout le reste.
-        { id: cle('type_personne'), label: 'Nature', type: 'select', options: ['Personne physique', 'Personne morale'], required: true, showIf: et(null) },
+        { id: cle('type_personne'), label: 'Nature', type: 'select', options: ['Personne physique', 'Personne morale'], required: !physiqueParDefaut, showIf: et(null), section, clientRole },
         ...identite,
         { id: cle('forme'), label: 'Forme juridique', type: 'text', placeholder: 'SARL, SA…', required: false, showIf: et(EST_MORALE) },
         { id: cle('rccm'), label: 'Numéro RCCM', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: false, mono: true, showIf: et(EST_MORALE) },
@@ -508,6 +567,27 @@ function personneBimodale(prefixe, { section, clientRole, libelleCivilite, libel
         { id: cle('representant_legal'), label: 'Représentant légal', type: 'text', placeholder: 'Ibrahima DIALLO', required: false, showIf: et(EST_MORALE) },
         { id: cle('representant_qualite'), label: 'Qualité du représentant légal', type: 'text', placeholder: 'Gérant', required: false, showIf: et(EST_MORALE) },
     ];
+}
+
+/**
+ * Bloc de personne **dérivé du gérant**, avec une politique propre : tout l'état civil devient
+ * facultatif au-delà du nom.
+ *
+ * C'est justifié ici et nulle part ailleurs : le liquidateur et le requérant d'une dissolution
+ * peuvent être des sociétés, et exiger une date de naissance les rendrait insaisissables. Là où
+ * l'étude a besoin d'un état civil complet — la constitution d'une SARLU — on **conditionne**
+ * sans relâcher, en appelant `rendreBimodal()` directement.
+ */
+function personneBimodale(prefixe, { section, clientRole, libelleCivilite, libelleNom, showIfSection = null }) {
+    const identite = GER_FIELDS.map((f, i) => ({
+        ...f,
+        id: f.id.replace(/^ger\./, `${prefixe}.`),
+        required: i <= 1 ? f.required : false,
+        ...(i === 0 ? { label: libelleCivilite } : {}),
+        ...(i === 1 ? { label: libelleNom } : {}),
+    }));
+
+    return rendreBimodal(identite, { prefixe, section, clientRole, showIfSection });
 }
 
 // Liquidateur — dérivé de GER_FIELDS par substitution de préfixe, comme GERANT_ENTRANT_FIELDS.
@@ -677,7 +757,17 @@ export const QUESTIONNAIRES = {
             min: 2, max: 20,
             fields: [
                 { id: 'nom', label: 'Nom / Dénomination', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
-                { id: 'type_personne', label: 'Type', type: 'select', options: ['Personne physique', 'Personne morale'], required: true },
+                // `required: false` depuis le 2026-09-30, et c'est une décision mesurée : ici le
+                // type de personne **ne commande rien**. Aucun `showIf` du bloc ne le consulte,
+                // le rôle n'est pas dans `Partie::ROLES_ADMETTANT_PERSONNE_MORALE` (donc aucun
+                // jeu de pièces n'en dépend) et **aucun des 37 gabarits .docx ne cite la
+                // balise**. Un champ obligatoire sans conséquence est de la friction pure.
+                //
+                // Il n'est pas supprimé pour autant : l'information est réelle — un actionnaire peut être une société — et sa
+                // balise est documentée. Le jour où un gabarit ou un jeu de pièces l'emploie,
+                // il redeviendra exigible. C'est l'inverse des blocs d'associés, où il pilote
+                // neuf champs conditionnels.
+                { id: 'type_personne', label: 'Type', type: 'select', options: ['Personne physique', 'Personne morale'], required: false },
                 { id: 'actions_chiffres', label: "Nombre d'actions", type: 'number', placeholder: '1000', required: true, mono: true },
                 { id: 'nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false },
             ],
@@ -733,13 +823,16 @@ export const QUESTIONNAIRES = {
         {
             id: 'associes', type: 'repeatable', label: 'Associés (responsabilité illimitée)', section: 'Associés', clientRole: 'associe',
             min: 2, max: 10,
-            fields: [
-                { id: 'nom', label: 'Nom et prénoms', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
+            // `schemaPersonne()` plutôt qu'un schéma de cinq champs écrit à la main : le bloc
+            // était le seul des quatre formes à associés qui ne savait pas décrire une personne
+            // morale, alors que `Partie::ROLES_ADMETTANT_PERSONNE_MORALE` admet bien `associe`
+            // — un associé de SNC peut être une société. L'utilitaire apporte « Nature », la
+            // forme, le RCCM et le représentant légal, et aligne le bloc sur SARL, SAS et les
+            // trois schémas de cession. Mesuré avant de le faire : **aucun dossier SNC en
+            // base**, donc pas de migration de données à prévoir.
+            fields: schemaPersonne([
                 { id: 'apport_chiffres', label: 'Apport (GNF)', type: 'number', placeholder: '25000000', required: true, mono: true },
-                { id: 'nationalite', label: 'Nationalité', type: 'text', placeholder: 'Guinéenne', required: false },
-                { id: 'adresse', label: 'Adresse', type: 'text', placeholder: 'Quartier, Commune, Ville', required: false },
-                { id: 'cni', label: "N° pièce d'identité", type: 'text', placeholder: 'GN00123456', required: false, mono: true },
-            ],
+            ]),
         },
         {
             id: 'gerants', type: 'repeatable', label: 'Gérant(s)', section: 'Gérant(s)', clientRole: 'gerant',
@@ -762,7 +855,17 @@ export const QUESTIONNAIRES = {
             min: 2, max: 20,
             fields: [
                 { id: 'nom', label: 'Nom / Dénomination', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
-                { id: 'type_personne', label: 'Type', type: 'select', options: ['Personne physique', 'Personne morale'], required: true },
+                // `required: false` depuis le 2026-09-30, et c'est une décision mesurée : ici le
+                // type de personne **ne commande rien**. Aucun `showIf` du bloc ne le consulte,
+                // le rôle n'est pas dans `Partie::ROLES_ADMETTANT_PERSONNE_MORALE` (donc aucun
+                // jeu de pièces n'en dépend) et **aucun des 37 gabarits .docx ne cite la
+                // balise**. Un champ obligatoire sans conséquence est de la friction pure.
+                //
+                // Il n'est pas supprimé pour autant : l'information est réelle — un membre de GIE est souvent une entreprise — et sa
+                // balise est documentée. Le jour où un gabarit ou un jeu de pièces l'emploie,
+                // il redeviendra exigible. C'est l'inverse des blocs d'associés, où il pilote
+                // neuf champs conditionnels.
+                { id: 'type_personne', label: 'Type', type: 'select', options: ['Personne physique', 'Personne morale'], required: false },
                 { id: 'apport_chiffres', label: 'Apport (GNF)', type: 'number', placeholder: '5000000', required: false, mono: true },
                 { id: 'adresse', label: 'Adresse', type: 'text', placeholder: 'Quartier, Commune, Ville', required: false },
             ],
@@ -791,6 +894,19 @@ export const QUESTIONNAIRES = {
         { id: 'soc.denomination', label: 'Dénomination de la société dissoute', type: 'text', placeholder: 'Faya Distribution SARLU', required: true, section: 'Société dissoute', societePicker: true, publicIntake: true },
         { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: FORMES_SOCIETE, required: true, publicIntake: true },
         { id: 'soc.rccm', label: 'Numéro RCCM', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true, publicIntake: true },
+        // Ces deux champs ne sont pas décoratifs : `dissolution.docx` les consomme dans la phrase
+        // qui **porte la décision** — « la durée de la société qui était initialement fixée à
+        // ${soc.duree_lettres} (${soc.duree}) années, à dater du ${soc.date_constitution}, est
+        // réduite à ${dissolution.duree_reduite} » — et `${soc.date_constitution}` sert aussi à
+        // « immatriculée au RCCM sous le numéro … en date du … ». Non déclarés, les trois
+        // emplacements sortaient **vides** du PV : mesuré sur le gabarit réel le 2026-09-30.
+        //
+        // Aucune table de correspondance à toucher : les deux clés sont déjà dans `CHAMPS`
+        // (societeFields.js) et `Societe::CHAMPS_QUESTIONNAIRE`, donc préremplies et masquées
+        // dès que la fiche les porte. `societes.duree` étant non nulle (défaut 99), le premier
+        // est **toujours** masqué sur une société du registre — c'est l'effet voulu.
+        { id: 'soc.duree', label: 'Durée initiale de la société (années)', type: 'number', placeholder: '99', required: false, mono: true, publicIntake: true },
+        { id: 'soc.date_constitution', label: "Date d'immatriculation au RCCM", type: 'date', required: false, publicIntake: true },
         { id: 'soc.capital_chiffres', label: 'Capital social (GNF)', type: 'number', placeholder: '50 000 000', required: true, mono: true, publicIntake: true },
         { id: 'soc.siege_ville', label: 'Ville du siège', type: 'text', placeholder: 'Conakry', required: true, publicIntake: true },
         { id: 'soc.siege_commune', label: 'Commune du siège', type: 'text', placeholder: 'Kaloum', required: true, publicIntake: true },

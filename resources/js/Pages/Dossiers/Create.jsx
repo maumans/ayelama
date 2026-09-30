@@ -10,7 +10,7 @@ import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutiv
 import { ChoixSociete } from '@/Components/Societes/ChoixSociete';
 import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
 import { mapSocieteToQuestionnaire, estChampSociete, ficheRenseigneChamp, societeDisplayName } from '@/lib/societeFields';
-import { groupFieldsBySection, buildPartiesPayload, roleRepresentant } from '@/lib/partiesPayload';
+import { groupFieldsBySection, buildPartiesPayload, roleRepresentant, champsDuRole, rolesARattacherDoffice, candidatsDuRegistre } from '@/lib/partiesPayload';
 import { piecesRequisesPour } from '@/lib/piecesRequises';
 import { construireFormDataBrouillon, libelleBrouillon, compterPieces } from '@/lib/brouillonDossier';
 import { allerAuBlocant, ancreSection, blocantsEtape, compterParSection, motifsParChamp, OBJET_LONGUEUR_MIN } from '@/lib/blocantsEtape';
@@ -375,6 +375,10 @@ export default function DossierCreate() {
     const [typeActe, setTypeActe] = useState(null);
     const [formValues, setFormValues] = useState({});
     const [clientLinks, setClientLinks] = useState({}); // { [clientRole]: clientObject }
+    // Rôles que le registre a rattachés d'office — { [clientRole]: true }. Sert uniquement à le
+    // **dire** à l'écran : un rattachement automatique qui ne s'annonce pas est indistinguable
+    // d'une saisie du clerc, alors que la liste des associés du registre peut être périmée.
+    const [rolesDepuisRegistre, setRolesDepuisRegistre] = useState({});
     const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
     // { client, group } — édition en place d'une fiche déjà rattachée à un rôle.
     const [editingClient, setEditingClient] = useState(null);
@@ -664,9 +668,37 @@ export default function DossierCreate() {
             const { data } = await axios.get(`/societes/${societe.id}`);
             setSocieteLink(data);
             setFormValues(prev => ({ ...prev, ...mapSocieteToQuestionnaire(data) }));
+            rattacherPersonnesSansAmbiguite(data);
         } catch {
             /* fiche de base déjà rattachée — on n'interrompt pas la saisie */
         }
+    };
+
+    /**
+     * Rattache d'office les personnes que le registre désigne sans ambiguïté.
+     *
+     * La **décision** vit dans `rolesARattacherDoffice()` (lib/partiesPayload.js), pure et
+     * vérifiable hors React ; il ne reste ici que ses effets. ⚠️ Le rattachement se **voit**
+     * (`ClientRoleSection` affiche « Rattaché depuis le registre ») : la liste des associés
+     * n'est jamais mise à jour après une cession de parts, donc ce que le registre propose peut
+     * être périmé. Un préremplissage muet serait le réalignement silencieux que le dépôt refuse
+     * ailleurs.
+     */
+    const rattacherPersonnesSansAmbiguite = (societe) => {
+        const retenus = rolesARattacherDoffice(questionnaire, societe?.personnesConnues ?? [], clientLinks);
+        if (retenus.length === 0) return;
+
+        for (const { role, group, client } of retenus) {
+            applyClientToSection(group, client);
+            addClientToPool(client);
+            setRolesDepuisRegistre(prev => ({ ...prev, [role]: true }));
+        }
+
+        toast.success(
+            'Rattaché depuis le registre : '
+            + retenus.map(({ group, client }) => `${clientDisplayName(client)} — ${group.name?.toLowerCase()}`).join(', ')
+            + '.',
+        );
     };
 
     // Variantes décidées, sous leur forme technique : `modif.types` stocke les libellés affichés
@@ -695,7 +727,28 @@ export default function DossierCreate() {
         return () => controleur.abort();
     }, [typeSelected?.id, step, JSON.stringify(variantesChoisies)]);
 
-    const unlinkSociete = () => setSocieteLink(null);
+    /**
+     * Détache la fiche du registre **et retire ce qu'elle avait projeté**.
+     *
+     * Jusqu'au 2026-09-30 la fonction se contentait de `setSocieteLink(null)` : les clés `soc.*`
+     * restaient dans `formValues`, si bien qu'un dossier délié partait avec la dénomination, le
+     * capital et le siège d'une société à laquelle il n'était plus rattaché — et les champs
+     * réapparaissaient déjà remplis sans qu'on sache d'où.
+     *
+     * On retire **exactement** les clés que `mapSocieteToQuestionnaire` avait posées : purger
+     * tous les `soc.*` emporterait une saisie faite à la main par-dessus la projection.
+     */
+    const unlinkSociete = () => {
+        const projetees = societeLink ? Object.keys(mapSocieteToQuestionnaire(societeLink)) : [];
+        if (projetees.length > 0) {
+            setFormValues(prev => {
+                const next = { ...prev };
+                for (const cle of projetees) delete next[cle];
+                return next;
+            });
+        }
+        setSocieteLink(null);
+    };
 
     /**
      * Recharge la fiche rattachée depuis le serveur — après un dépôt de pièce constitutive, pour
@@ -714,9 +767,14 @@ export default function DossierCreate() {
 
     /**
      * Verse une personne connue de la société aux « clients du dossier », d'où elle est
-     * réutilisable comme cédant, gérant sortant, souscripteur… Ne l'affecte à aucun rôle
-     * d'office : un associé d'origine peut avoir déjà cédé toutes ses parts, c'est au clerc
-     * de dire à quel titre il intervient.
+     * réutilisable comme cédant, gérant sortant, souscripteur… Ne l'affecte à aucun rôle : un
+     * associé d'origine peut avoir déjà cédé toutes ses parts, c'est au clerc de dire à quel
+     * titre il intervient.
+     *
+     * ⚠️ C'est le chemin des cas **ambigus** seulement. Depuis le 2026-09-30,
+     * {@see rattacherPersonnesSansAmbiguite} affecte d'office le rôle quand le registre ne
+     * connaît qu'un seul candidat pour lui — la réserve ci-dessus ne valant que dès qu'il y en
+     * a plusieurs.
      */
     const importerPersonneConnue = (personne) => {
         if (!personne?.client) {
@@ -757,7 +815,8 @@ export default function DossierCreate() {
 
     const applyClientToSection = (group, client) => {
         const prefix = group.fields[0].id.split('.')[0];
-        const fieldIds = group.fields.map(f => f.id);
+        // Le schéma **complet** du rôle, pas le groupe rendu : voir champsDuRole().
+        const fieldIds = champsDuRole(questionnaire, group.clientRole);
         const mapped = mapClientToPrefixedFields(client, prefix, fieldIds);
         setFormValues(prev => ({ ...prev, ...mapped }));
         setClientLinks(prev => ({ ...prev, [group.clientRole]: client }));
@@ -772,7 +831,7 @@ export default function DossierCreate() {
      */
     const applyClientToRepresentant = (group, client) => {
         const prefix = group.fields[0].id.split('.')[0];
-        const fieldIds = group.fields.map(f => f.id);
+        const fieldIds = champsDuRole(questionnaire, group.clientRole);
         const mapped = mapClientToPrefixedFields(client, prefix, fieldIds, 'repr_');
         setFormValues(prev => ({ ...prev, ...mapped }));
         setClientLinks(prev => ({ ...prev, [roleRepresentant(group.clientRole)]: client }));
@@ -780,6 +839,13 @@ export default function DossierCreate() {
 
     const unlinkClientFromSection = (role) => {
         setClientLinks(prev => {
+            const next = { ...prev };
+            delete next[role];
+            return next;
+        });
+        // Une fois détaché, le rôle n'est plus « depuis le registre » : s'il est relu ensuite à la
+        // main, la mention mentirait.
+        setRolesDepuisRegistre(prev => {
             const next = { ...prev };
             delete next[role];
             return next;
@@ -1679,6 +1745,13 @@ export default function DossierCreate() {
                                                                 champsManquants={champsIdentiteManquants(group)}
                                                                 saisieLibre={!!saisieLibreRoles[group.clientRole]}
                                                                 onToggleSaisieLibre={(v) => toggleSaisieLibre(group.clientRole, v)}
+                                                                depuisRegistre={!!rolesDepuisRegistre[group.clientRole]}
+                                                                suggestionsRegistre={candidatsDuRegistre(societeLink?.personnesConnues, group.clientRole)}
+                                                                onSelectRegistre={(client) => {
+                                                                    applyClientToSection(group, client);
+                                                                    addClientToPool(client);
+                                                                    setRolesDepuisRegistre(prev => ({ ...prev, [group.clientRole]: true }));
+                                                                }}
                                                             >
                                                                 {grille}
 

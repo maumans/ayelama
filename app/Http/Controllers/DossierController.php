@@ -893,6 +893,10 @@ class DossierController extends Controller
                 'pieces' => $dossier->societe->exigePiecesConstitutives()
                     ? $dossier->societe->piecesConstitutivesChecklist()
                     : [],
+                // Le modal d'édition du questionnaire propose les mêmes personnes que
+                // l'assistant de création : désigner le requérant d'une dissolution ne doit
+                // pas être plus difficile après coup qu'à la création.
+                'personnesConnues' => $dossier->societe->personnesConnuesPourEcran(),
             ] : null,
         ]);
     }

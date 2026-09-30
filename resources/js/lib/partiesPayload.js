@@ -68,6 +68,19 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks, stag
             cle_locale: cleRepresente,
             role: group.clientRole,
             client_id: client?.id ?? undefined,
+            // ⚠️ **La nature de la personne, comme la branche répétable le fait déjà** (voir
+            // plus bas). Son absence ici était un trou silencieux : mesuré le 2026-09-30,
+            // **39 parties sur 41 avaient `type_personne` à NULL**, et rien ne le dérive côté
+            // serveur. Conséquence, `Partie::piecesRequisesPour()` retombait sur « physique » —
+            // l'écran affichait le jeu de pièces d'une société (il lit `formValues`), le
+            // serveur en exigeait un autre. Cocher « Personne morale » n'avait donc aucun effet
+            // au-delà de l'affichage.
+            //
+            // La fiche liée prime sur la saisie : c'est elle qui fait foi sur la nature d'une
+            // personne, et le questionnaire n'en est qu'une projection (décision #33).
+            type_personne: client
+                ? client.type
+                : typePersonneCanonique(formValues[`${prefix}.type_personne`]),
             // Emplacement de ce rôle dans le questionnaire : c'est ce qui permet au
             // serveur de reprojeter l'identité depuis la fiche client sans connaître
             // le schéma (qui vit uniquement ici, en JS). Voir ClientProjectionService.
@@ -236,6 +249,125 @@ function representationDuRepresente(valeurs, prefixe, cle, parties, { client = n
 // dénomination, objet social, description du bien… jamais les champs calculés
 // ou juridiques comme le RCCM d'une société en cours de création, la taxe de
 // plus-value ou le rang hypothécaire).
+/**
+ * Ne garde d'une condition `showIf` que ce qui dépend des champs du bloc lui-même.
+ *
+ * Le formulaire public doit évaluer les `showIf` — sans quoi les branches « personne physique »
+ * et « personne morale » s'affichent ensemble — mais il ne peut pas évaluer **toutes** les
+ * conditions : certaines désignent des champs que le client ne voit pas.
+ *
+ * Le cas qui l'impose : les blocs de la dissolution sont conditionnés par
+ * `dissolution.phase`, qui n'est **pas** `publicIntake` — qualifier la phase d'une procédure est
+ * une décision de l'étude, pas du client, exactement comme `modif.types`. Évaluer cette
+ * condition rendrait tout le bloc invisible et le formulaire inutilisable.
+ *
+ * Or l'étude a **déjà** tranché en créant la demande pour ce rôle. La règle est donc :
+ * **la visibilité d'un champ de rôle ne peut dépendre que d'un autre champ du même rôle.**
+ * Ce qui dépend d'ailleurs est une décision déjà prise, pas une question à poser.
+ *
+ * @param showIf  condition d'origine
+ * @param ids     identifiants des champs du bloc
+ */
+function conditionsInternes(showIf, ids) {
+    if (!showIf) return null;
+
+    if (showIf.all !== undefined) {
+        const restantes = showIf.all.map(c => conditionsInternes(c, ids)).filter(Boolean);
+        if (restantes.length === 0) return null;
+        return restantes.length === 1 ? restantes[0] : { all: restantes };
+    }
+
+    return ids.has(showIf.field) ? showIf : null;
+}
+
+/**
+ * Tous les champs d'un rôle, **schéma complet** — pas seulement ceux visibles à l'instant T.
+ *
+ * ⚠️ Rattacher une fiche doit remplir la section **entière**, et non la partie qui se trouve
+ * affichée au moment du clic. Le cas qui l'impose : dans un bloc bimodal, l'état civil est
+ * conditionné à `type_personne`. Tant que la nature n'est pas connue, ces champs sont invisibles
+ * — donc absents du groupe rendu. Or c'est le rattachement lui-même qui pose la nature : les
+ * huit champs d'état civil apparaissent **juste après**, et resteraient **vides** s'ils
+ * n'étaient pas dans la liste passée à la projection. Vides et masqués, puisque ce sont des
+ * champs d'identité : la famille de défauts de la décision 69.
+ *
+ * Projeter une clé actuellement invisible est sans risque — `purgerChampsInvisibles()` nettoie
+ * à l'envoi ce qui l'est resté. L'oublier, si.
+ *
+ * `RepeatableGroup.applyClient()` n'a jamais eu ce défaut : il passe `fields`, le schéma de
+ * l'item, jamais un sous-ensemble filtré.
+ */
+/**
+ * Quels rôles le registre désigne-t-il **sans ambiguïté** ?
+ *
+ * Le chemin existait en entier — `societes.dossier_id` → les `parties` du dossier constitutif →
+ * `Societe::associesConnus()` → `personnesConnues` → les puces du sélecteur — et s'arrêtait au
+ * vivier : désigner l'associé unique d'une SARLU demandait **trois clics dans deux endroits**
+ * pour une information que la base porte déjà.
+ *
+ * ⚠️ **Un seul candidat, sinon rien.** L'objection qui a fait écrire `importerPersonneConnue()`
+ * sans affectation de rôle — un associé d'origine peut avoir cédé toutes ses parts — reste
+ * entière dès qu'il y a plusieurs associés : on ne choisit pas à la place du clerc. Elle ne dit
+ * rien, en revanche, du cas où le registre ne connaît **qu'une** personne pour ce rôle.
+ *
+ * Fonction **pure**, hors du composant, pour deux raisons : la règle est vérifiable sans rendre
+ * de React (contrôle E de `tools/verifier-sections-questionnaire.mjs`), et elle est ainsi
+ * énoncée à un seul endroit pour les écrans qui voudront la partager.
+ *
+ * @param personnesConnues  tel que `SocieteController::show()` le renvoie : `{role, client}`
+ * @param clientLinks       rôles déjà pourvus, qu'on ne touche jamais
+ * @returns {Array<{role: string, group: object, client: object}>}
+ */
+/**
+ * Les personnes que le registre connaît pour ce rôle, et qui sont **rattachables**.
+ *
+ * Une personne sans fiche client n'en est pas : la rattacher créerait une partie coquille, sans
+ * identité à projeter. Le sélecteur la grise déjà dans la carte de la société ; ici on l'écarte.
+ *
+ * Une seule définition pour deux usages qui doivent rester d'accord — le rattachement d'office
+ * ({@see rolesARattacherDoffice}) et les propositions affichées dans la carte du rôle. Qu'ils
+ * divergent, et la carte proposerait quelqu'un que la règle refuse, ou l'inverse.
+ */
+export function candidatsDuRegistre(personnesConnues = [], clientRole = null) {
+    if (!clientRole) return [];
+
+    return personnesConnues.filter(p => p?.role === clientRole && p?.client);
+}
+
+export function rolesARattacherDoffice(questionnaire, personnesConnues = [], clientLinks = {}) {
+    const retenus = [];
+    for (const group of groupFieldsBySection(questionnaire)) {
+        const role = group.clientRole;
+        if (!role || clientLinks[role]) continue;
+
+        // ⚠️ **Jamais un bloc répétable.** `applyClientToSection()` déduit le préfixe de
+        // `fields[0].id` : sur un répétable, ce serait le nom du bloc (`associes`), et la
+        // projection écrirait des clés bâtardes du genre `associes.nom` à côté du vrai tableau.
+        // Une ligne se rattache par `RepeatableGroup.applyClient()`, qui sait où l'écrire.
+        //
+        // Le cas ne peut pas se produire aujourd'hui — `associesConnus()` ne rend que
+        // `associe`, `associe_unique` et `gerant`, et aucun questionnaire à sélecteur de
+        // société ne porte ces rôles en répétable — mais la garde coûte une ligne et le
+        // dégât serait silencieux.
+        if (group.fields[0]?.type === 'repeatable') continue;
+
+        // **Un seul candidat, sinon rien** — deux associés d'origine, et c'est au clerc de
+        // dire lequel intervient. La carte du rôle les proposera tous les deux.
+        const candidats = candidatsDuRegistre(personnesConnues, role);
+        if (candidats.length !== 1) continue;
+
+        retenus.push({ role, group, client: candidats[0].client });
+    }
+
+    return retenus;
+}
+
+export function champsDuRole(questionnaire, clientRole) {
+    const groupe = groupFieldsBySection(questionnaire).find(g => g.clientRole === clientRole);
+
+    return (groupe?.fields ?? []).map(f => f.id);
+}
+
 export function getPublicIntakeFields(questionnaire, clientRole) {
     const groups = groupFieldsBySection(questionnaire);
     const roleGroup = clientRole ? groups.find(g => g.clientRole === clientRole) : null;
@@ -257,10 +389,10 @@ export function getPublicIntakeFields(questionnaire, clientRole) {
     // Le formulaire public **n'expose jamais** la représentation. Trois raisons, dont deux
     // structurelles :
     //
-    //  1. `Intake/Show.jsx` rend `roleFields` brut, sans évaluer `showIf`, et exige tous les
-    //     champs `required`. Le bloc y apparaîtrait donc **déployé en entier**, et ses champs
-    //     conditionnellement obligatoires seraient exigés **sans condition** : un client qui ne
-    //     se fait pas représenter ne pourrait plus envoyer sa demande.
+    //  1. ~~`Intake/Show.jsx` rend `roleFields` brut, sans évaluer `showIf`~~ — **corrigé le
+    //     2026-09-30** : l'écran évalue désormais les conditions, comme les deux autres moteurs
+    //     de rendu. Cette raison-là est donc tombée ; les deux suivantes, qui sont les vraies,
+    //     tiennent seules.
     //  2. Qualifier un mandat est un acte juridique — un pouvoir est-il valable, une tutelle
     //     existe-t-elle, un gérant peut-il engager la société. Ce n'est pas au client de le
     //     dire. Même parti que `modif.types`, dont le commentaire porte déjà cette règle.
@@ -271,6 +403,13 @@ export function getPublicIntakeFields(questionnaire, clientRole) {
     // partagé, et une édition ultérieure le réexposerait en silence. Un test l'affirme pour les
     // 16 questionnaires et les 19 rôles.
     roleFields = roleFields.filter(f => !estChampRepresentation(f.id));
+
+    // Les conditions résiduelles sont celles que le client peut réellement satisfaire —
+    // typiquement « cette personne est-elle physique ou morale ». Voir conditionsInternes().
+    {
+        const ids = new Set(roleFields.map(f => f.id));
+        roleFields = roleFields.map(f => ({ ...f, showIf: conditionsInternes(f.showIf, ids) }));
+    }
 
     const extraFields = questionnaire
         .filter(f => f.publicIntake && f.type !== 'repeatable')

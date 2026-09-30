@@ -163,6 +163,18 @@ Pièces requises, par rôle de la personne :
 | Associé personne **morale** | Statuts · Déclaration RCCM · PV de l'assemblée générale autorisant la participation · CNI/passeport du représentant légal |
 | Gérant sortant, président de séance, secrétaire de séance | *aucune* — ces personnes sont mentionnées à l'acte, elles n'y apportent rien |
 
+> **Le champ « Nature »** (personne physique / personne morale) décide de ce que l'écran demande
+> et des pièces exigées. Il n'apparaît que là où il change quelque chose : associé, associé
+> unique, cédant, cessionnaire, souscripteur, liquidateur. Choisir « Personne morale » remplace
+> l'état civil (naissance, pièce d'identité) par la forme juridique, le RCCM et le représentant
+> légal — et fait basculer la liste des pièces.
+>
+> **Dès qu'une fiche client est rattachée, ce champ disparaît** : la fiche dit déjà si elle
+> décrit une personne ou une société. On ne le renseigne que pour une saisie sans fiche.
+>
+> Sur les **actionnaires d'une SA** et les **membres d'un GIE**, le champ existe pour
+> information mais n'est pas obligatoire : aucune pièce ni aucun acte n'en dépend aujourd'hui.
+
 #### Onglet « Actes & documents »
 
 Liste des fichiers du dossier, classés par type : **Acte principal, Annexe, Procédure, Lettre,

@@ -151,7 +151,7 @@ l'office.
 | Règle | Comportement |
 |---|---|
 | **Capital minimum** | Une **SA** (et une SAU) exige un capital minimum — paramétrable, par défaut 140 000 000 GNF. SARL, SARLU, SAS, SASU, SNC, SCS : pas de minimum. Le **GIE** peut être créé sans capital. Message : « Capital insuffisant : une *forme* exige au moins *X* GNF (capital saisi : *Y* GNF). » |
-| **Associé unique** | Les formes unipersonnelles sont **SASU, SARLU et SAU**. Une forme unipersonnelle avec plusieurs associés est refusée ; une forme pluripersonnelle avec un seul associé aussi. |
+| **Associé unique** | Les formes unipersonnelles sont **SASU, SARLU et SAU**. Une forme unipersonnelle avec plusieurs associés est refusée ; une forme pluripersonnelle avec un seul associé aussi. **L'associé unique peut être une société** — c'est un montage courant : choisissez « Personne morale » dans le champ *Nature*, et l'écran demande la forme juridique, le RCCM et le représentant légal au lieu de l'état civil. Il en va de même pour les associés d'une SNC. |
 | **Commissaire aux comptes** | Obligatoire en **SA** : « Un commissaire aux comptes titulaire est obligatoire pour une SA. » |
 | **Dénomination** | Contrôle d'unicité contre le registre des sociétés, après normalisation. |
 | **Mineurs** | Un mineur **ne peut pas** être associé d'une forme à responsabilité illimitée et solidaire. Un associé mineur doit avoir un **représentant légal** renseigné, avec sa qualité, sur la fiche client. |
@@ -349,6 +349,25 @@ l'allure qu'elle avait.
 
 L'application recalcule parfois une facture entière — quand l'assiette change, par exemple. Les
 remises accordées sont **retrouvées et réappliquées**, ligne par ligne.
+
+---
+
+## 6 ter. Dissolution et clôture : deux dossiers, dans l'ordre
+
+Une dissolution-liquidation se traite en **deux dossiers** : l'assemblée qui dissout et nomme le
+liquidateur, puis, des mois ou des années plus tard, celle qui approuve les comptes et clôture.
+
+L'ordre n'est pas une convention : **la clôture ne peut pas être enregistrée avant que la
+dissolution ait produit son effet.** Tant que le dossier de dissolution n'a pas atteint
+l'Expédition, la fiche société reste « active » au registre, et le dossier de clôture est bloqué.
+
+> **Le blocage vous dit où en est la procédure.** S'il existe déjà un dossier portant la phase
+> attendue, il le nomme, indique son étape et propose de l'ouvrir : « Le dossier SOC-2026-0019
+> porte déjà la phase *Dissolution anticipée*, mais il est à l'étape *Formalités* ». N'en ouvrez
+> pas un second — faites avancer celui-là.
+>
+> Ce n'est que s'il n'existe **aucun** dossier de dissolution que le message vous invite à en
+> ouvrir un, ou à corriger le statut de la fiche s'il est réellement erroné.
 
 ---
 

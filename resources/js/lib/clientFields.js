@@ -177,6 +177,24 @@ export function mapClientToPrefixedFields(client, prefix, fieldIds, sousPrefixe 
         set('rccm', client.rccm);
     }
 
+    // ⚠️ **La nature de la personne, projetée comme le reste de l'identité.**
+    // `type_personne` figure dans SUFFIXES_IDENTITE — donc le champ « Nature » disparaît de
+    // l'écran dès qu'une fiche est rattachée — mais cette fonction ne le produisait pas : le
+    // champ était masqué **et vide**, le pire des deux mondes. `buildPartieFields()` le pose
+    // bien (l. ~215) et `ClientProjectionService` aussi côté serveur, si bien que le dossier
+    // enregistré était correct : seul le formulaire mentait, en réclamant « Fiche incomplète
+    // pour cet acte — il manque : Nature » sur une fiche entièrement remplie.
+    //
+    // Le défaut était **invisible jusqu'au 2026-09-30** : `{prefixe}.type_personne` était rangé
+    // dans la carte précédente, hors du groupe, donc `champsIdentiteManquants()` — qui ne
+    // parcourt que `group.fields` — ne le voyait pas. Remettre le champ dans sa carte a
+    // découvert le trou, il ne l'a pas créé.
+    //
+    // Mesuré : sur les 37 suffixes d'identité, trois n'étaient projetés pour **aucun** des deux
+    // types (`type_personne`, `cni`, `domicile`) ; seul `type_personne` est `required` dans une
+    // section liée à un rôle, donc seul il bloquait.
+    set('type_personne', client.type === 'physique' ? 'Personne physique' : 'Personne morale');
+
     set('quartier', client.quartier);
     set('commune', client.commune);
     set('demeurant_ville', client.demeurant_ville);

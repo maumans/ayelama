@@ -450,10 +450,37 @@ class ReglesSocieteService
             return [];
         }
 
+        // La phase à laquelle il manque d'avoir produit son effet, et le dossier qui la porte
+        // peut-être déjà. Sans cette recherche, le message envoyait ouvrir un dossier qui
+        // existe — voir dossierFrerePortant().
+        $attendue = $phase === VarianteDissolution::ClotureLiquidation
+            ? VarianteDissolution::Dissolution
+            : VarianteDissolution::ClotureLiquidation;
+
+        $frere = $this->dossierFrerePortant($dossier, $attendue);
+
+        if ($frere) {
+            return ['dissolution_cycle_vie' => [[
+                'texte' => sprintf(
+                    'La société « %s » est %s au registre. Le dossier %s porte déjà la phase « %s », '
+                    . "mais il est à l'étape « %s » : la fiche ne changera d'état qu'à son Expédition. "
+                    . 'Faites-le avancer avant de poursuivre ici — n\'en ouvrez pas un second.',
+                    $societe->denomination,
+                    mb_strtolower($actuel->label()),
+                    $frere->reference,
+                    $attendue->label(),
+                    $frere->etape->label(),
+                ),
+                // La sortie n'est pas dans ce dossier : elle est dans l'autre.
+                'lien'   => '/dossiers/' . $frere->reference,
+                'action' => 'Ouvrir ' . $frere->reference,
+            ]]];
+        }
+
         $message = match ($phase) {
             VarianteDissolution::Dissolution => sprintf(
                 'La société « %s » est déjà %s au registre%s. Une seconde dissolution ne peut pas être prononcée : '
-                . "pour en clôturer la liquidation, ouvrez un dossier en phase « %s ».",
+                . "pour en clôturer la liquidation, ouvrez un dossier en phase « %s ".'".',
                 $societe->denomination,
                 mb_strtolower($actuel->label()),
                 $societe->dissolution_at ? ' depuis le ' . $societe->dissolution_at->format('d/m/Y') : '',
@@ -469,6 +496,39 @@ class ReglesSocieteService
         };
 
         return ['dissolution_cycle_vie' => [$message]];
+    }
+
+    /**
+     * Un autre dossier de cette société porte-t-il déjà la phase attendue ?
+     *
+     * ⚠️ **Le message le plus nuisible est celui qui donne un conseil faux.** Constaté le
+     * 2026-09-30 sur AFG SARLU : le dossier de clôture était bloqué par « ouvrez d'abord un
+     * dossier en phase Dissolution anticipée » alors que SOC-2026-0019 le portait déjà, à
+     * l'étape Formalités. Le clerc était envoyé créer un doublon — ou pire, invité par la
+     * seconde moitié de la phrase à « corriger le statut de la fiche », c'est-à-dire à écrire
+     * au registre un état que l'acte n'a pas encore produit.
+     *
+     * Le blocage reste le même — on ne clôture pas une liquidation qui n'est pas ouverte —
+     * mais il dit désormais **où en est** la procédure au lieu d'en demander une autre. C'est
+     * la doctrine du dépôt : un blocage énuméré vaut mieux qu'un bouton grisé, à condition
+     * qu'il nomme la sortie.
+     *
+     * Le plus avancé des candidats : s'il y a deux tentatives, c'est celle qui aboutira.
+     */
+    private function dossierFrerePortant(Dossier $dossier, VarianteDissolution $phase): ?Dossier
+    {
+        if (! $dossier->societe_id) {
+            return null;
+        }
+
+        return Dossier::query()
+            ->where('societe_id', $dossier->societe_id)
+            ->whereKeyNot($dossier->getKey())
+            ->with(['typeActe', 'questionnaire'])
+            ->get()
+            ->filter(fn (Dossier $autre) => in_array($phase, VariantesTypeActe::duDossier($autre), true))
+            ->sortByDesc(fn (Dossier $autre) => $autre->etape?->ordre() ?? 0)
+            ->first();
     }
 
     /**

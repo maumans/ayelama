@@ -355,7 +355,7 @@ trompait de vingt jours, et un calcul ne s'y trompe pas.
 |--------|------------|------|-----------------------|
 | `${soc.objet_social}` | Objet social (liste des secteurs d'activité) | Texte long | `OBJET SOCIAL`, `(DÉCRIRE L'ACTIVITÉ)`, `………………………………` |
 | `${soc.duree}` | Durée de la société en années | Entier (déf. `99`) | `DURÉE : … ANS`, `QUATRE-VINGT-DIX-NEUF (99) ANS` |
-| `${soc.exercice_social}` | Période de l'exercice | Texte (déf. `1er janvier au 31 décembre`) | `DU … AU …`, `EXERCICE SOCIAL` |
+| ~~`${soc.exercice_social}`~~ | ⚠️ **Non résolvable** — la colonne `societes.exercice_social` existe et porte un défaut, mais aucune clé `soc.exercice_social` n'est projetée et **aucun des 37 gabarits ne cite cette balise** (mesuré le 2026-09-30). L'employer laisserait un trou dans l'acte. Donnée de registre, pas de questionnaire | — | — |
 
 ### 5.5 Direction (variable selon la forme)
 
@@ -431,7 +431,7 @@ trompait de vingt jours, et un calcul ne s'y trompe pas.
 |--------|------------|-----------|
 | `${soc.rccm_numero}` | Numéro RCCM obtenu | `RCCM N° …………` |
 | `${soc.nif}` | Numéro d'Identification Fiscale | `NIF …………` |
-| `${soc.jal_journal}` | Nom du journal d'annonces légales | `JOURNAL …………`, `JAL : …………` |
+| ~~`${soc.jal_journal}`~~ | ⚠️ **Non résolvable** — `societes.jal_journal` est bien **écrite** au retour de la formalité JAL ({@see DonneeAuRetour::JalJournal}), mais n'est projetée nulle part et **aucun gabarit ne la cite** (mesuré le 2026-09-30) : l'insertion est ce qu'on *envoie* au journal, elle ne peut pas en porter le nom. Donnée de registre | — |
 
 ---
 

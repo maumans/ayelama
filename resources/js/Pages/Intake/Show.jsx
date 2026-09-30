@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import GuestPublicLayout from '@/Layouts/GuestPublicLayout';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields } from '@/data/questionnaires';
 import { getPublicIntakeFields, groupFieldsBySection } from '@/lib/partiesPayload';
 import { buildPartieFields } from '@/lib/clientFields';
 import { Input } from '@/Components/ui/input';
@@ -69,7 +69,21 @@ export default function IntakeShow() {
 
     const questionnaireKey = demande ? TYPE_ACTE_CODE_MAP[demande.typeActe.code] : null;
     const questionnaire = questionnaireKey ? (QUESTIONNAIRES[questionnaireKey] ?? []) : [];
-    const { roleFields, roleLabel, extraFields, repeatableFieldId } = getPublicIntakeFields(questionnaire, demande?.clientRole);
+    const { roleFields: tousRoleFields, roleLabel, extraFields: tousExtraFields, repeatableFieldId } = getPublicIntakeFields(questionnaire, demande?.clientRole);
+
+    // ⚠️ **Les `showIf` sont évalués ici comme dans les deux autres moteurs de rendu.**
+    // Ils ne l'étaient pas : `FieldGroup` recevait les champs bruts, si bien que les branches
+    // « personne physique » et « personne morale » s'affichaient **ensemble** — nom de jeune
+    // fille à côté du numéro RCCM — et que des champs conditionnellement obligatoires étaient
+    // exigés **sans condition**, bloquant l'envoi sur une case que le client n'avait aucune
+    // raison de remplir.
+    //
+    // Le dépôt connaissait le défaut : le commentaire de `getPublicIntakeFields()` l'invoque
+    // pour exclure toute la représentation du formulaire public. Il le contournait au lieu de
+    // le corriger, et CLAUDE.md désigne pourtant ces trois écrans comme un même point de
+    // contrôle (`Dossiers/Create`, le modal de `Dossiers/Show`, `Intake/Show`).
+    const roleFields  = getVisibleFields(tousRoleFields, formValues);
+    const extraFields = getVisibleFields(tousExtraFields, formValues);
     const extraGroups = groupFieldsBySection(extraFields);
 
     const officeNom = 'Ayelema'; // branding statique côté page publique (pas de session pour lire les Settings)

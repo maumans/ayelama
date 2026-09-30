@@ -27,7 +27,7 @@ périmètre**, sans qu'il faille le demander :
 |---|---|
 | un champ de questionnaire (type, contrôle, affichage) | `ChampQuestionnaire.jsx`, utilisé par `Dossiers/Create`, le modal de `Dossiers/Show` et `Intake/Show` |
 | l'identité projetée dans `donnees` | `clientFields.js` **et** `ClientProjectionService.php` — miroirs assumés |
-| la fiche société projetée dans `donnees` | `societeFields.js` **et** `Societe::versQuestionnaire()` / `depuisQuestionnaire()` / `completerDepuisQuestionnaire()` — **les deux sens** |
+| la fiche société projetée dans `donnees` | `resources/js/lib/societeFields.js` **et** `Societe::versQuestionnaire()` / `depuisQuestionnaire()` / `completerDepuisQuestionnaire()` — **les deux sens** ; `PariteProjectionSocieteTest` verrouille la correspondance |
 | une liste fermée (formes, régimes, situations) | la constante PHP **et** son miroir dans `questionnaires.js`, plus le test de parité |
 | une conversion de format | **le sens inverse** existe presque toujours |
 | une règle de validation de fiche | la même cohérence côté questionnaire, et réciproquement |
@@ -35,6 +35,12 @@ périmètre**, sans qu'il faille le demander :
 | un champ de `parties` envoyé par le frontend | `StoreDossierRequest::partiesRules()` — non validé = **écarté par `validated()`**, donc jamais persisté, en silence |
 | la **représentation** d'une partie (procuration, tutelle, représentant légal) | `Partie` (colonnes + jeux de pièces), `MotifRepresentation`, `ClientProjectionService::valeursRepresentation()` **et** `MentionComparutionService` — le sous-espace `repr_*` doit rester masqué en saisie, sinon il est tapé puis écrasé |
 | un `match` exhaustif d'enum PHP | son équivalent JS, qui n'a **aucun** filet (`ETAPE_ORDER`, `ETAPE_TAB`, `getStepBlockers`) |
+| l'ordre des champs d'une **section** de questionnaire | `groupFieldsBySection()` ouvre une carte au **premier** champ portant `section` : un champ déclaré avant lui tombe dans la carte précédente, sans erreur. Et un spread (`...GER_FIELDS[0]`) peut réintroduire un `section` hérité. Lancer `node tools/verifier-sections-questionnaire.mjs` |
+| un suffixe de `SUFFIXES_IDENTITE` (`clientFields.js`) | il est **masqué** dès qu'une fiche est liée : `mapClientToPrefixedFields()` doit donc le **produire**, sinon le champ est masqué *et* vide et la carte réclame une donnée qu'on ne peut plus saisir. Trois projections à tenir d'accord — le formulaire (`mapClientToPrefixedFields`), le payload (`buildPartieFields`) et le serveur (`ClientProjectionService`). Même outil, contrôle B |
+| un champ que le formulaire permet de **déclarer** sur une partie | `buildPartiesPayload()` a **deux branches** — sections scalaires et blocs répétables — et elles divergent en silence : `type_personne` n'était envoyé que par la seconde, d'où **39 parties sur 41** à NULL. Le serveur a des replis qui rendent l'oubli muet. Même outil, contrôle C |
+| un `showIf` sur un champ de rôle | les **trois** moteurs doivent l'évaluer, `Intake/Show.jsx` compris. ⚠️ Le formulaire public ne peut évaluer que les conditions portant sur **un champ du même rôle** (`conditionsInternes()`) : le reste désigne des champs que le client ne voit pas, et que l'étude a déjà tranchés |
+| la **projection d'une fiche** sur une section | elle part de `champsDuRole()` — le schéma **complet** — et jamais du groupe rendu : dans un bloc bimodal, les champs que le rattachement fait apparaître ne sont pas encore visibles au moment où il a lieu. Même outil, contrôle D |
+| ce qui est **capté au retour d'une formalité** | `DonneeAuRetour::colonne()`, `EnregistrementRetourFormalite` **et** le `donnees_au_retour` semé sur les barèmes — semer par libellé a déjà servi les copies de `SOC-MOD` / `SOC-DIS`, qui ne délivrent pas ces données |
 
 ### Mesurer, pas supposer
 
@@ -71,6 +77,13 @@ Un défaut silencieux coûte plus que son équivalent visible. Préférer systé
 ⚠️ **Ce que la construction ne rattrape pas** : `vite build` ignore les erreurs de portée et de zone
 morte temporelle. Une constante déclarée sous son usage passe la construction et rend une page
 blanche. Après un changement JS structurel, charger réellement le module.
+
+Elle ne voit pas non plus une **structure de données valide mais fausse**. Un champ rangé dans la
+mauvaise carte de questionnaire est un objet parfaitement correct : la construction passe, la page
+s'affiche, et le select « Nature » du requérant apparaît sous « Décision de dissolution » pendant
+deux semaines sans que rien ne le signale. Charger le module et **inspecter le résultat**, pas
+seulement constater qu'il se charge — c'est ainsi qu'une seconde variante du même défaut a été
+trouvée dans la minute qui a suivi la correction de la première.
 
 ---
 

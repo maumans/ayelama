@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Search, Building2, BuildingIcon, X, Check, Loader2, PlusCircle, Users, ExternalLink } from 'lucide-react';
+import { Search, Building2, BuildingIcon, X, Check, Loader2, Users, ExternalLink } from 'lucide-react';
 
 /**
  * Sélecteur de société du registre (`/societes/autocomplete`).
@@ -25,7 +25,6 @@ export function SocietePicker({
     linked,
     onSelect,
     onUnlink,
-    onCreateNew,
     onImporterPersonnes,
     placeholder,
 }) {
@@ -184,14 +183,14 @@ export function SocietePicker({
                             </button>
                         ))}
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => { onCreateNew(); setOpen(false); }}
-                        className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-sm text-seal-hover transition-colors hover:bg-seal-light"
-                    >
-                        <PlusCircle className="h-3.5 w-3.5" />
-                        Ajouter une société absente du registre
-                    </button>
+                    {/* ⚠️ Il y avait ici un bouton « Ajouter une société absente du registre » qui
+                        appelait `onCreateNew()` sans garde — or `ChoixSociete` ne transmet pas
+                        cette prop, et aucun appelant ne la transmet : le clic levait un
+                        `TypeError` et fermait le formulaire sur une page blanche. Retiré le
+                        2026-09-30 plutôt que branché, parce que le chemin existe déjà juste
+                        au-dessus — l'option « Société hors registre » — et que `ChoixSociete`
+                        l'indique en toutes lettres sous le sélecteur. Deux portes pour la même
+                        pièce, dont une casseée. */}
                 </div>
             )}
         </div>

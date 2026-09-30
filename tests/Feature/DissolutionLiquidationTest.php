@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Models\UserRole;
 use App\Notifications\EcheanceLiquidationNotification;
 use App\Services\ActesGeneratorService;
+use App\Services\DossierStepService;
 use App\Services\SocieteCycleVieService;
 use App\Services\SocieteMutationService;
 use App\Support\EffetsFicheSociete;
@@ -748,5 +749,70 @@ class DissolutionLiquidationTest extends TestCase
         $this->actingAs($this->utilisateur(RoleUtilisateur::Notaire))
             ->patch("/societes/{$societe->id}/radiation", ['radiation_at' => now()->addYear()->toDateString()])
             ->assertSessionHasErrors('radiation_at');
+    }
+    // ═══ Un blocage doit nommer sa sortie ════════════════════════════════
+
+    /**
+     * Le blocage de clôture nomme le dossier de dissolution en cours, au lieu d'en réclamer un.
+     *
+     * Constaté le 2026-09-30 sur AFG SARLU : la clôture était bloquée par « ouvrez d'abord un
+     * dossier en phase Dissolution anticipée » alors que SOC-2026-0019 le portait déjà, à
+     * l'étape Formalités. Le conseil envoyait créer un doublon — et sa seconde moitié,
+     * « corrigez le statut de la fiche s'il est erroné », invitait à écrire au registre un état
+     * que l'acte n'avait pas encore produit.
+     *
+     * Le blocage lui-même est juste et reste : on ne clôture pas une liquidation qui n'est pas
+     * ouverte. C'est sa **sortie** qui était fausse.
+     */
+    public function test_le_blocage_de_cloture_nomme_le_dossier_de_dissolution_en_cours(): void
+    {
+        $societe = $this->societe();
+
+        $dissolution = $this->dossier($this->donneesDissolution(), $societe);
+        $dissolution->update(['etape' => EtapeDossier::Formalites]);
+
+        $cloture = $this->dossier(['dissolution.phase' => 'Clôture de la liquidation', 'dissolution.date_cloture' => '15/09/2026'], $societe);
+
+        $anomalies = app(DossierStepService::class)->anomaliesMetier($cloture);
+        $blocage = collect($anomalies)->firstWhere('cle', 'dissolution_cycle_vie');
+
+        $this->assertNotNull($blocage, 'La clôture doit rester bloquée : la société est encore active.');
+        $this->assertStringContainsString(
+            $dissolution->reference,
+            $blocage['texte'],
+            'Le message doit nommer le dossier qui porte déjà la dissolution.',
+        );
+        $this->assertStringContainsString('Formalités', $blocage['texte'], "Et dire où il en est.");
+        $this->assertSame('/dossiers/' . $dissolution->reference, $blocage['lien'] ?? null,
+            'Le blocage doit mener au dossier à faire avancer, pas au registre.');
+    }
+
+    /** Sans dossier de dissolution, l'ancien conseil reste le bon. */
+    public function test_sans_dossier_de_dissolution_le_blocage_en_reclame_un(): void
+    {
+        $cloture = $this->dossier(['dissolution.phase' => 'Clôture de la liquidation', 'dissolution.date_cloture' => '15/09/2026'], $this->societe());
+
+        $blocage = collect(app(DossierStepService::class)->anomaliesMetier($cloture))
+            ->firstWhere('cle', 'dissolution_cycle_vie');
+
+        $this->assertNotNull($blocage);
+        $this->assertStringContainsString('Ouvrez d\'abord un dossier', $blocage['texte']);
+        $this->assertArrayNotHasKey('lien', $blocage, "Il n'y a nulle part où mener.");
+    }
+
+    /**
+     * Un message enrichi n'empêche pas les autres de rester de simples chaînes.
+     *
+     * L'extension du contrat de `anomaliesMetier()` est additive : c'est ce qui permet de ne
+     * pas toucher les quarante autres règles.
+     */
+    public function test_les_autres_blocages_restent_de_simples_messages(): void
+    {
+        $sansPhase = $this->dossier(['soc.denomination' => 'Société sans phase'], $this->societe());
+
+        foreach (app(DossierStepService::class)->anomaliesMetier($sansPhase) as $anomalie) {
+            $this->assertArrayHasKey('cle', $anomalie);
+            $this->assertIsString($anomalie['texte']);
+        }
     }
 }
