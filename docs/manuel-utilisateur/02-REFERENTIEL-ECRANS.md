@@ -96,11 +96,19 @@ Bouton **« Nouveau dossier »**.
 
 Trois étapes, avec un bandeau de progression :
 
-**Étape 1 — Catégorie.** Choix de la catégorie d'acte, puis du type d'acte précis. Pour un dossier
-de société, le choix « société du registre / société hors registre » est posé ici, en premier.
+**Étape 1 — Catégorie.** Choix de la catégorie d'acte, puis du type d'acte précis.
 
-**Étape 2 — Détails.** Le questionnaire du type d'acte choisi. Il est découpé en **sections
-repliables**. Certains champs n'apparaissent qu'en fonction des réponses précédentes. On y trouve :
+**Étape 2 — Détails.** Le questionnaire du type d'acte choisi, découpé en **sections repliables**.
+Certains champs n'apparaissent qu'en fonction des réponses précédentes.
+
+> **Pour une modification ou une dissolution, la société se choisit en tout premier**, juste sous
+> le type d'acte — avant les clients du dossier, avant l'objet. Ce n'est pas un détail de mise en
+> page : ce choix remplit la moitié de ce qui suit. Il préremplit la dénomination, la forme, le
+> capital et le siège, rattache les personnes que le registre connaît à leur rôle, fait
+> apparaître le dossier constitutif et détermine les pièces exigées. Le demander plus bas
+> revenait à faire saisir un formulaire avant de savoir de quelle société il parle.
+
+On y trouve ensuite :
 
 - les champs propres à l'acte (capital, prix, durée, objet social…) ;
 - les **personnes au dossier**, avec leur rôle ; chacune peut être rattachée à une **fiche client**

@@ -609,6 +609,23 @@ export default function DossierCreate() {
     const questionnaire = typeActe ? getQuestionnaire(typeActe) : [];
     // Champs filtrés selon les valeurs actuelles (showIf)
     const visibleFields = getVisibleFields(questionnaire, formValues);
+
+    /*
+     * La section qui désigne la société est rendue **à part**, juste sous le type d'acte.
+     *
+     * Elle était la première d'une longue carte de questionnaire, elle-même placée après les
+     * clients du dossier, l'objet et les intervenants : on remplissait donc un formulaire de
+     * dissolution avant de savoir de quelle société on parlait, alors que c'est ce choix qui
+     * préremplit les champs `soc.*`, rattache les personnes connues et fait apparaître le
+     * dossier constitutif. Choisir l'acte et son objet doit aller d'un seul geste.
+     *
+     * Découpage et non duplication : `rendreGroupe()` reste l'unique rendu d'une section, donc
+     * le compteur « à compléter », les ancres de défilement des blocages et le marquage des
+     * champs en défaut valent aux deux emplacements.
+     */
+    const groupesSections     = groupFieldsBySection(visibleFields);
+    const groupeSociete       = groupesSections.find(g => g.societePicker) ?? null;
+    const groupesQuestionnaire = groupesSections.filter(g => !g.societePicker);
     // Modifications statutaires mutuellement exclusives — dérivé de l'enum côté serveur, la règle
     // n'est jamais redéclarée ici (voir TypeModificationStatutaire::incompatiblesAvec).
     const exclusionsModification = tableExclusionsModification(typesModification);
@@ -1161,429 +1178,21 @@ export default function DossierCreate() {
         });
     };
 
-    return (
-        <AppLayout breadcrumbs={[
-            { label: 'Dossiers', href: '/dossiers' },
-            { label: 'Nouveau dossier' }
-        ]}>
-            <Head title="Nouveau dossier — Ayelema" />
-
-            <div className="p-6 max-w-[800px] mx-auto space-y-6">
-
-                {/* En-tête */}
-                <div className="flex items-start justify-between gap-4">
-                    <div>
-                        <h1 className="font-serif text-display text-ink">Nouveau dossier</h1>
-                        <p className="text-slate-500 text-sm mt-1">Suivez les étapes pour créer un nouveau dossier d'acte</p>
-                    </div>
-                    {/* Enregistrement du brouillon : proposé dès qu'un type d'acte est
-                        choisi — avant, il n'y a rien à reprendre qu'un clic ne referait. */}
-                    {typeActe && (
-                        <div className="shrink-0 text-right">
-                            <BoutonBrouillon className="h-8 gap-1.5" />
-                            {brouillonEnregistreA && (
-                                <p className="mt-1 text-[11px] text-slate-400">
-                                    Brouillon enregistré à {brouillonEnregistreA}
-                                </p>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* Reprise d'une saisie inachevée — proposée seulement avant d'avoir
-                    commencé à remplir, pour ne jamais écraser une saisie en cours. */}
-                {brouillons.length > 0 && !brouillonId && !typeActe && (
-                    <div className="rounded-lg border border-seal/30 bg-seal-light/60 p-4">
-                        <div className="flex items-center gap-2">
-                            <FileClock className="h-4 w-4 text-seal-hover" />
-                            <h2 className="text-sm font-semibold text-ink">
-                                {brouillons.length === 1
-                                    ? 'Vous avez un dossier en cours de saisie'
-                                    : `Vous avez ${brouillons.length} dossiers en cours de saisie`}
-                            </h2>
-                        </div>
-                        <div className="mt-3 space-y-2">
-                            {brouillons.map(b => (
-                                <div key={b.id} className="flex items-center gap-3 rounded-md border border-seal/20 bg-white px-3 py-2">
-                                    <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-medium text-slate-800">
-                                            {b.libelle || b.typeActeLabel || 'Dossier sans objet'}
-                                        </p>
-                                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
-                                            {b.typeActeLabel && <span>{b.typeActeLabel}</span>}
-                                            <span>Modifié le {b.modifie_le}</span>
-                                            {b.nbPieces > 0 && (
-                                                <span className="inline-flex items-center gap-1 text-slate-500">
-                                                    <Paperclip className="h-3 w-3" />
-                                                    {b.nbPieces} pièce{b.nbPieces > 1 ? 's' : ''} conservée{b.nbPieces > 1 ? 's' : ''}
-                                                </span>
-                                            )}
-                                        </p>
-                                    </div>
-                                    <Button variant="seal" size="sm" className="h-7 shrink-0 gap-1" onClick={() => reprendreBrouillon(b)}>
-                                        <ArrowRight className="h-3 w-3" /> Reprendre
-                                    </Button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setBrouillonASupprimer(b)}
-                                        title="Supprimer ce brouillon"
-                                        className="shrink-0 rounded p-1 text-slate-300 transition-colors hover:text-danger"
-                                    >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Stepper wizard */}
-                <div className="flex items-center gap-2">
-                    {wizardSteps.map((s, i) => (
-                        <React.Fragment key={s.id}>
-                            <div className={cn(
-                                'flex items-center gap-2 cursor-default',
-                                i <= step && 'cursor-pointer'
-                            )} onClick={() => i < step && setStep(i)}>
-                                <div className={cn(
-                                    'h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold transition-all',
-                                    i < step && 'bg-success text-white',
-                                    i === step && 'bg-ink text-white',
-                                    i > step && 'bg-slate-100 text-slate-400'
-                                )}>
-                                    {i < step ? <Check className="h-3.5 w-3.5" /> : i + 1}
-                                </div>
-                                <span className={cn(
-                                    'text-sm font-medium hidden sm:block',
-                                    i === step && 'text-ink',
-                                    i < step && 'text-success',
-                                    i > step && 'text-slate-400'
-                                )}>
-                                    {s.label}
-                                </span>
-                            </div>
-                            {i < wizardSteps.length - 1 && (
-                                <div className={cn('flex-1 h-px', i < step ? 'bg-success' : 'bg-slate-200')} />
-                            )}
-                        </React.Fragment>
-                    ))}
-                </div>
-
-                {/* Contenu */}
-                <AnimatePresence mode="wait">
-                    <motion.div
-                        key={step}
-                        initial={{ opacity: 0, x: 12 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -12 }}
-                        transition={{ duration: 0.18 }}
-                    >
-
-                        {/* Étape 1 : Catégorie */}
-                        {step === 0 && (
-                            <div className="space-y-3">
-                                <h2 className="font-serif text-heading text-ink">Sélectionnez une catégorie</h2>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                                    {categories.filter(cat => (typesActes?.[cat.id]?.length ?? 0) > 0).map((cat) => {
-                                        const Icon = cat.icon;
-                                        const isSelected = categorie?.id === cat.id;
-                                        return (
-                                            <button
-                                                key={cat.id}
-                                                onClick={() => { setCategorie(cat); setSousGroupe(null); setTypeActe(null); }}
-                                                className={cn(
-                                                    'flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center',
-                                                    isSelected ? cat.activeColor : `bg-white ${cat.color}`
-                                                )}
-                                            >
-                                                <div className={cn('h-10 w-10 rounded-xl flex items-center justify-center', isSelected ? 'bg-white/80' : 'bg-slate-50')}>
-                                                    <Icon className={cn('h-5 w-5', cat.iconColor)} />
-                                                </div>
-                                                <span className="text-sm font-medium text-slate-800 leading-tight">{cat.label}</span>
-                                                <span className="text-xs text-slate-400 leading-tight hidden sm:block">{cat.desc}</span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Étape 2 : Type précis + reste du formulaire, sur un seul écran */}
-                        {step === 1 && (
-                            <>
-                                <div className="space-y-3">
-                                    <h2 className="font-serif text-heading text-ink">
-                                        Type d'acte — <span className="text-slate-500">{categorieSelected?.label}</span>
-                                    </h2>
-                                    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-4">
-                                        <div className={cn('grid gap-4', categorie?.id === 'societe' && 'sm:grid-cols-2')}>
-                                            {categorie?.id === 'societe' && (
-                                                <div className="space-y-1.5">
-                                                    <Label htmlFor="procedure">Procédure</Label>
-                                                    <select
-                                                        id="procedure"
-                                                        value={sousGroupe ?? ''}
-                                                        onChange={e => selectProcedure(e.target.value)}
-                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                    >
-                                                        <option value="">— Choisir —</option>
-                                                        {SOCIETE_GROUPES.map(g => (
-                                                            <option key={g.id} value={g.id}>{g.label}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            )}
-
-                                            {(categorie?.id !== 'societe' || sousGroupe) && typesDisponibles.length > 1 && (
-                                                <div className="space-y-1.5">
-                                                    <Label htmlFor="type_acte">{categorie?.id === 'societe' ? 'Type de société' : "Type d'acte"}</Label>
-                                                    <select
-                                                        id="type_acte"
-                                                        value={typeActe?.id ?? ''}
-                                                        onChange={e => selectTypeById(e.target.value)}
-                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                    >
-                                                        <option value="">— Choisir —</option>
-                                                        {typesDisponibles.map(t => (
-                                                            <option key={t.id} value={t.id}>{t.label}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {typeActe && (
-                                            <div className="pt-3 border-t border-slate-100 space-y-2">
-                                                {typeActe.code === 'SOC-MOD' && (
-                                                    <div className="flex items-center gap-1.5 text-xs text-warning-text">
-                                                        <AlertCircle className="h-3 w-3" />
-                                                        Fiche de modification obligatoire
-                                                    </div>
-                                                )}
-                                                {typeActe.description && (
-                                                    <p className="text-xs text-slate-500">{typeActe.description}</p>
-                                                )}
-                                                {/* Règles légales de la forme choisie (CR juillet 2026) :
-                                                    affichées ici pour guider la saisie, plutôt que de se
-                                                    découvrir au moment où l'avancement est refusé. */}
-                                                {reglesParTypeActe?.[typeActe.code] && (() => {
-                                                    const r = reglesParTypeActe[typeActe.code];
-                                                    return (
-                                                        <div className="rounded-md border border-slate-200 bg-slate-50/70 p-2.5 space-y-1">
-                                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                                                Règles légales — {r.valeur}
-                                                            </p>
-                                                            <p className="text-xs text-slate-600">{r.natureLabel} · {r.responsabilite}</p>
-                                                            <ul className="space-y-0.5 text-xs text-slate-500">
-                                                                <li>
-                                                                    Capital minimum :{' '}
-                                                                    <span className="font-medium text-slate-700">
-                                                                        {r.capitalMinimum
-                                                                            ? `${r.capitalMinimum.toLocaleString('fr-FR')} GNF`
-                                                                            : 'aucun'}
-                                                                    </span>
-                                                                </li>
-                                                                <li>
-                                                                    Associé unique :{' '}
-                                                                    <span className="font-medium text-slate-700">
-                                                                        {r.admetAssocieUnique ? 'admis (un seul associé)' : 'non admis'}
-                                                                    </span>
-                                                                </li>
-                                                                {r.exigeCommissaire && (
-                                                                    <li className="text-warning-text">Commissaire aux comptes obligatoire</li>
-                                                                )}
-                                                                {r.exigeMajoriteAssocies && (
-                                                                    <li className="text-warning-text">Associés majeurs obligatoires</li>
-                                                                )}
-                                                            </ul>
-                                                        </div>
-                                                    );
-                                                })()}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Le reste du formulaire n'apparaît qu'une fois le type d'acte choisi */}
-                                {typeActe && (
-                                <div className="space-y-4 mt-4">
-                                <h2 className="font-serif text-heading text-ink">
-                                    Détails — <span className="text-slate-500">{typeSelected?.label}</span>
-                                </h2>
-
-                                {/* Clients du dossier — créés/choisis en premier, réutilisables ensuite pour un rôle précis */}
-                                <Card>
-                                    <CardContent className="p-5 space-y-3">
-                                        <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">
-                                            Clients du dossier
-                                        </GroupHeader>
-                                        <p className="text-xs text-slate-400 -mt-2">
-                                            Ajoutez ici les clients (personnes physiques ou morales) concernés par ce dossier.
-                                            Vous pourrez ensuite les réutiliser directement comme gérant, associé, vendeur… dans
-                                            les sections ci-dessous. Ne renseignez une qualité que si la personne n'a pas de rôle
-                                            précis dans l'acte (témoin, accompagnateur…).
-                                        </p>
-                                        {dossierClients.map((p, i) => (
-                                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3">
-                                                <div className="flex-1 space-y-2">
-                                                    <ClientPicker
-                                                        placeholder="Rechercher un client existant…"
-                                                        linked={p.client}
-                                                        onSelect={(client) => setDossierClientClient(i, client)}
-                                                        onUnlink={() => setDossierClientClient(i, null)}
-                                                        onCreateNew={() => setCreatingClientForDossierIndex(i)}
-                                                    />
-                                                    <Input
-                                                        placeholder="Qualité si sans rôle précis (ex : témoin, accompagnateur…) — optionnel"
-                                                        value={p.role}
-                                                        onChange={e => setDossierClientRole(i, e.target.value)}
-                                                    />
-                                                </div>
-                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger mt-0.5"
-                                                    onClick={() => removeDossierClient(i)} title="Retirer">
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                </Button>
-                                            </div>
-                                        ))}
-                                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={addDossierClient}>
-                                            <PlusCircle className="h-3.5 w-3.5" /> Ajouter un client
-                                        </Button>
-                                    </CardContent>
-                                </Card>
-
-                                {/* Champs obligatoires du dossier, organisés par sections */}
-                                <Card className="border-seal/30">
-                                    <CardContent className="p-5 space-y-4">
-
-                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
-                                            <GroupHeader icon={FileText} iconColor="text-blue-600" iconBg="bg-blue-50">Dossier</GroupHeader>
-                                            <div className="space-y-4">
-                                                <div className="space-y-1.5">
-                                                    <Label htmlFor="objet">
-                                                        Objet du dossier <span className="text-danger">*</span>
-                                                    </Label>
-                                                    <textarea
-                                                        id="objet"
-                                                        rows={2}
-                                                        placeholder={`Description synthétique du dossier (min. ${OBJET_LONGUEUR_MIN} caractères)…`}
-                                                        value={objet}
-                                                        onChange={e => setObjet(e.target.value)}
-                                                        className={cn(
-                                                            'w-full scroll-mt-24 resize-none rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal',
-                                                            validationTentee && blocantsParChamp.has('objet')
-                                                                ? 'border-danger'
-                                                                : 'border-slate-200',
-                                                        )}
-                                                    />
-                                                    {/* Compteur vivant : le placeholder qui énonçait la règle disparaissait à la
-                                                        première frappe, si bien que « 10 caractères minimum » devenait invisible
-                                                        au moment précis où elle commençait à compter. */}
-                                                    {objet.trim().length < OBJET_LONGUEUR_MIN && (
-                                                        <p className={cn(
-                                                            'text-xs',
-                                                            validationTentee && blocantsParChamp.has('objet') ? 'text-danger' : 'text-slate-400',
-                                                        )}>
-                                                            {OBJET_LONGUEUR_MIN} caractères minimum — {objet.trim().length} saisi{objet.trim().length > 1 ? 's' : ''}
-                                                        </p>
-                                                    )}
-                                                    {errors.objet && <p className="text-xs text-danger">{errors.objet}</p>}
-                                                </div>
-                                                <label htmlFor="urgent" className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
-                                                    <Checkbox
-                                                        id="urgent"
-                                                        checked={urgent}
-                                                        onCheckedChange={(checked) => setUrgent(checked === true)}
-                                                    />
-                                                    <span className="flex items-center gap-1.5">
-                                                        <Zap className="h-3.5 w-3.5 text-warning-text" />
-                                                        Dossier urgent
-                                                    </span>
-                                                </label>
-                                            </div>
-                                        </div>
-
-                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
-                                            <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">Intervenants</GroupHeader>
-                                            <div className="space-y-4">
-                                                <div className="space-y-1.5">
-                                                    <Label htmlFor="notaire_id">
-                                                        Notaire en charge <span className="text-danger">*</span>
-                                                    </Label>
-                                                    <select
-                                                        id="notaire_id"
-                                                        value={notaireId}
-                                                        onChange={e => setNotaireId(e.target.value)}
-                                                        className={cn(
-                                                            'w-full scroll-mt-24 rounded-lg border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal',
-                                                            validationTentee && blocantsParChamp.has('notaire_id')
-                                                                ? 'border-danger'
-                                                                : 'border-slate-200',
-                                                        )}
-                                                    >
-                                                        <option value="">Choisir un notaire…</option>
-                                                        {(notaires ?? []).map(n => (
-                                                            <option key={n.id} value={n.id}>{n.name}{n.initiales ? ` (${n.initiales})` : ''}</option>
-                                                        ))}
-                                                    </select>
-                                                    {errors.notaire_id && <p className="text-xs text-danger">{errors.notaire_id}</p>}
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div className="space-y-1.5">
-                                                        <Label htmlFor="reviseur_id">Certificateur</Label>
-                                                        <select
-                                                            id="reviseur_id"
-                                                            value={reviseurId}
-                                                            onChange={e => setReviseurId(e.target.value)}
-                                                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                        >
-                                                            <option value="">Aucun</option>
-                                                            {(reviseurs ?? []).map(r => (
-                                                                <option key={r.id} value={r.id}>{r.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    <div className="space-y-1.5">
-                                                        <Label htmlFor="formaliste_id">Formaliste</Label>
-                                                        <select
-                                                            id="formaliste_id"
-                                                            value={formalisteId}
-                                                            onChange={e => setFormalisteId(e.target.value)}
-                                                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
-                                                        >
-                                                            <option value="">Aucun</option>
-                                                            {(formalistes ?? []).map(f => (
-                                                                <option key={f.id} value={f.id}>{f.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
-                                            <GroupHeader icon={StickyNote} iconColor="text-amber-600" iconBg="bg-amber-50">Notes</GroupHeader>
-                                            <div className="space-y-1.5">
-                                                <Label htmlFor="notes">Notes initiales <span className="text-slate-400 text-xs">(optionnel)</span></Label>
-                                                <textarea
-                                                    id="notes"
-                                                    rows={3}
-                                                    placeholder="Contexte, remarques ou instructions particulières pour ce dossier…"
-                                                    value={notes}
-                                                    onChange={e => setNotes(e.target.value)}
-                                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-                                                />
-                                                {errors.notes && <p className="text-xs text-danger">{errors.notes}</p>}
-                                            </div>
-                                        </div>
-
-                                    </CardContent>
-                                </Card>
-
-                                {/* Questionnaire spécifique, groupé par section (icône + grille 2 colonnes) */}
-                                {visibleFields.length > 0 && (
-                                    <Card>
-                                        <CardContent className="p-5 space-y-4">
-                                            {groupFieldsBySection(visibleFields).map((group, gi) => {
+    /**
+     * Rendu d'une section du questionnaire.
+     *
+     * Extrait du `.map()` le 2026-09-30 pour pouvoir être appelé **à deux endroits** : la
+     * section qui désigne la société du registre est remontée juste sous le type d'acte,
+     * avant même les clients du dossier. Choisir l'acte et son objet va d'un seul geste —
+     * et la sélection préremplit aussitôt les champs `soc.*`, rattache les personnes connues
+     * et fait apparaître le dossier constitutif : tout cela arrivait auparavant **après** un
+     * bloc « clients du dossier » qu'on remplissait sans savoir de quelle société on parlait.
+     *
+     * Un seul rendu pour les deux emplacements : dupliquer la carte aurait fait diverger le
+     * compteur « à compléter », les ancres de défilement des blocages et le marquage des
+     * champs en défaut — trois mécanismes qui tiennent à cette structure.
+     */
+    const rendreGroupe = (group, gi) => {
                                                 const meta = getSectionMeta(group.name);
                                                 const Icon = meta.icon;
                                                 return (
@@ -1845,7 +1454,442 @@ export default function DossierCreate() {
                                                         })()}
                                                     </div>
                                                 );
-                                            })}
+    };
+
+    return (
+        <AppLayout breadcrumbs={[
+            { label: 'Dossiers', href: '/dossiers' },
+            { label: 'Nouveau dossier' }
+        ]}>
+            <Head title="Nouveau dossier — Ayelema" />
+
+            <div className="p-6 max-w-[800px] mx-auto space-y-6">
+
+                {/* En-tête */}
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <h1 className="font-serif text-display text-ink">Nouveau dossier</h1>
+                        <p className="text-slate-500 text-sm mt-1">Suivez les étapes pour créer un nouveau dossier d'acte</p>
+                    </div>
+                    {/* Enregistrement du brouillon : proposé dès qu'un type d'acte est
+                        choisi — avant, il n'y a rien à reprendre qu'un clic ne referait. */}
+                    {typeActe && (
+                        <div className="shrink-0 text-right">
+                            <BoutonBrouillon className="h-8 gap-1.5" />
+                            {brouillonEnregistreA && (
+                                <p className="mt-1 text-[11px] text-slate-400">
+                                    Brouillon enregistré à {brouillonEnregistreA}
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Reprise d'une saisie inachevée — proposée seulement avant d'avoir
+                    commencé à remplir, pour ne jamais écraser une saisie en cours. */}
+                {brouillons.length > 0 && !brouillonId && !typeActe && (
+                    <div className="rounded-lg border border-seal/30 bg-seal-light/60 p-4">
+                        <div className="flex items-center gap-2">
+                            <FileClock className="h-4 w-4 text-seal-hover" />
+                            <h2 className="text-sm font-semibold text-ink">
+                                {brouillons.length === 1
+                                    ? 'Vous avez un dossier en cours de saisie'
+                                    : `Vous avez ${brouillons.length} dossiers en cours de saisie`}
+                            </h2>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                            {brouillons.map(b => (
+                                <div key={b.id} className="flex items-center gap-3 rounded-md border border-seal/20 bg-white px-3 py-2">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium text-slate-800">
+                                            {b.libelle || b.typeActeLabel || 'Dossier sans objet'}
+                                        </p>
+                                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
+                                            {b.typeActeLabel && <span>{b.typeActeLabel}</span>}
+                                            <span>Modifié le {b.modifie_le}</span>
+                                            {b.nbPieces > 0 && (
+                                                <span className="inline-flex items-center gap-1 text-slate-500">
+                                                    <Paperclip className="h-3 w-3" />
+                                                    {b.nbPieces} pièce{b.nbPieces > 1 ? 's' : ''} conservée{b.nbPieces > 1 ? 's' : ''}
+                                                </span>
+                                            )}
+                                        </p>
+                                    </div>
+                                    <Button variant="seal" size="sm" className="h-7 shrink-0 gap-1" onClick={() => reprendreBrouillon(b)}>
+                                        <ArrowRight className="h-3 w-3" /> Reprendre
+                                    </Button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBrouillonASupprimer(b)}
+                                        title="Supprimer ce brouillon"
+                                        className="shrink-0 rounded p-1 text-slate-300 transition-colors hover:text-danger"
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Stepper wizard */}
+                <div className="flex items-center gap-2">
+                    {wizardSteps.map((s, i) => (
+                        <React.Fragment key={s.id}>
+                            <div className={cn(
+                                'flex items-center gap-2 cursor-default',
+                                i <= step && 'cursor-pointer'
+                            )} onClick={() => i < step && setStep(i)}>
+                                <div className={cn(
+                                    'h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold transition-all',
+                                    i < step && 'bg-success text-white',
+                                    i === step && 'bg-ink text-white',
+                                    i > step && 'bg-slate-100 text-slate-400'
+                                )}>
+                                    {i < step ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                                </div>
+                                <span className={cn(
+                                    'text-sm font-medium hidden sm:block',
+                                    i === step && 'text-ink',
+                                    i < step && 'text-success',
+                                    i > step && 'text-slate-400'
+                                )}>
+                                    {s.label}
+                                </span>
+                            </div>
+                            {i < wizardSteps.length - 1 && (
+                                <div className={cn('flex-1 h-px', i < step ? 'bg-success' : 'bg-slate-200')} />
+                            )}
+                        </React.Fragment>
+                    ))}
+                </div>
+
+                {/* Contenu */}
+                <AnimatePresence mode="wait">
+                    <motion.div
+                        key={step}
+                        initial={{ opacity: 0, x: 12 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -12 }}
+                        transition={{ duration: 0.18 }}
+                    >
+
+                        {/* Étape 1 : Catégorie */}
+                        {step === 0 && (
+                            <div className="space-y-3">
+                                <h2 className="font-serif text-heading text-ink">Sélectionnez une catégorie</h2>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                    {categories.filter(cat => (typesActes?.[cat.id]?.length ?? 0) > 0).map((cat) => {
+                                        const Icon = cat.icon;
+                                        const isSelected = categorie?.id === cat.id;
+                                        return (
+                                            <button
+                                                key={cat.id}
+                                                onClick={() => { setCategorie(cat); setSousGroupe(null); setTypeActe(null); }}
+                                                className={cn(
+                                                    'flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center',
+                                                    isSelected ? cat.activeColor : `bg-white ${cat.color}`
+                                                )}
+                                            >
+                                                <div className={cn('h-10 w-10 rounded-xl flex items-center justify-center', isSelected ? 'bg-white/80' : 'bg-slate-50')}>
+                                                    <Icon className={cn('h-5 w-5', cat.iconColor)} />
+                                                </div>
+                                                <span className="text-sm font-medium text-slate-800 leading-tight">{cat.label}</span>
+                                                <span className="text-xs text-slate-400 leading-tight hidden sm:block">{cat.desc}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Étape 2 : Type précis + reste du formulaire, sur un seul écran */}
+                        {step === 1 && (
+                            <>
+                                <div className="space-y-3">
+                                    <h2 className="font-serif text-heading text-ink">
+                                        Type d'acte — <span className="text-slate-500">{categorieSelected?.label}</span>
+                                    </h2>
+                                    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-4">
+                                        <div className={cn('grid gap-4', categorie?.id === 'societe' && 'sm:grid-cols-2')}>
+                                            {categorie?.id === 'societe' && (
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="procedure">Procédure</Label>
+                                                    <select
+                                                        id="procedure"
+                                                        value={sousGroupe ?? ''}
+                                                        onChange={e => selectProcedure(e.target.value)}
+                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                    >
+                                                        <option value="">— Choisir —</option>
+                                                        {SOCIETE_GROUPES.map(g => (
+                                                            <option key={g.id} value={g.id}>{g.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {(categorie?.id !== 'societe' || sousGroupe) && typesDisponibles.length > 1 && (
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="type_acte">{categorie?.id === 'societe' ? 'Type de société' : "Type d'acte"}</Label>
+                                                    <select
+                                                        id="type_acte"
+                                                        value={typeActe?.id ?? ''}
+                                                        onChange={e => selectTypeById(e.target.value)}
+                                                        className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                    >
+                                                        <option value="">— Choisir —</option>
+                                                        {typesDisponibles.map(t => (
+                                                            <option key={t.id} value={t.id}>{t.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {typeActe && (
+                                            <div className="pt-3 border-t border-slate-100 space-y-2">
+                                                {typeActe.code === 'SOC-MOD' && (
+                                                    <div className="flex items-center gap-1.5 text-xs text-warning-text">
+                                                        <AlertCircle className="h-3 w-3" />
+                                                        Fiche de modification obligatoire
+                                                    </div>
+                                                )}
+                                                {typeActe.description && (
+                                                    <p className="text-xs text-slate-500">{typeActe.description}</p>
+                                                )}
+                                                {/* Règles légales de la forme choisie (CR juillet 2026) :
+                                                    affichées ici pour guider la saisie, plutôt que de se
+                                                    découvrir au moment où l'avancement est refusé. */}
+                                                {reglesParTypeActe?.[typeActe.code] && (() => {
+                                                    const r = reglesParTypeActe[typeActe.code];
+                                                    return (
+                                                        <div className="rounded-md border border-slate-200 bg-slate-50/70 p-2.5 space-y-1">
+                                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                                                Règles légales — {r.valeur}
+                                                            </p>
+                                                            <p className="text-xs text-slate-600">{r.natureLabel} · {r.responsabilite}</p>
+                                                            <ul className="space-y-0.5 text-xs text-slate-500">
+                                                                <li>
+                                                                    Capital minimum :{' '}
+                                                                    <span className="font-medium text-slate-700">
+                                                                        {r.capitalMinimum
+                                                                            ? `${r.capitalMinimum.toLocaleString('fr-FR')} GNF`
+                                                                            : 'aucun'}
+                                                                    </span>
+                                                                </li>
+                                                                <li>
+                                                                    Associé unique :{' '}
+                                                                    <span className="font-medium text-slate-700">
+                                                                        {r.admetAssocieUnique ? 'admis (un seul associé)' : 'non admis'}
+                                                                    </span>
+                                                                </li>
+                                                                {r.exigeCommissaire && (
+                                                                    <li className="text-warning-text">Commissaire aux comptes obligatoire</li>
+                                                                )}
+                                                                {r.exigeMajoriteAssocies && (
+                                                                    <li className="text-warning-text">Associés majeurs obligatoires</li>
+                                                                )}
+                                                            </ul>
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Le reste du formulaire n'apparaît qu'une fois le type d'acte choisi */}
+                                {typeActe && (
+                                <div className="space-y-4 mt-4">
+
+                                {/* La société, avant tout le reste : c'est l'objet de l'acte, et
+                                    son choix remplit la moitié du formulaire qui suit. */}
+                                {groupeSociete && (
+                                    <Card className="border-seal/30">
+                                        <CardContent className="p-5">
+                                            {rendreGroupe(groupeSociete, 'societe')}
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                <h2 className="font-serif text-heading text-ink">
+                                    Détails — <span className="text-slate-500">{typeSelected?.label}</span>
+                                </h2>
+
+                                {/* Clients du dossier — créés/choisis en premier, réutilisables ensuite pour un rôle précis */}
+                                <Card>
+                                    <CardContent className="p-5 space-y-3">
+                                        <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">
+                                            Clients du dossier
+                                        </GroupHeader>
+                                        <p className="text-xs text-slate-400 -mt-2">
+                                            Ajoutez ici les clients (personnes physiques ou morales) concernés par ce dossier.
+                                            Vous pourrez ensuite les réutiliser directement comme gérant, associé, vendeur… dans
+                                            les sections ci-dessous. Ne renseignez une qualité que si la personne n'a pas de rôle
+                                            précis dans l'acte (témoin, accompagnateur…).
+                                        </p>
+                                        {dossierClients.map((p, i) => (
+                                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3">
+                                                <div className="flex-1 space-y-2">
+                                                    <ClientPicker
+                                                        placeholder="Rechercher un client existant…"
+                                                        linked={p.client}
+                                                        onSelect={(client) => setDossierClientClient(i, client)}
+                                                        onUnlink={() => setDossierClientClient(i, null)}
+                                                        onCreateNew={() => setCreatingClientForDossierIndex(i)}
+                                                    />
+                                                    <Input
+                                                        placeholder="Qualité si sans rôle précis (ex : témoin, accompagnateur…) — optionnel"
+                                                        value={p.role}
+                                                        onChange={e => setDossierClientRole(i, e.target.value)}
+                                                    />
+                                                </div>
+                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger mt-0.5"
+                                                    onClick={() => removeDossierClient(i)} title="Retirer">
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={addDossierClient}>
+                                            <PlusCircle className="h-3.5 w-3.5" /> Ajouter un client
+                                        </Button>
+                                    </CardContent>
+                                </Card>
+
+                                {/* Champs obligatoires du dossier, organisés par sections */}
+                                <Card className="border-seal/30">
+                                    <CardContent className="p-5 space-y-4">
+
+                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                                            <GroupHeader icon={FileText} iconColor="text-blue-600" iconBg="bg-blue-50">Dossier</GroupHeader>
+                                            <div className="space-y-4">
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="objet">
+                                                        Objet du dossier <span className="text-danger">*</span>
+                                                    </Label>
+                                                    <textarea
+                                                        id="objet"
+                                                        rows={2}
+                                                        placeholder={`Description synthétique du dossier (min. ${OBJET_LONGUEUR_MIN} caractères)…`}
+                                                        value={objet}
+                                                        onChange={e => setObjet(e.target.value)}
+                                                        className={cn(
+                                                            'w-full scroll-mt-24 resize-none rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal',
+                                                            validationTentee && blocantsParChamp.has('objet')
+                                                                ? 'border-danger'
+                                                                : 'border-slate-200',
+                                                        )}
+                                                    />
+                                                    {/* Compteur vivant : le placeholder qui énonçait la règle disparaissait à la
+                                                        première frappe, si bien que « 10 caractères minimum » devenait invisible
+                                                        au moment précis où elle commençait à compter. */}
+                                                    {objet.trim().length < OBJET_LONGUEUR_MIN && (
+                                                        <p className={cn(
+                                                            'text-xs',
+                                                            validationTentee && blocantsParChamp.has('objet') ? 'text-danger' : 'text-slate-400',
+                                                        )}>
+                                                            {OBJET_LONGUEUR_MIN} caractères minimum — {objet.trim().length} saisi{objet.trim().length > 1 ? 's' : ''}
+                                                        </p>
+                                                    )}
+                                                    {errors.objet && <p className="text-xs text-danger">{errors.objet}</p>}
+                                                </div>
+                                                <label htmlFor="urgent" className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
+                                                    <Checkbox
+                                                        id="urgent"
+                                                        checked={urgent}
+                                                        onCheckedChange={(checked) => setUrgent(checked === true)}
+                                                    />
+                                                    <span className="flex items-center gap-1.5">
+                                                        <Zap className="h-3.5 w-3.5 text-warning-text" />
+                                                        Dossier urgent
+                                                    </span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                                            <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">Intervenants</GroupHeader>
+                                            <div className="space-y-4">
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="notaire_id">
+                                                        Notaire en charge <span className="text-danger">*</span>
+                                                    </Label>
+                                                    <select
+                                                        id="notaire_id"
+                                                        value={notaireId}
+                                                        onChange={e => setNotaireId(e.target.value)}
+                                                        className={cn(
+                                                            'w-full scroll-mt-24 rounded-lg border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal',
+                                                            validationTentee && blocantsParChamp.has('notaire_id')
+                                                                ? 'border-danger'
+                                                                : 'border-slate-200',
+                                                        )}
+                                                    >
+                                                        <option value="">Choisir un notaire…</option>
+                                                        {(notaires ?? []).map(n => (
+                                                            <option key={n.id} value={n.id}>{n.name}{n.initiales ? ` (${n.initiales})` : ''}</option>
+                                                        ))}
+                                                    </select>
+                                                    {errors.notaire_id && <p className="text-xs text-danger">{errors.notaire_id}</p>}
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-1.5">
+                                                        <Label htmlFor="reviseur_id">Certificateur</Label>
+                                                        <select
+                                                            id="reviseur_id"
+                                                            value={reviseurId}
+                                                            onChange={e => setReviseurId(e.target.value)}
+                                                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                        >
+                                                            <option value="">Aucun</option>
+                                                            {(reviseurs ?? []).map(r => (
+                                                                <option key={r.id} value={r.id}>{r.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <Label htmlFor="formaliste_id">Formaliste</Label>
+                                                        <select
+                                                            id="formaliste_id"
+                                                            value={formalisteId}
+                                                            onChange={e => setFormalisteId(e.target.value)}
+                                                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                                                        >
+                                                            <option value="">Aucun</option>
+                                                            {(formalistes ?? []).map(f => (
+                                                                <option key={f.id} value={f.id}>{f.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                                            <GroupHeader icon={StickyNote} iconColor="text-amber-600" iconBg="bg-amber-50">Notes</GroupHeader>
+                                            <div className="space-y-1.5">
+                                                <Label htmlFor="notes">Notes initiales <span className="text-slate-400 text-xs">(optionnel)</span></Label>
+                                                <textarea
+                                                    id="notes"
+                                                    rows={3}
+                                                    placeholder="Contexte, remarques ou instructions particulières pour ce dossier…"
+                                                    value={notes}
+                                                    onChange={e => setNotes(e.target.value)}
+                                                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
+                                                />
+                                                {errors.notes && <p className="text-xs text-danger">{errors.notes}</p>}
+                                            </div>
+                                        </div>
+
+                                    </CardContent>
+                                </Card>
+
+                                {/* Questionnaire spécifique, groupé par section (icône + grille 2 colonnes) */}
+                                {groupesQuestionnaire.length > 0 && (
+                                    <Card>
+                                        <CardContent className="p-5 space-y-4">
+                                            {groupesQuestionnaire.map(rendreGroupe)}
                                         </CardContent>
                                     </Card>
                                 )}
@@ -1863,7 +1907,7 @@ export default function DossierCreate() {
                             const dossierClientsAjoutes = dossierClients.filter(p => p.client);
                             const autresValides = dossierClientsAjoutes.filter(p => p.role.trim());
                             const dossierClientsDisponibles = dossierClientsAjoutes.filter(p => !p.role.trim());
-                            const sections = groupFieldsBySection(visibleFields)
+                            const sections = groupesSections
                                 .map(group => ({
                                     ...group,
                                     fields: group.fields.filter(f => {
@@ -2132,7 +2176,7 @@ export default function DossierCreate() {
                            le champ ne figure pas. */
                         onOuvrirFiche={(role) => {
                             const client = clientLinks[role];
-                            const groupe = groupFieldsBySection(visibleFields).find(g => g.clientRole === role);
+                            const groupe = groupesSections.find(g => g.clientRole === role);
 
                             if (client) setEditingClient({ client, group: groupe ?? null });
                         }}
