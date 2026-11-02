@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, libelleRepresentant } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { ClientPicker } from '@/Components/ui/client-picker';
@@ -10,8 +10,9 @@ import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutiv
 import { ChoixSociete } from '@/Components/Societes/ChoixSociete';
 import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
 import { mapSocieteToQuestionnaire, estChampSociete, ficheRenseigneChamp, societeDisplayName } from '@/lib/societeFields';
-import { groupFieldsBySection, buildPartiesPayload, roleRepresentant, champsDuRole, rolesARattacherDoffice, candidatsDuRegistre } from '@/lib/partiesPayload';
+import { groupFieldsBySection, buildPartiesPayload, roleRepresentant, champsDuRole, rolesARattacherDoffice, candidatsDuRegistre, lignesDeRepartitionDepuisRegistre, repartitionEstVierge, optionsDynamiques } from '@/lib/partiesPayload';
 import { piecesRequisesPour } from '@/lib/piecesRequises';
+import { capitauxApresModification, appliquerCalculs, CHAMPS_SOURCES_CAPITAL, pourcentagesRepartition, partsProjetees } from '@/lib/calculsSociete';
 import { construireFormDataBrouillon, libelleBrouillon, compterPieces } from '@/lib/brouillonDossier';
 import { allerAuBlocant, ancreSection, blocantsEtape, compterParSection, motifsParChamp, OBJET_LONGUEUR_MIN } from '@/lib/blocantsEtape';
 import { ChampQuestionnaire, classesChamp } from '@/Components/Questionnaire/ChampQuestionnaire';
@@ -262,6 +263,10 @@ function ConsequencesModification({ typesModification, selection, valeurPartsCed
         : null;
 
     const statuts = choisis.filter(t => t.impacteStatuts).length;
+    // ⚠️ Le RCCM n'est plus acquis : `Décision de gestion` ne touche ni les statuts ni le
+    // registre. Le texte disait « RCCM seulement » dès que les statuts ne bougeaient pas —
+    // vrai pour les neuf premières opérations, faux pour la dixième.
+    const rccm = choisis.filter(t => t.impacteRccm).length;
 
     return (
         <div className="space-y-3 rounded-md border border-seal/30 bg-seal-light/50 p-3">
@@ -270,7 +275,9 @@ function ConsequencesModification({ typesModification, selection, valeurPartsCed
                 <p className="mt-0.5 text-xs text-slate-700">
                     {statuts > 0
                         ? 'Statuts à mettre à jour et enregistrement au RCCM.'
-                        : 'RCCM seulement — les statuts ne sont pas modifiés.'}
+                        : rccm > 0
+                            ? 'RCCM seulement — les statuts ne sont pas modifiés.'
+                            : "Ni les statuts ni le RCCM — seul un procès-verbal est produit."}
                 </p>
             </div>
 
@@ -557,41 +564,12 @@ export default function DossierCreate() {
     ]);
 
     // ── Capital après modification (augmentation / diminution) ───────────────
-    // Le capital « après » n'est jamais saisi : il se déduit du capital actuel de la société
-    // et du montant de l'opération. Le laisser en saisie libre laisserait passer une
-    // incohérence entre les statuts mis à jour, le PV et la DNSV — trois documents qui
-    // doivent porter le même chiffre.
+    // Le calcul vit dans `@/lib/calculsSociete` et non plus ici : il était **le seul des
+    // trois moteurs de rendu à l'avoir**, si bien qu'un dossier corrigé depuis la modale
+    // d'édition de `Dossiers/Show.jsx` gardait un capital « après » périmé.
     useEffect(() => {
-        const capital = parseFloat(formValues['soc.capital_chiffres']) || 0;
-        if (capital <= 0) return;
-
-        const majAttendue = (champMontant, champApres, signe) => {
-            const montant = parseFloat(formValues[champMontant]) || 0;
-            if (montant <= 0) return null;
-            return String(Math.round(capital + signe * montant));
-        };
-
-        const augmentation = majAttendue('modif.augmentation_montant', 'modif.augmentation_capital_apres', 1);
-        const diminution   = majAttendue('modif.diminution_montant', 'modif.diminution_capital_apres', -1);
-
-        setFormValues(prev => {
-            const next = { ...prev };
-            let change = false;
-            if (augmentation !== null && next['modif.augmentation_capital_apres'] !== augmentation) {
-                next['modif.augmentation_capital_apres'] = augmentation;
-                change = true;
-            }
-            if (diminution !== null && next['modif.diminution_capital_apres'] !== diminution) {
-                next['modif.diminution_capital_apres'] = diminution;
-                change = true;
-            }
-            return change ? next : prev;
-        });
-    }, [
-        formValues['soc.capital_chiffres'],
-        formValues['modif.augmentation_montant'],
-        formValues['modif.diminution_montant'],
-    ]);
+        setFormValues(prev => appliquerCalculs(prev, capitauxApresModification(prev)));
+    }, CHAMPS_SOURCES_CAPITAL.map(cle => formValues[cle]));
 
     // `typeActe` est directement la ligne TypeActe de la base (id, code, label,
     // description, modeles) — plus besoin de chercher son id serveur, il l'a déjà.
@@ -686,9 +664,34 @@ export default function DossierCreate() {
             setSocieteLink(data);
             setFormValues(prev => ({ ...prev, ...mapSocieteToQuestionnaire(data) }));
             rattacherPersonnesSansAmbiguite(data);
+            reprendreRepartitionDuRegistre(data);
         } catch {
             /* fiche de base déjà rattachée — on n'interrompt pas la saisie */
         }
+    };
+
+    /**
+     * Reprend la répartition actuelle du capital, pour que le clerc n'ait qu'à saisir l'écart.
+     *
+     * ⚠️ **C'est un geste différent du rattachement d'une fiche**, et c'est pourquoi il a sa
+     * propre fonction : on n'associe pas une personne à une carte, on **écrit des lignes** dans
+     * un bloc répétable. `rolesARattacherDoffice()` s'interdit d'ailleurs explicitement les
+     * répétables, pour une raison qui ne vaut pas ici.
+     *
+     * ⚠️ **Jamais sur une carte déjà remplie.** Rattacher une société après avoir commencé à
+     * saisir ne doit pas effacer ce travail — même prudence que le rattachement d'office, qui
+     * s'abstient dès qu'un rôle est pourvu.
+     */
+    const reprendreRepartitionDuRegistre = (societe) => {
+        const lignes = lignesDeRepartitionDepuisRegistre(societe?.etat);
+
+        if (lignes.length === 0) return;
+
+        setFormValues(prev => {
+            if (!repartitionEstVierge(prev['modif.repartition_apres'])) return prev;
+
+            return { ...prev, 'modif.repartition_apres': lignes };
+        });
     };
 
     /**
@@ -717,6 +720,37 @@ export default function DossierCreate() {
             + '.',
         );
     };
+
+    // Les personnes que le dossier connaît — registre et saisies en cours réunis. Mémoïsé :
+    // la liste est recalculée à chaque frappe sans cela, et elle alimente un `<select>`.
+    const listesDynamiques = useMemo(
+        () => optionsDynamiques({ etatSociete: societeLink?.etat, formValues }),
+        [
+            societeLink?.etat,
+            formValues['modif.cessionnaires'],
+            formValues['modif.souscripteurs'],
+            formValues['modif.cedants'],
+            formValues['gerant_entrant.prenom_nom'],
+        ],
+    );
+
+    // ── Pourcentages de la répartition ───────────────────────────────────────
+    // Déduits de `parts / total projeté`, jamais saisis. L'effet écrit dans le tableau qu'il
+    // lit : `pourcentagesRepartition()` rend le tableau d'origine quand rien ne change, ce qui
+    // est la seule chose qui l'empêche de boucler.
+    useEffect(() => {
+        setFormValues(prev => {
+            const lignes = prev['modif.repartition_apres'];
+            const calcule = pourcentagesRepartition(lignes, partsProjetees(prev));
+
+            return calcule === lignes ? prev : { ...prev, 'modif.repartition_apres': calcule };
+        });
+    }, [
+        formValues['modif.repartition_apres'],
+        formValues['soc.nombre_parts'],
+        formValues['modif.augmentation_parts_nouvelles'],
+        formValues['modif.diminution_parts_annulees'],
+    ]);
 
     // Variantes décidées, sous leur forme technique : `modif.types` stocke les libellés affichés
     // (convention de tous les `select` du projet), le serveur accepte les deux.
@@ -817,10 +851,18 @@ export default function DossierCreate() {
     const champsSocieteAffichables = (group) => {
         if (!group.societePicker) return group.fields;
 
-        // Mode « registre » sans fiche encore choisie : le sélecteur **est** la saisie. Afficher les
-        // champs vides sous lui inviterait à une double saisie dont l'une serait perdue.
+        // ⚠️ Tous les champs de cette carte ne décrivent pas la société. `mode_traitement` dit
+        // qui rédige l'acte : c'est une donnée du **dossier**, qu'aucune fiche du registre ne
+        // renseigne et que le rattachement n'a donc aucune raison de masquer. La première
+        // version renvoyait `[]` tant qu'aucune société n'était choisie, ce qui escamotait
+        // silencieusement le seul champ obligatoire de la carte.
+        const horsFiche = group.fields.filter(f => !estChampSociete(f.id));
+
+        // Mode « registre » sans fiche encore choisie : le sélecteur **est** la saisie des champs
+        // `soc.*`. Les afficher vides sous lui inviterait à une double saisie dont l'une serait
+        // perdue.
         if (!societeLink) {
-            return modeSociete === 'hors_registre' ? group.fields : [];
+            return modeSociete === 'hors_registre' ? group.fields : horsFiche;
         }
 
         return group.fields.filter(f => !ficheRenseigneChamp(societeLink, f.id));
@@ -1264,6 +1306,7 @@ export default function DossierCreate() {
                                                                                     exclusions={exclusionsModification}
                                                                                 />
                                                                             )}
+                                                                            optionsDynamiques={listesDynamiques}
                                                                             rendreRepeatable={(f) => (
                                                                                 <RepeatableGroup
                                                                                     fieldDef={f}
@@ -1276,6 +1319,7 @@ export default function DossierCreate() {
                                                                                     onStagedPieceChange={(key, file) => handleStagedPieceChange(f.id, key, file)}
                                                                                     piecesBrouillon={piecesBrouillon[f.id] || {}}
                                                                                     onRetirerPieceBrouillon={(key) => retirerPieceBrouillon(f.id, key)}
+                                                                                    optionsDynamiques={listesDynamiques}
                                                                                 />
                                                                             )}
                                                                         />

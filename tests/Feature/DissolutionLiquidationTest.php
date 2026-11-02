@@ -117,23 +117,43 @@ class DissolutionLiquidationTest extends TestCase
         $this->assertSame([], VariantesTypeActe::valeursDuDossier($dossier));
     }
 
-    // ═══ La référence écrite : `null`, délibérément ══════════════════════
+    // ═══ La référence écrite : nulle jusqu'au 2026-10-28, signée depuis ══
 
-    public function test_la_dissolution_ne_declare_aucune_reference_ecrite(): void
+    /**
+     * ⚠️ **Ce test affirmait l'inverse, et il avait raison de le faire.**
+     *
+     * Jusqu'au 2026-10-30 il exigeait `null` : le compte rendu de juillet 2026 ne mentionnait
+     * ni dissolution, ni liquidation, ni radiation, et fabriquer une liste imposée l'aurait
+     * fait afficher comme faisant foi par l'écran Processus, puis défendre par
+     * `divergeDeLaReference()` contre les corrections de l'étude.
+     *
+     * Ce qui a changé n'est pas le principe mais la **source** : le tableau de validation
+     * signé par Maître Bah le 2026-10-28 décrit les deux procédures acte par acte (lignes 15
+     * et 17). Le test garde donc la même exigence — ne rien déclarer qu'un document n'établit
+     * — en la vérifiant désormais contre ce document.
+     */
+    public function test_la_reference_de_dissolution_suit_le_tableau_signe(): void
     {
-        // Le compte rendu de juillet 2026 ne mentionne ni dissolution, ni liquidation, ni
-        // radiation. Lui fabriquer une liste imposée la ferait afficher comme faisant foi par
-        // l'écran Processus, et `divergeDeLaReference()` la défendrait contre les corrections
-        // de l'étude. Une contrainte inventée est pire qu'une contrainte absente.
-        foreach (VarianteDissolution::cases() as $variante) {
-            $this->assertNull(
-                $variante->documentsReference(),
-                "« {$variante->label() } » ne doit déclarer aucune référence écrite tant qu'aucune source ne l'établit.",
-            );
-        }
+        // Ligne 15 : PV constatant la dissolution et nommant le liquidateur, publication au
+        // journal d'annonces légales, puis déclaration au greffe.
+        $this->assertSame(
+            ['acte_principal', 'insertion', 'declaration_rccm'],
+            array_keys(VarianteDissolution::Dissolution->documentsReference()),
+        );
 
-        $this->assertNull(\App\Models\DocumentAttendu::reference('SOC-DIS', 'dissolution'));
-        $this->assertFalse(\App\Models\DocumentAttendu::divergeDeLaReference('SOC-DIS', 'dissolution', []));
+        // Ligne 17 : assemblée de clôture, RCCM de liquidation, radiation. **Aucune
+        // publication** — là où la ligne 15 la cite. L'absence est une réponse, pas un oubli.
+        $cloture = VarianteDissolution::ClotureLiquidation->documentsReference();
+        $this->assertSame(['acte_principal', 'declaration_rccm'], array_keys($cloture));
+        $this->assertArrayNotHasKey('insertion', $cloture);
+
+        // Et la référence remonte bien jusqu'à l'écran de configuration.
+        $this->assertIsArray(\App\Models\DocumentAttendu::reference('SOC-DIS', 'dissolution'));
+        $this->assertTrue(
+            \App\Models\DocumentAttendu::divergeDeLaReference('SOC-DIS', 'dissolution', []),
+            "Une procédure configurée sans aucun document s'écarte désormais de la référence : "
+            . "c'est précisément ce que l'écran doit signaler.",
+        );
     }
 
     public function test_la_modification_conserve_sa_reference_ecrite(): void
@@ -165,9 +185,24 @@ class DissolutionLiquidationTest extends TestCase
 
         $prevus = app(ActesGeneratorService::class)->actesPrevus($typeActe, ['dissolution']);
 
-        $this->assertCount(1, $prevus);
-        $this->assertSame('Acte de dissolution et liquidation', $prevus[0]['nom']);
-        $this->assertFalse($prevus[0]['a_gabarit'], 'Le gabarit manque : il doit être signalé, pas passé sous silence.');
+        // **Trois** depuis le 2026-10-30, et c'est un progrès : la référence du tableau signé
+        // nomme les trois actes de la dissolution, dont deux n'ont pas de gabarit dans cette
+        // fixture. Le dossier annonce donc ce qu'il doit produire **et** ce qui lui manque,
+        // là où il n'annonçait qu'un acte sur trois.
+        $this->assertCount(3, $prevus);
+
+        $parRole = collect($prevus)->keyBy('type_document');
+
+        $this->assertSame(
+            ['acte_principal', 'declaration_rccm', 'insertion'],
+            $parRole->keys()->sort()->values()->all(),
+        );
+
+        $this->assertSame('Acte de dissolution et liquidation', $parRole['acte_principal']['nom']);
+        $this->assertFalse(
+            $parRole['acte_principal']['a_gabarit'],
+            'Le gabarit manque : il doit être signalé, pas passé sous silence.',
+        );
     }
 
     public function test_le_gabarit_dune_phase_ne_sert_pas_a_lautre(): void
@@ -182,8 +217,33 @@ class DissolutionLiquidationTest extends TestCase
         ]);
         $modele->rattachements()->create(['type_acte_id' => $typeActe->id, 'variante' => 'cloture_liquidation']);
 
-        $this->assertCount(0, app(ActesGeneratorService::class)->actesPrevus($typeActe, ['dissolution']));
-        $this->assertCount(1, app(ActesGeneratorService::class)->actesPrevus($typeActe, ['cloture_liquidation']));
+        $service = app(ActesGeneratorService::class);
+
+        // ⚠️ **L'assertion a changé de forme, pas d'intention.** Elle exigeait zéro acte sur la
+        // dissolution : vrai tant que la variante ne déclarait aucune référence écrite, faux
+        // depuis que le tableau signé du 2026-10-28 lui en donne une — la dissolution annonce
+        // désormais ses trois actes, tous sans gabarit ici. Ce que le test garde est la règle
+        // qu'il a toujours gardée : **le gabarit de la clôture ne doit jamais servir à la
+        // dissolution**. On le vérifie donc sur le gabarit, et non sur un décompte.
+        foreach ($service->actesPrevus($typeActe, ['dissolution']) as $prevu) {
+            $this->assertNotSame(
+                'PV de clôture de liquidation',
+                $prevu['nom'],
+                "Le gabarit de la phase 2 est proposé à la phase 1 : une société qu'on dissout "
+                . 'verrait produire le procès-verbal qui clôt sa liquidation.',
+            );
+            $this->assertFalse(
+                $prevu['a_gabarit'],
+                'Aucun gabarit de dissolution ne vit dans cette fixture : en annoncer un '
+                . "signifierait qu'un gabarit d'une autre phase a été retenu.",
+            );
+        }
+
+        // Et la clôture, elle, retrouve bien le sien.
+        $cloture = collect($service->actesPrevus($typeActe, ['cloture_liquidation']))
+            ->firstWhere('type_document', 'acte_principal');
+
+        $this->assertSame('PV de clôture de liquidation', $cloture['nom']);
     }
 
     public function test_un_type_sans_variante_reste_bavard_comme_avant(): void

@@ -3,7 +3,7 @@ import { Head, router, usePage } from '@inertiajs/react';
 import { motion } from 'framer-motion';
 import {
     Scale, Plus, Trash2, ChevronDown, ChevronUp,
-    Percent, X, ClipboardCheck, Pencil,
+    Percent, X, ClipboardCheck, Pencil, AlertTriangle,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -494,6 +494,24 @@ function TypeActeRow({ typeActe, onEdit }) {
                                                     Dépend de : {typeActe.baremes?.find(x => String(x.id) === String(b.depend_de_bareme_id))?.libelle ?? '—'}
                                                 </div>
                                             )}
+                                            {/* D'où vient ce montant. Un tarif qu'aucune note de frais de
+                                                l'étude ne donne part quand même sur une facture : il doit
+                                                au moins le dire, ici et sur la note. Voir la migration
+                                                `ajouter_source_aux_baremes`. */}
+                                            {b.a_confirmer ? (
+                                                <div className="mt-0.5 flex items-start gap-1 text-[10px] font-normal text-amber-700" title={b.source ?? ''}>
+                                                    <AlertTriangle className="mt-px h-2.5 w-2.5 shrink-0" />
+                                                    <span>Montant non confirmé par l'étude</span>
+                                                </div>
+                                            ) : b.source && b.actif ? (
+                                                <div className="mt-0.5 text-[10px] font-normal text-slate-400" title={b.source}>
+                                                    {b.source.length > 64 ? b.source.slice(0, 64) + '…' : b.source}
+                                                </div>
+                                            ) : !b.actif && b.source ? (
+                                                <div className="mt-0.5 text-[10px] font-normal text-slate-400 italic" title={b.source}>
+                                                    {b.source.length > 72 ? b.source.slice(0, 72) + '…' : b.source}
+                                                </div>
+                                            ) : null}
                                         </td>
                                         <td className="text-xs text-slate-500">
                                             {b.base_calcul === 'valeur_acte' ? '% valeur acte' : 'Montant fixe'}
@@ -571,8 +589,10 @@ export default function ParametresBaremes() {
                     </Button>
                 </div>
 
-                {/* KPIs */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* KPIs. Le troisième compte ce que l'étude doit relire : un tarif qu'aucune de
+                    ses notes de frais ne donne part quand même sur une facture. Affiché même à
+                    zéro serait trompeur — une carte à zéro invite à cliquer pour rien. */}
+                <div className={cn('grid gap-3', stats.aConfirmer > 0 ? 'grid-cols-3' : 'grid-cols-2')}>
                     <Card className="p-4 text-center">
                         <div className="text-2xl font-bold text-ink">{stats.total ?? 0}</div>
                         <div className="text-xs text-slate-500 mt-0.5">Barèmes configurés</div>
@@ -581,6 +601,12 @@ export default function ParametresBaremes() {
                         <div className="text-2xl font-bold text-success">{stats.actifs ?? 0}</div>
                         <div className="text-xs text-slate-500 mt-0.5">Actifs</div>
                     </Card>
+                    {stats.aConfirmer > 0 && (
+                        <Card className="p-4 text-center border-amber-200 bg-amber-50/60">
+                            <div className="text-2xl font-bold text-amber-700">{stats.aConfirmer}</div>
+                            <div className="text-xs text-amber-700/80 mt-0.5">À confirmer par l'étude</div>
+                        </Card>
+                    )}
                 </div>
 
                 {/* Filtre catégorie */}

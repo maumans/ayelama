@@ -4,6 +4,8 @@ import { motion } from 'framer-motion';
 import AppLayout from '@/Layouts/AppLayout';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/lib/toast';
+import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -14,6 +16,7 @@ import {
 import { classesStatutSociete } from '@/data/statutsSociete';
 import {
     AlertTriangle, Building2, CalendarClock, FileText, Gavel, Search, X,
+    Copy, Check, Mail, Phone, MapPin, ExternalLink,
 } from 'lucide-react';
 
 /**
@@ -128,25 +131,136 @@ function DialogRadiation({ societe, onClose }) {
     );
 }
 
+/* ─── Copie ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Une valeur du registre, copiable d'un clic.
+ *
+ * Le RCCM et le NIF se recopient sans cesse — dans une formalité, un courrier, un formulaire du
+ * greffe — et se relisent mal : `GN.TCC.2021.B09995` se retape de travers. La confirmation est
+ * **dans le bouton** et non seulement en toast : l'action se répète ligne après ligne, il faut
+ * voir laquelle vient d'être copiée.
+ */
+function ValeurCopiable({ valeur, libelle, icone: Icone, mono = false }) {
+    const [copie, setCopie] = useState(false);
+
+    if (!valeur) return null;
+
+    const copier = async () => {
+        try {
+            await navigator.clipboard.writeText(valeur);
+            setCopie(true);
+            toast.success(`${libelle} copié.`);
+            setTimeout(() => setCopie(false), 1800);
+        } catch {
+            // `navigator.clipboard` exige un contexte sécurisé : en HTTP simple il n'existe pas.
+            // Le dire, plutôt que de laisser croire à une copie silencieuse.
+            toast.error(`Copie impossible depuis ce navigateur — ${libelle} : ${valeur}`);
+        }
+    };
+
+    return (
+        <button
+            type="button"
+            onClick={copier}
+            title={`Copier ${libelle.toLowerCase()}`}
+            className="group inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-xs text-slate-500 transition-colors hover:bg-slate-100 hover:text-ink"
+        >
+            {Icone && <Icone className="h-3 w-3 shrink-0 text-slate-400" />}
+            <span className={cn('truncate', mono && 'font-mono')}>{valeur}</span>
+            {copie
+                ? <Check className="h-3 w-3 shrink-0 text-emerald-600" />
+                : <Copy className="h-3 w-3 shrink-0 text-slate-300 group-hover:text-slate-500" />}
+        </button>
+    );
+}
+
+/**
+ * Une lacune du registre, cliquable.
+ *
+ * ⚠️ Affichée **seulement si elle compte au moins une fiche**. Une puce à zéro mènerait à une
+ * liste vide : elle occuperait la place sans rien apprendre, et l'en-tête doit dire ce qui reste
+ * à faire, pas énumérer ce qui va bien.
+ */
+function Lacune({ nombre, actif, onClick, children }) {
+    if (!nombre) return null;
+
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                actif
+                    ? 'border-amber-400 bg-amber-100 text-amber-900'
+                    : 'border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100',
+            )}
+        >
+            <AlertTriangle className="h-3 w-3" />
+            {nombre} {children}
+        </button>
+    );
+}
+
 /* ─── Ligne ──────────────────────────────────────────────────────────────── */
 
-function LigneSociete({ societe, onRadier }) {
+function LigneSociete({ societe, onRadier, afficherLiquidation }) {
     return (
         <motion.tr
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
+            className="border-b border-slate-100 align-top last:border-0 hover:bg-slate-50/60"
         >
             <td className="px-4 py-3">
-                <div className="flex flex-col">
-                    <span className="font-medium text-ink">{societe.denomination}</span>
-                    <span className="text-xs text-slate-500">
-                        {[societe.sigle, societe.forme_label, societe.rccm_numero].filter(Boolean).join(' · ') || '—'}
+                <div className="flex flex-col gap-0.5">
+                    {/* La denomination mene a la fiche : composition, historique, diff des
+                        operations. Le registre liste, la fiche raconte. */}
+                    <a
+                        href={`/societes/${societe.id}/fiche`}
+                        className="font-medium text-ink transition-colors hover:text-seal-hover hover:underline"
+                    >
+                        {societe.denomination}
+                    </a>
+                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                        {[societe.sigle, societe.forme_label].filter(Boolean).join(' · ') || '—'}
+                        {/* Badge « externe » (addendum v1.2 § 7.1) : l'état de cette fiche vient
+                            de pièces fournies par le client, pas d'un dossier de l'étude. Ce
+                            n'est pas un défaut — c'est ce qui explique pourquoi la checklist
+                            des pièces constitutives s'affiche sur elle et pas sur ses voisines. */}
+                        {societe.externe && (
+                            <span
+                                className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-px text-[10px] font-medium text-slate-500"
+                                title="Constituée par un autre office : son état est initialisé depuis les statuts et le RCCM fournis."
+                            >
+                                externe
+                            </span>
+                        )}
                     </span>
+
+                    {/* Les identifiants officiels, copiables : ce sont eux qu'on recopie dans
+                        les formalités et les courriers, et qu'on retape de travers. */}
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                        <ValeurCopiable valeur={societe.rccm_numero} libelle="RCCM" mono />
+                        <ValeurCopiable valeur={societe.nif} libelle="NIF" mono />
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                        <ValeurCopiable valeur={societe.email_societe} libelle="Email" icone={Mail} />
+                        <ValeurCopiable valeur={societe.telephone_societe} libelle="Téléphone" icone={Phone} />
+                    </div>
+
                     {/* Trace des données perdues avant que le retour de formalité ne les
                         capte : la société est immatriculée — son dossier a dépassé les
                         formalités — mais son numéro n'a jamais atteint le registre. Aucun
                         rattrapage automatique n'est possible, l'étude corrige en une saisie. */}
+                    {/* ⚠️ Un **constat**, et non un bouton. La fiche ne se corrige pas depuis
+                        le registre : une modification de société est l'objet d'un dossier, et
+                        elle n'est portée au registre qu'à l'**Expédition** — par
+                        `SocieteMutationService`, après le PV, la certification et les
+                        formalités. Un formulaire d'édition ici contournerait ce circuit.
+                        ⚠️ Conséquence assumée : ce message n'a **pas de sortie**. Le numéro
+                        manquant se rattrape au retour de la formalité ({@see DonneeAuRetour}),
+                        ou dans le prochain dossier de la société. */}
                     {societe.manque_rccm && (
                         <span className="mt-1 inline-flex w-fit items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                             <AlertTriangle className="h-3 w-3" />
@@ -167,22 +281,66 @@ function LigneSociete({ societe, onRadier }) {
                 )}
             </td>
 
-            <td className="px-4 py-3">
-                <Echeance echeance={societe.echeance} />
+            <td className="px-4 py-3 text-sm text-slate-600">
+                {societe.siege ? (
+                    <span className="inline-flex items-start gap-1.5">
+                        <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span>{societe.siege}</span>
+                    </span>
+                ) : <span className="text-slate-400">—</span>}
             </td>
 
-            <td className="px-4 py-3 text-sm text-slate-600">
-                {societe.liquidateur ?? <span className="text-slate-400">—</span>}
+            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
+                {societe.capital_chiffres !== null && societe.capital_chiffres !== undefined
+                    ? `${Number(societe.capital_chiffres).toLocaleString('fr-FR')} GNF`
+                    : <span className="text-slate-400">—</span>}
             </td>
 
+            {/* Colonnes de liquidation : rendues seulement quand la page a de quoi les
+                remplir. Voir `afficherLiquidation` côté serveur. */}
+            {afficherLiquidation && (
+                <>
+                    <td className="px-4 py-3">
+                        <Echeance echeance={societe.echeance} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                        {societe.liquidateur ?? <span className="text-slate-400">—</span>}
+                    </td>
+                </>
+            )}
+
             <td className="px-4 py-3 text-sm text-slate-600">
-                <span className="inline-flex items-center gap-1.5">
-                    <FileText className="h-3.5 w-3.5 text-slate-400" />
-                    {societe.dossiers_count}
-                </span>
+                {societe.dossiers_count > 0 ? (
+                    <a
+                        href={`/dossiers?societe=${societe.id}`}
+                        title="Voir les dossiers de cette société"
+                        className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-slate-100 hover:text-ink"
+                    >
+                        <FileText className="h-3.5 w-3.5 text-slate-400" />
+                        {societe.dossiers_count}
+                    </a>
+                ) : (
+                    <span className="inline-flex items-center gap-1.5 text-slate-400">
+                        <FileText className="h-3.5 w-3.5" />0
+                    </span>
+                )}
+                {societe.dossier_origine && (
+                    <a
+                        href={`/dossiers/${societe.dossier_origine}`}
+                        title="Ouvrir le dossier constitutif — statuts, PV, RCCM, DNSV"
+                        className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400 hover:text-seal-hover hover:underline"
+                    >
+                        <ExternalLink className="h-3 w-3" />
+                        {societe.dossier_origine}
+                    </a>
+                )}
             </td>
 
             <td className="px-4 py-3 text-right">
+                {/* Seule action du registre : constater une radiation. Les autres changements
+                    d'état viennent des dossiers, et la radiation seule ne peut pas en venir —
+                    elle n'est prouvée que par la pièce du greffe, qui arrive après la clôture
+                    ({@see SocieteController::radier}). */}
                 {societe.peut_etre_radiee && (
                     <Button size="sm" variant="outline" onClick={() => onRadier(societe)}>
                         <Gavel className="mr-1.5 h-3.5 w-3.5" />
@@ -196,15 +354,24 @@ function LigneSociete({ societe, onRadier }) {
 
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 
-export default function Index({ societes, statuts, filters, stats }) {
+export default function Index({ societes, statuts, filters, stats, afficherLiquidation }) {
     const [q, setQ] = useState(filters.q ?? '');
     const [aRadier, setARadier] = useState(null);
 
     const filtrer = (patch) => router.get(
         '/societes',
-        { q, statut: filters.statut, ...patch },
+        { q, statut: filters.statut, manque: filters.manque, ...patch },
         { preserveState: true, replace: true },
     );
+
+    /** Cliquer une lacune déjà active la retire : la puce est une bascule, pas un aller simple. */
+    const basculerLacune = (quoi) => filtrer({ manque: filters.manque === quoi ? '' : quoi });
+
+    const filtreActif = filters.q || filters.statut || filters.manque;
+
+    // Le nombre de colonnes varie avec `afficherLiquidation` : la ligne « aucun résultat »
+    // doit suivre, sinon le tableau se décale.
+    const nbColonnes = afficherLiquidation ? 8 : 6;
 
     return (
         <AppLayout>
@@ -220,14 +387,45 @@ export default function Index({ societes, statuts, filters, stats }) {
                         <p className="mt-1 text-sm text-slate-500">
                             {stats.total} fiche{stats.total > 1 ? 's' : ''} — {stats.enLiquidation} en liquidation,
                             {' '}{stats.aRadier} en attente de radiation.
-                            {stats.manqueRccm > 0 && (
-                                <span className="text-amber-700">
-                                    {' '}⚠️ {stats.manqueRccm} immatriculée{stats.manqueRccm > 1 ? 's' : ''} sans RCCM au registre.
-                                </span>
-                            )}
                         </p>
                     </div>
                 </header>
+
+                {/* ⚠️ **Les lacunes mènent quelque part.** Elles étaient annoncées en texte
+                    simple — « 5 immatriculées sans RCCM » — sans aucun moyen de voir lesquelles :
+                    un chiffre sans sortie se contemple. Chaque puce filtre la liste, et un
+                    second clic la relâche. Une lacune à zéro n'est pas rendue : elle mènerait à
+                    une liste vide et occuperait la place sans rien apprendre. */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <Lacune
+                        nombre={stats.manqueRccm}
+                        actif={filters.manque === 'rccm'}
+                        onClick={() => basculerLacune('rccm')}
+                    >
+                        immatriculée{stats.manqueRccm > 1 ? 's' : ''} sans RCCM
+                    </Lacune>
+                    <Lacune
+                        nombre={stats.manqueNif}
+                        actif={filters.manque === 'nif'}
+                        onClick={() => basculerLacune('nif')}
+                    >
+                        sans NIF
+                    </Lacune>
+                    <Lacune
+                        nombre={stats.manqueDate}
+                        actif={filters.manque === 'date_constitution'}
+                        onClick={() => basculerLacune('date_constitution')}
+                    >
+                        sans date d'immatriculation
+                    </Lacune>
+                    <Lacune
+                        nombre={stats.sansDossier}
+                        actif={filters.manque === 'sans_dossier'}
+                        onClick={() => basculerLacune('sans_dossier')}
+                    >
+                        sans dossier constitutif
+                    </Lacune>
+                </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                     <form
@@ -258,8 +456,8 @@ export default function Index({ societes, statuts, filters, stats }) {
                         </SelectContent>
                     </Select>
 
-                    {(filters.q || filters.statut) && (
-                        <Button variant="ghost" size="sm" onClick={() => { setQ(''); filtrer({ q: '', statut: '' }); }}>
+                    {filtreActif && (
+                        <Button variant="ghost" size="sm" onClick={() => { setQ(''); filtrer({ q: '', statut: '', manque: '' }); }}>
                             <X className="mr-1.5 h-3.5 w-3.5" />
                             Réinitialiser
                         </Button>
@@ -272,19 +470,26 @@ export default function Index({ societes, statuts, filters, stats }) {
                             <tr className="text-left text-xs font-medium uppercase tracking-wide text-slate-500">
                                 <th className="px-4 py-3">Société</th>
                                 <th className="px-4 py-3">Statut</th>
-                                <th className="px-4 py-3">Prochaine échéance</th>
-                                <th className="px-4 py-3">Liquidateur</th>
+                                <th className="px-4 py-3">Siège</th>
+                                <th className="px-4 py-3">Capital</th>
+                                {afficherLiquidation && <th className="px-4 py-3">Prochaine échéance</th>}
+                                {afficherLiquidation && <th className="px-4 py-3">Liquidateur</th>}
                                 <th className="px-4 py-3">Dossiers</th>
                                 <th className="px-4 py-3" />
                             </tr>
                         </thead>
                         <tbody>
                             {societes.data.map((s) => (
-                                <LigneSociete key={s.id} societe={s} onRadier={setARadier} />
+                                <LigneSociete
+                                    key={s.id}
+                                    societe={s}
+                                    onRadier={setARadier}
+                                    afficherLiquidation={afficherLiquidation}
+                                />
                             ))}
                             {societes.data.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-500">
+                                    <td colSpan={nbColonnes} className="px-4 py-12 text-center text-sm text-slate-500">
                                         Aucune société ne correspond à cette recherche.
                                     </td>
                                 </tr>
@@ -310,6 +515,7 @@ export default function Index({ societes, statuts, filters, stats }) {
             </div>
 
             {aRadier && <DialogRadiation societe={aRadier} onClose={() => setARadier(null)} />}
+
         </AppLayout>
     );
 }

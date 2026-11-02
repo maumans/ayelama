@@ -372,6 +372,53 @@ class Societe extends Model
      *
      * Quatrième `documentable` de {@see DocumentFichier}, après Dossier, Formalite et Partie.
      */
+    /**
+     * Les associés de la société, passés et présents — une ligne par passage.
+     *
+     * Addendum v1.2 § 4.1. Avant cette table, le registre ne savait pas qui détenait la
+     * société : `associesConnus()` relisait les parties du dossier de **constitution**, donc
+     * rendait les associés d'origine pour toujours, et une cession de parts ne portait rien.
+     */
+    public function associes()
+    {
+        return $this->hasMany(SocieteAssocie::class)->orderByDesc('date_entree');
+    }
+
+    /** Ceux qui détiennent aujourd'hui — `date_sortie` nulle. */
+    public function associesActuels()
+    {
+        return $this->hasMany(SocieteAssocie::class)->whereNull('date_sortie')->orderByDesc('nb_parts');
+    }
+
+    public function gerants()
+    {
+        return $this->hasMany(SocieteGerant::class)->orderByDesc('date_nomination');
+    }
+
+    public function gerantsEnFonction()
+    {
+        return $this->hasMany(SocieteGerant::class)->whereNull('date_fin')->orderByDesc('date_nomination');
+    }
+
+    /** Les opérations appliquées, de la plus récente à la plus ancienne. */
+    public function historique()
+    {
+        return $this->hasMany(SocieteHistorique::class)->orderByDesc('date_effet')->orderByDesc('id');
+    }
+
+    /**
+     * Nombre de parts réellement réparties entre les associés actuels.
+     *
+     * ⚠️ À distinguer de `nombre_parts`, qui est le nombre **statutaire**. Les deux doivent
+     * coïncider, et l'écart est précisément ce que le contrôle bloquant de la répartition
+     * projetée interdit ({@see \App\Services\EtatSocieteService}). Les confondre masquerait
+     * l'erreur qu'on cherche à voir.
+     */
+    public function partsReparties(): int
+    {
+        return (int) $this->associesActuels()->sum('nb_parts');
+    }
+
     public function piecesConstitutives()
     {
         return $this->morphMany(DocumentFichier::class, 'documentable')->orderBy('id');
@@ -407,6 +454,23 @@ class Societe extends Model
      * constituées) sont concernées.
      */
     public function exigePiecesConstitutives(): bool
+    {
+        return $this->estExterne();
+    }
+
+    /**
+     * Société constituée ailleurs — l'`origine = EXTERNE` de l'addendum v1.2 § 3.
+     *
+     * ⚠️ **Dérivée, et non stockée.** La spécification prévoit une colonne `origine` ; `dossier_id`
+     * répond déjà à la question, et sans jamais pouvoir la contredire. Une colonne séparée aurait
+     * pu dire « ÉTUDE » sur une fiche sans dossier, ou l'inverse — mesuré : les 15 fiches du
+     * registre portent toutes leur dossier constitutif, aucune n'aurait servi à départager les
+     * deux sources. Une seconde vérité qu'on n'a pas écrite est une divergence qu'on n'aura pas.
+     *
+     * Le nom est le pendant lisible de {@see exigePiecesConstitutives()}, qui exprimait la même
+     * condition du point de vue de la checklist.
+     */
+    public function estExterne(): bool
     {
         return $this->dossier_id === null;
     }
@@ -597,12 +661,12 @@ class Societe extends Model
     public function personnesConnuesPourEcran(): array
     {
         return $this->associesConnus()
-            ->map(fn (Partie $partie) => [
-                'partie_id' => $partie->id,
-                'client_id' => $partie->client_id,
-                'nom'       => $partie->nom,
-                'role'      => $partie->role,
-                'client'    => $partie->client,
+            ->map(fn ($personne) => [
+                'partie_id' => $personne->id,
+                'client_id' => $personne->client_id,
+                'nom'       => $personne->nom,
+                'role'      => $personne->role,
+                'client'    => $personne->client,
             ])
             ->values()
             ->all();
@@ -610,6 +674,36 @@ class Societe extends Model
 
     public function associesConnus()
     {
+        // ⚠️ **La table prime, le repli demeure.** `societe_associes` et `societe_gerants` sont la vérité depuis
+        // l'addendum v1.2 ; mais tant que `ayelema:backfill-associes` n'a pas tourné sur une
+        // fiche, elles sont vides — et rendre une liste vide ferait disparaître de l'écran des
+        // personnes que l'étude connaît. Le repli lit les parties du dossier de constitution,
+        // comme avant, et disparaîtra quand le backfill sera passé partout.
+        $associes = $this->associesActuels()->with('client')->get();
+        $gerants  = $this->gerantsEnFonction()->with('client')->get();
+
+        if ($associes->isNotEmpty() || $gerants->isNotEmpty()) {
+            $isAssocieUnique = in_array($this->forme, ['SARLU', 'SASU'], true) && $associes->count() === 1;
+
+            $listeAssocies = $associes->map(fn (SocieteAssocie $a) => (object) [
+                'id'        => $a->id,
+                'nom'       => $a->nom,
+                'role'      => $isAssocieUnique ? 'associe_unique' : 'associe',
+                'client_id' => $a->client_id,
+                'client'    => $a->client,
+            ]);
+
+            $listeGerants = $gerants->map(fn (SocieteGerant $g) => (object) [
+                'id'        => $g->id,
+                'nom'       => $g->nom,
+                'role'      => 'gerant',
+                'client_id' => $g->client_id,
+                'client'    => $g->client,
+            ]);
+
+            return $listeAssocies->concat($listeGerants);
+        }
+
         if (!$this->dossier_id) {
             return collect();
         }
@@ -804,6 +898,58 @@ class Societe extends Model
      * ⚠️ Calculé depuis `dossiers`, jamais par `whereJsonContains` sur `formalites` : la
      * sémantique JSON diverge entre MySQL (développement) et SQLite (test).
      */
+    /**
+     * Les étapes au-delà des formalités — là où la société est réputée immatriculée.
+     *
+     * Dérivé de l'enum et non recopié : ajouter une étape après `Formalites` doit suffire, et
+     * une liste en dur aurait laissé le registre juger sur un ordre périmé.
+     *
+     * @return array<int, string>
+     */
+    /**
+     * Le siège en une ligne — quartier, commune, ville.
+     *
+     * Sur le modèle et non dans le contrôleur : le registre, l'autocomplétion et la carte de
+     * synthèse de l'assistant montrent la même adresse, et trois compositions séparées auraient
+     * fini par différer d'une virgule ou d'un champ.
+     */
+    public function siegeComplet(): ?string
+    {
+        $parties = array_filter([$this->siege_quartier, $this->siege_commune, $this->siege_ville]);
+
+        return $parties === [] ? null : implode(', ', $parties);
+    }
+
+    public static function etapesApresFormalites(): array
+    {
+        return array_values(array_map(
+            fn (EtapeDossier $e) => $e->value,
+            array_filter(
+                EtapeDossier::cases(),
+                fn (EtapeDossier $e) => $e->ordre() > EtapeDossier::Formalites->ordre(),
+            ),
+        ));
+    }
+
+    /**
+     * Version **requêtable** de {@see immatriculeeSansRccm()}.
+     *
+     * ⚠️ Les deux doivent dire la même chose, et `RegistreSocietesFiltresTest` l'affirme fiche
+     * par fiche. Le prédicat PHP sert à l'affichage d'une ligne déjà chargée ; le scope sert à
+     * **filtrer et compter**, ce que le prédicat ne peut pas faire sans charger tout le
+     * registre — c'est d'ailleurs ce que la statistique de l'en-tête faisait à chaque
+     * affichage de page.
+     */
+    // ⚠️ Nom distinct du prédicat, et non le même : Eloquent résout `Societe::xxx()` sur la
+    // méthode d'instance avant de chercher un scope, et un scope homonyme lèverait
+    // « Non-static method cannot be called statically » — constaté en l'écrivant.
+    public function scopeManqueRccm($query)
+    {
+        return $query
+            ->where(fn ($q) => $q->whereNull('rccm_numero')->orWhere('rccm_numero', ''))
+            ->whereHas('dossiers', fn ($q) => $q->whereIn('etape', self::etapesApresFormalites()));
+    }
+
     public function immatriculeeSansRccm(): bool
     {
         if (filled($this->rccm_numero)) {

@@ -2,9 +2,8 @@
 
 namespace App\Models;
 
-use App\Enums\TypeModificationStatutaire;
+use App\Enums\OrganismeFormalite;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
 
 class Bareme extends Model
 {
@@ -12,7 +11,7 @@ class Bareme extends Model
         'type_acte_id', 'organisme', 'libelle',
         'taux', 'montant_fixe', 'quantite_defaut', 'base_calcul',
         'condition_modification',
-        'description', 'actif', 'ordre',
+        'description', 'source', 'a_confirmer', 'actif', 'ordre',
         'genere_formalite', 'depend_de_bareme_id', 'type_impot',
         'remise_autorisee',
         'retour_attendu', 'delai_heures', 'pieces_requises', 'donnees_au_retour',
@@ -25,6 +24,7 @@ class Bareme extends Model
             'montant_fixe'     => 'decimal:2',
             'quantite_defaut'  => 'integer',
             'actif'            => 'boolean',
+            'a_confirmer'      => 'boolean',
             'genere_formalite' => 'boolean',
             // Les honoraires de l'étude se remisent, un débours non : elle verse au tiers
             // l'intégralité de ce qu'elle facture. Copié sur la ligne à la génération.
@@ -76,13 +76,26 @@ class Bareme extends Model
             return true;
         }
 
-        $condition = TypeModificationStatutaire::tryFrom($this->condition_modification);
+        // ⚠️ **La condition se résout par le type d'acte, plus par un seul enum.** Elle passait
+        // par `TypeModificationStatutaire::tryFrom()` en dur : une condition portant sur une
+        // variante de **dissolution** (`dissolution`, `cloture_liquidation`) était donc jugée
+        // illisible, et le barème écarté — sans message. Un tarif ou une formalité propre à la
+        // dissolution ne pouvait pas exister, et rien ne disait pourquoi.
+        //
+        // `VariantesTypeActe::resoudre()` interroge l'enum du type d'acte du dossier, quel
+        // qu'il soit. C'est déjà la résolution employée par `DocumentAttendu::reference()` :
+        // les deux posaient la même question, une seule savait la poser.
+        $condition = \App\Support\VariantesTypeActe::resoudre(
+            $dossier->typeActe?->code,
+            $this->condition_modification,
+        );
 
-        if (!$condition) {
-            // Condition illisible (valeur saisie à la main, cas retiré de l'enum) : on
-            // n'applique pas le barème. Le sens de `condition_modification` est de restreindre ;
-            // en cas de doute, la restriction l'emporte — mieux vaut une ligne manquante,
-            // visible et corrigeable, qu'un droit facturé à tort.
+        if (! $condition) {
+            // Condition illisible (valeur saisie à la main, cas retiré de l'enum, ou condition
+            // d'un autre type d'acte) : on n'applique pas le barème. Le sens de
+            // `condition_modification` est de restreindre ; en cas de doute, la restriction
+            // l'emporte — mieux vaut une ligne manquante, visible et corrigeable, qu'un droit
+            // facturé à tort.
             return false;
         }
 
@@ -120,14 +133,19 @@ class Bareme extends Model
      * attendue par Formalite::organisme (snake_case) — utilisé uniquement par
      * FormaliteGenerationService au moment de générer la Formalite correspondante.
      */
+    /**
+     * La colonne `baremes.organisme` s'écrit en capitales initiales, `formalites.organisme` en
+     * minuscules : {@see \App\Enums\OrganismeFormalite::libelleBareme()} porte les deux
+     * écritures, et cette conversion n'a plus de table à elle.
+     *
+     * ⚠️ Le repli `Str::slug()` est supprimé. Il transformait n'importe quel libellé en un
+     * organisme que ni la validation de `FormaliteController` ni les onglets de l'écran
+     * Formalités ne connaissaient : une formalité posée sous « Autre » existait en base sans
+     * être affichable nulle part. Un organisme inconnu retombe désormais sur `autre`, qui est
+     * un cas déclaré, validé et affiché.
+     */
     public function organismeFormalite(): string
     {
-        return match ($this->organisme) {
-            'APIP'         => 'apip',
-            'Impots'       => 'impots',
-            'Conservation' => 'conservation_fonciere',
-            'CNSS'         => 'cnss',
-            default        => Str::slug($this->organisme, '_'),
-        };
+        return OrganismeFormalite::depuisLibelleBareme($this->organisme)->value;
     }
 }

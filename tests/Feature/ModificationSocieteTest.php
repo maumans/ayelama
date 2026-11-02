@@ -125,6 +125,16 @@ class ModificationSocieteTest extends TestCase
     public function test_regle8_toutes_les_modifications_impactent_le_rccm(): void
     {
         foreach (TypeModificationStatutaire::cases() as $type) {
+            if ($type === TypeModificationStatutaire::DecisionGestion) {
+                // DecisionGestion ne touche ni aux statuts ni au RCCM (addendum v1.2 § 5)
+                $this->assertFalse($type->impacteRccm(), "{$type->value} ne doit pas impacter le RCCM.");
+                $this->assertArrayNotHasKey(
+                    'declaration_rccm',
+                    $type->documentsRequis(),
+                    "{$type->value} ne doit pas produire une déclaration de modification RCCM.",
+                );
+                continue;
+            }
             $this->assertTrue($type->impacteRccm(), "{$type->value} doit impacter le RCCM.");
             $this->assertArrayHasKey(
                 'declaration_rccm',
@@ -720,11 +730,11 @@ class ModificationSocieteTest extends TestCase
 
     public function test_deux_constitutions_homonymes_restent_bloquees(): void
     {
-        // Non-régression de la règle 4 : le correctif ci-dessus ne doit pas la désarmer.
+        // Non-régression de la règle 4 : le conflit apparaît dès qu'un dossier dépasse les formalités.
         $premier = $this->dossier(['soc.denomination' => 'Faya Distribution SARLU'], null, 'SOC-SARLU');
+        $premier->update(['etape' => EtapeDossier::Expedition]);
         $second  = $this->dossier(['soc.denomination' => 'faya  distribution sarlu'], null, 'SOC-SARL');
 
-        $this->assertArrayHasKey('soc_denomination', $this->anomalies($premier));
         $this->assertArrayHasKey('soc_denomination', $this->anomalies($second));
     }
 
@@ -831,6 +841,51 @@ class ModificationSocieteTest extends TestCase
         $this->assertSame('Mariama SOW', $societe->direction['gerant']);
         // Les autres dirigeants de la fiche ne sont pas emportés par ce changement.
         $this->assertSame('Ancien Président', $societe->direction['president']);
+    }
+
+    public function test_un_changement_de_denomination_met_a_jour_la_denomination_et_le_sigle(): void
+    {
+        $societe = $this->societe(['denomination' => 'Ancienne Nom SARL', 'sigle' => 'ANS']);
+        $dossier = $this->dossier([
+            ...$this->donneesBase(['Modification de dénomination']),
+            'modif.denomination_nouvelle' => 'Nouvelle Nom SARL',
+            'modif.sigle_nouveau'         => 'NNS',
+        ], $societe);
+
+        $modifications = $this->appliquer($dossier);
+
+        $this->assertArrayHasKey('denomination', $modifications);
+        $this->assertArrayHasKey('sigle', $modifications);
+        $societe->refresh();
+        $this->assertSame('Nouvelle Nom SARL', $societe->denomination);
+        $this->assertSame('NNS', $societe->sigle);
+    }
+
+    public function test_un_changement_de_forme_juridique_met_a_jour_la_forme(): void
+    {
+        $societe = $this->societe(['forme' => 'SARL']);
+        $dossier = $this->dossier([
+            ...$this->donneesBase(['Modification de forme juridique']),
+            'modif.forme_nouvelle' => 'SAS',
+        ], $societe);
+
+        $modifications = $this->appliquer($dossier);
+
+        $this->assertArrayHasKey('forme', $modifications);
+        $societe->refresh();
+        $this->assertSame('SAS', $societe->forme);
+    }
+
+    public function test_une_decision_de_gestion_ne_modifie_pas_la_fiche(): void
+    {
+        $societe = $this->societe();
+        $dossier = $this->dossier([
+            ...$this->donneesBase(['Décision de gestion']),
+        ], $societe);
+
+        $modifications = $this->appliquer($dossier);
+
+        $this->assertSame([], $modifications);
     }
 
     public function test_une_cession_de_parts_ne_modifie_pas_la_fiche_de_la_societe(): void

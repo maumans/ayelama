@@ -31,7 +31,8 @@ import { ClotureTab } from '@/Components/Dossiers/ClotureTab';
 /** Ancre DOM de la carte « Parties & pièces » (onglet Informations). */
 const ANCRE_PIECES_PARTIES = 'pieces-parties';
 import { mapClientToPrefixedFields, buildPartieFields, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
-import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles, roleRepresentant, champsDuRole, candidatsDuRegistre } from '@/lib/partiesPayload';
+import { groupFieldsBySection, buildPartiesPayload, getManagedClientRoles, roleRepresentant, champsDuRole, candidatsDuRegistre, optionsDynamiques } from '@/lib/partiesPayload';
+import { capitauxApresModification, appliquerCalculs, CHAMPS_SOURCES_CAPITAL, pourcentagesRepartition, partsProjetees } from '@/lib/calculsSociete';
 import { piecesRequisesPour } from '@/lib/piecesRequises';
 import { isoDateToFR, frDateToISO } from '@/lib/dates';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -279,6 +280,43 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
         }
     }, [open]);
 
+    // ── Capital après modification ───────────────────────────────────────────
+    // ⚠️ **Ce calcul manquait ici.** Il n'existait qu'à la création : un dossier corrigé
+    // depuis cette modale gardait son capital « après » périmé, et les statuts mis à jour, le
+    // procès-verbal et la DNSV pouvaient dès lors porter trois chiffres différents. Même
+    // module que `Dossiers/Create.jsx`, donc plus de divergence possible.
+    useEffect(() => {
+        setFormValues(prev => appliquerCalculs(prev, capitauxApresModification(prev)));
+    }, CHAMPS_SOURCES_CAPITAL.map(cle => formValues[cle]));
+
+    // Les personnes que le dossier connaît. ⚠️ `societe` est une **prop** de cette modale, pas
+    // un `usePage()` : la lire deux fois avait déjà causé une erreur de portée ici.
+    const listesDynamiques = useMemo(
+        () => optionsDynamiques({ etatSociete: societe?.etat, formValues }),
+        [
+            societe?.etat,
+            formValues['modif.cessionnaires'],
+            formValues['modif.souscripteurs'],
+            formValues['modif.cedants'],
+            formValues['gerant_entrant.prenom_nom'],
+        ],
+    );
+
+    // Pourcentages de la répartition — même module, même garde anti-boucle qu'à la création.
+    useEffect(() => {
+        setFormValues(prev => {
+            const lignes = prev['modif.repartition_apres'];
+            const calcule = pourcentagesRepartition(lignes, partsProjetees(prev));
+
+            return calcule === lignes ? prev : { ...prev, 'modif.repartition_apres': calcule };
+        });
+    }, [
+        formValues['modif.repartition_apres'],
+        formValues['soc.nombre_parts'],
+        formValues['modif.augmentation_parts_nouvelles'],
+        formValues['modif.diminution_parts_annulees'],
+    ]);
+
     const applyClientToSection = (group, client) => {
         const prefix = group.fields[0].id.split('.')[0];
         // Le schéma **complet** du rôle, pas le groupe rendu : voir champsDuRole().
@@ -489,6 +527,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                                                     exclusions={exclusionsModification}
                                                 />
                                             )}
+                                            optionsDynamiques={listesDynamiques}
                                             rendreRepeatable={(f) => (
                                                 <RepeatableGroup
                                                     fieldDef={f}
@@ -498,6 +537,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                                                     piecesRequises={usePage().props.piecesRequises}
                                                     stagedPieces={stagedPieces[f.id] || {}}
                                                     onStagedPieceChange={(key, file) => handleStagedPieceChange(f.id, key, file)}
+                                                    optionsDynamiques={listesDynamiques}
                                                 />
                                             )}
                                         />
@@ -933,18 +973,21 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
         setPreviewPieceKey(k => k === key ? null : key);
     };
 
-    // Redirection depuis la création du dossier (?focus=pieces, voir DossierController::store())
-    // — amène directement l'attention sur les pièces à fournir plutôt que de laisser l'utilisateur
-    // les découvrir en scrollant.
-    const piecesCardRef = useRef(null);
+    // Redirection depuis la création du dossier (?focus=pieces, voir DossierController::store()).
+    //
+    // ⚠️ **Le paramètre n'affiche plus qu'une bannière : il ne fait plus défiler.** Le défilement
+    // automatique ouvrait la page sur son milieu, en sautant deux choses placées au-dessus : le
+    // panneau « Conditions requises », qui énumère **tout** ce qui bloque — pièces comprises, avec
+    // un bouton qui y mène — et la carte de l'accord client. Or le message de création dit
+    // « déposez l'accord du client **et** complétez les pièces » : on atterrissait donc sur la
+    // seconde moitié de la consigne sans avoir vu la première. Signalé en usage réel le
+    // 2026-10-05 ; mesuré, 20 dossiers sur 27 déclenchaient ce saut.
+    //
+    // La bannière, elle, garde son intérêt : elle explique *pourquoi* la carte compte, à qui y
+    // arrive. C'est l'invitation qui était utile, pas le déplacement forcé.
     const [showFocusPiecesBanner] = useState(
         () => new URLSearchParams(window.location.search).get('focus') === 'pieces'
     );
-    useEffect(() => {
-        if (showFocusPiecesBanner) {
-            piecesCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    }, []);
 
     /**
      * Rôles réellement présents au dossier et porteurs de pièces — « associé/gérant » était écrit
@@ -1138,7 +1181,7 @@ function InformationsTab({ dossier, can, onEditQuest, managedRoles, onAjouterPer
                 </CardContent>
             </Card>
 
-            <Card id={ANCRE_PIECES_PARTIES} ref={piecesCardRef}>
+            <Card id={ANCRE_PIECES_PARTIES}>
                 <CardHeader className="pb-3 flex flex-row items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
                         <Users className="h-4 w-4 text-seal" />
@@ -2745,6 +2788,17 @@ function FacturationTab({ dossier, can }) {
                                             {ligne.remiseDepasse && (
                                                 <span className="ml-2 text-[11px] text-danger">
                                                     ⚠️ remise supérieure au montant de la ligne
+                                                </span>
+                                            )}
+                                            {/* Le montant ne vient d'aucune note de frais de l'étude. Dit ici
+                                                plutôt qu'à l'écran d'administration seul : c'est cette ligne-ci
+                                                qui part au client, et la relire suppose d'y penser. */}
+                                            {ligne.montantAConfirmer && (
+                                                <span
+                                                    className="ml-2 inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+                                                    title="Aucune note de frais fournie par l'étude ne donne ce montant. À confirmer avant d'émettre."
+                                                >
+                                                    montant à confirmer
                                                 </span>
                                             )}
                                         </td>

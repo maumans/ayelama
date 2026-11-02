@@ -3,17 +3,21 @@
 namespace App\Http\Controllers;
 
 use App\Enums\CategorieActe;
+use App\Enums\OrganismeFormalite;
 use App\Enums\RoleUtilisateur;
+use App\Enums\TypeAssemblee;
 use App\Models\Bareme;
 use App\Models\DocumentAttendu;
 use App\Models\ModeleActe;
 use App\Models\ModeleCourrier;
+use App\Models\OperationSociete;
 use App\Models\Setting;
 use App\Models\TypeActe;
 use App\Models\User;
 use App\Models\UserRole;
 use App\Support\VariantesTypeActe;
 use Database\Seeders\ReglesGestionDocumentsSeeder;
+use Database\Seeders\ReglesGestionOperationsSeeder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -356,7 +360,104 @@ class ParametresController extends Controller
                 ],
             ]),
             'typesDocument' => ModeleActe::typesDocumentOptions(),
+            // Second onglet : le catalogue des opérations sur les sociétés (addendum v1.2 § 5).
+            // Il vit ici plutôt que sur un écran à lui parce qu'il règle la même chose que la
+            // colonne « Accord initial » — ce qu'une procédure exige — à un autre grain.
+            'operations'    => $this->catalogueOperations(),
+            'assemblees'    => TypeAssemblee::toutes(),
         ]);
+    }
+
+    /**
+     * Le catalogue éditable, et son écart à la référence écrite dans les enums.
+     *
+     * Même parti pris que `documents_attendus` : le code porte la règle sourcée, la base en
+     * porte une copie réglable, et l'écran montre **les deux**. Une règle qu'on peut corriger
+     * sans voir ce qu'elle valait au départ se corrige une fois et se perd.
+     *
+     * `regle_validee` est repris de la spécification, qui marque chaque ligne ✅ ou ⚠ : l'étude
+     * doit savoir lesquelles elle peut changer sans contredire une décision déjà prise.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function catalogueOperations(): array
+    {
+        return OperationSociete::orderBy('ordre')->get()->map(function (OperationSociete $o) {
+            $reference = $o->referenceEnum();
+
+            return [
+                'id'                 => $o->id,
+                'code'               => $o->code,
+                'type_acte_code'     => $o->type_acte_code,
+                'variante'           => $o->variante,
+                'libelle'            => $o->libelle,
+                'assemblee'          => $o->assemblee->value,
+                'assembleeLabel'     => $o->assemblee->abrege(),
+                'impacte_statuts'    => $o->impacte_statuts,
+                'impacte_rccm'       => $o->impacte_rccm,
+                'publication_jal'    => $o->publication_jal,
+                'exclusive'          => $o->exclusive,
+                'regle_validee'      => $o->regle_validee,
+                'description_statut' => $o->description_statut,
+                'est_actif'          => $o->est_actif,
+                // Une ligne sans référence n'est pas réglable : il n'y a rien à quoi la
+                // comparer, et rien côté code pour l'exécuter. L'écran le dit plutôt que de
+                // proposer un bouton « Réinitialiser » qui ne ferait rien.
+                'aUneReference'      => $reference !== null,
+                'diverge'            => $o->divergeDeLaReference($reference),
+                'differences'        => $o->differencesAvecLaReference($reference),
+            ];
+        })->all();
+    }
+
+    /**
+     * Régler une opération du catalogue — test T13 de la spécification.
+     *
+     * Les six champs réglables sont exactement ceux que `divergeDeLaReference()` compare : un
+     * champ modifiable sans être comparé serait un réglage dont l'écart ne se verrait jamais.
+     */
+    public function updateOperationSociete(Request $request, OperationSociete $operation)
+    {
+        $data = $request->validate([
+            'assemblee'       => ['required', Rule::enum(TypeAssemblee::class)],
+            'impacte_statuts' => ['required', 'boolean'],
+            'impacte_rccm'    => ['required', 'boolean'],
+            'publication_jal' => ['required', 'boolean'],
+            'exclusive'       => ['required', 'boolean'],
+            'regle_validee'   => ['required', 'boolean'],
+            'est_actif'       => ['required', 'boolean'],
+        ]);
+
+        $avant = $operation->only(array_keys($data));
+        $operation->update($data);
+
+        // Une règle qui décide des actes produits et des formalités engagées ne change pas en
+        // silence — même exigence que pour les documents attendus.
+        Log::info('Opération de société modifiée', [
+            'code'  => $operation->code,
+            'avant' => $avant,
+            'apres' => $data,
+            'par'   => auth()->id(),
+        ]);
+
+        return back()->with('success', "Règle de l'opération {$operation->code} mise à jour.");
+    }
+
+    /** Restaure la règle écrite dans l'enum pour une opération. */
+    public function reinitialiserOperationSociete(OperationSociete $operation)
+    {
+        if (! ReglesGestionOperationsSeeder::reinitialiser($operation->code)) {
+            // Ne pas faire croire à une remise à zéro qui n'a pas eu lieu : une ligne hors
+            // référence n'a pas de valeur d'origine à retrouver.
+            return back()->with('error', "L'opération {$operation->code} n'a pas de référence au code : rien à restaurer.");
+        }
+
+        Log::info('Opération de société réinitialisée à la référence', [
+            'code' => $operation->code,
+            'par'  => auth()->id(),
+        ]);
+
+        return back()->with('success', "Règle de l'opération {$operation->code} restaurée.");
     }
 
     /**
@@ -599,7 +700,24 @@ class ParametresController extends Controller
 
     // ── Barèmes (facturation + génération automatique de formalités) ───────
 
-    private const ORGANISMES = ['APIP', 'Impots', 'Conservation', 'CNSS', 'Greffe', 'Notaire', 'Autre'];
+    /**
+     * Les organismes proposés à la création d'un barème.
+     *
+     * ⚠️ Dérivés de {@see OrganismeFormalite}, plus recopiés. La liste écrite en clair
+     * ignorait `JAL` et aurait fait poser la publication au journal sous « Autre », que
+     * l'écran Formalités ne sait pas afficher.
+     *
+     * `Notaire` s'y ajoute : des honoraires ne se déposent nulle part, mais ils portent
+     * bien un organisme sur la ligne de barème — c'est la seule valeur de cette colonne
+     * qui ne corresponde à aucune formalité, et c'est voulu.
+     */
+    private static function organismes(): array
+    {
+        return [
+            ...array_map(fn (OrganismeFormalite $o) => $o->libelleBareme(), OrganismeFormalite::cases()),
+            'Notaire',
+        ];
+    }
 
     private function baremeToArray(Bareme $b): array
     {
@@ -615,6 +733,11 @@ class ParametresController extends Controller
             'remise_autorisee'    => (bool) $b->remise_autorisee,
             'base_calcul'         => $b->base_calcul,
             'description'         => $b->description,
+            // D'où vient ce montant, et l'étude l'a-t-elle confirmé ? Un tarif que personne n'a
+            // communiqué part quand même sur une facture : il doit au moins le dire. Voir la
+            // migration `ajouter_source_aux_baremes` pour les trois états.
+            'source'              => $b->source,
+            'a_confirmer'         => (bool) $b->a_confirmer,
             'actif'               => $b->actif,
             'ordre'               => $b->ordre,
             'genere_formalite'    => $b->genere_formalite,
@@ -650,7 +773,7 @@ class ParametresController extends Controller
                 'value' => $c->value,
                 'label' => $c->label(),
             ]),
-            'organismes' => self::ORGANISMES,
+            'organismes' => self::organismes(),
             // Le catalogue des données captables, servi au lieu d'être recopié en JavaScript :
             // l'écran ne porte ainsi aucun nom de donnée, et un cas ajouté à l'enum y apparaît
             // sans toucher au front. Même parti que `piecesRequises.js` pour les rôles.
@@ -659,6 +782,9 @@ class ParametresController extends Controller
             'stats'      => [
                 'total'  => Bareme::count(),
                 'actifs' => Bareme::where('actif', true)->count(),
+                // Combien de tarifs facturés ne viennent d'aucune note de frais de l'étude.
+                // Compté plutôt que deviné : c'est ce que l'étude doit relire avant d'émettre.
+                'aConfirmer' => Bareme::where('actif', true)->where('a_confirmer', true)->count(),
             ],
         ]);
     }

@@ -362,6 +362,165 @@ export function rolesARattacherDoffice(questionnaire, personnesConnues = [], cli
     return retenus;
 }
 
+/**
+ * Les lignes de « Nouvelle répartition » reprises du registre.
+ *
+ * ⚠️ **Le clerc retapait ce que le registre savait.** `modif.repartition_apres` partait d'une
+ * carte vierge : il fallait ressaisir chaque associé au clavier, puis recalculer les
+ * pourcentages de tête — alors que `societe_associes` porte les noms, les parts et les fiches,
+ * et que `EtatSocieteService::courant()` calcule déjà les pourcentages.
+ *
+ * ⚠️ **Ce n'est pas `rolesARattacherDoffice()`, et ce ne pouvait pas l'être.** Celui-ci rattache
+ * **une fiche à une carte** et s'interdit explicitement les blocs répétables, parce qu'il
+ * déduit un préfixe de `fields[0].id`. Ici on ne rattache rien : on **écrit des lignes** dans
+ * `formValues[bloc]`, ce qu'un bloc répétable rend directement. Deux gestes différents, deux
+ * fonctions — les confondre aurait fait écrire des clés bâtardes du genre `associes.nom`.
+ *
+ * La règle « un seul candidat, sinon rien » ne s'applique pas non plus : il n'y a aucune
+ * ambiguïté à lever, les associés du registre **sont** la répartition de départ.
+ *
+ * @param {{associes?: Array<{nom: string, client_id: ?number, nb_parts: number, pourcentage: ?number}>}} etat
+ * @returns {Array<Record<string, unknown>>} prêt pour `formValues['modif.repartition_apres']`
+ */
+export function lignesDeRepartitionDepuisRegistre(etat) {
+    return (etat?.associes ?? [])
+        .filter(a => a?.nom)
+        .map(a => ({
+            associe:        a.nom,
+            parts_chiffres: a.nb_parts === null || a.nb_parts === undefined ? '' : String(a.nb_parts),
+            pourcentage:    a.pourcentage === null || a.pourcentage === undefined ? '' : String(a.pourcentage),
+            // ⚠️ **Un instantané, pas un booléen.** `__depuisRegistre: true` disait seulement
+            // d'où venait la ligne ; il ne permettait pas de voir que le clerc avait ensuite
+            // changé les parts. En gardant ce que le registre disait, la ligne affiche
+            // « depuis le registre » tant que rien ne bouge, et « modifié — 100 au registre »
+            // dès que l'écart apparaît. La même information sert au clerc et à la relecture.
+            //
+            // ⚠️ Cette clé est **enregistrée dans `donnees`**, comme `__saisieLibre`, `client`
+            // et `partie_id` le sont déjà sur les autres blocs : rien ne filtre les clés
+            // préfixées de `__` avant l'envoi. C'est assumé — la provenance d'une ligne de
+            // répartition a sa place dans un instantané.
+            __registre: {
+                nb_parts:    a.nb_parts ?? null,
+                pourcentage: a.pourcentage ?? null,
+            },
+        }));
+}
+
+/**
+ * Une carte de répartition est-elle encore vierge ?
+ *
+ * On ne reprend le registre que dans ce cas. Écraser une saisie en cours parce que le clerc
+ * vient de rattacher une société serait le genre d'« aide » qui fait perdre du travail —
+ * même prudence que `rolesARattacherDoffice`, qui s'abstient dès qu'un rôle est déjà pourvu.
+ *
+ * `initRepeatableFields()` crée `min` lignes vides au démarrage : une carte intacte est donc
+ * une carte dont **aucune** ligne ne porte de valeur, et non une carte sans ligne.
+ */
+export function repartitionEstVierge(lignes) {
+    if (!Array.isArray(lignes) || lignes.length === 0) return true;
+
+    return lignes.every(ligne => Object.entries(ligne ?? {})
+        .filter(([cle]) => !cle.startsWith('__'))
+        .every(([, valeur]) => valeur === '' || valeur === null || valeur === undefined));
+}
+
+/**
+ * Les personnes que ce dossier connaît déjà, pour les proposer au lieu de les faire retaper.
+ *
+ * ⚠️ **Le nom d'un associé n'est pas un libellé, c'est une clé.** C'est par lui que
+ * `SocieteMutationService::appliquerRepartition()` retrouve qui perd ses parts. La casse et
+ * les espaces sont normalisés depuis le 2026-11-02, mais une faute de frappe ne l'est pas :
+ * « Maurice MANSARE » au lieu de « Maurice Mansaré » fait sortir l'associé réel et entrer un
+ * fantôme avec ses parts, sans un mot. Un champ de texte libre pour cette valeur-là est donc
+ * un défaut en attente, pas une commodité.
+ *
+ * Trois origines, dans cet ordre de priorité :
+ *
+ *  1. le **registre** — les associés actuels de la société rattachée ;
+ *  2. le **dossier** — cessionnaires, souscripteurs et cédants déjà déclarés dans ce
+ *     questionnaire, qui n'existent pas encore au registre ;
+ *  3. le **gérant entrant**, qui devient souvent associé dans la foulée.
+ *
+ * Le dédoublonnage se fait sur le nom normalisé, et la **première** origine l'emporte : une
+ * personne déjà au registre y reste rattachée même si elle est aussi cessionnaire.
+ *
+ * @returns {Array<{valeur: string, label: string, origine: 'registre'|'dossier'}>}
+ */
+export function personnesDuDossier({ etatSociete = null, formValues = {} } = {}) {
+    const vues = new Map();
+
+    const ajouter = (nom, origine) => {
+        const propre = String(nom ?? '').trim();
+
+        if (propre === '') return;
+
+        const cle = propre.toLowerCase().replace(/\s+/g, ' ');
+
+        if (vues.has(cle)) return;
+
+        vues.set(cle, { valeur: propre, label: propre, origine });
+    };
+
+    for (const associe of etatSociete?.associes ?? []) {
+        ajouter(associe?.nom, 'registre');
+    }
+
+    for (const bloc of ['modif.cessionnaires', 'modif.souscripteurs', 'modif.cedants']) {
+        const lignes = Array.isArray(formValues[bloc]) ? formValues[bloc] : [];
+
+        for (const ligne of lignes) {
+            ajouter(ligne?.nom ?? ligne?.prenom_nom, 'dossier');
+        }
+    }
+
+    ajouter(formValues['gerant_entrant.prenom_nom'], 'dossier');
+
+    return [...vues.values()];
+}
+
+/**
+ * Les listes d'options qu'un champ peut demander par `optionsDe`.
+ *
+ * ⚠️ **Nommer les sources ici, et nulle part ailleurs.** Un `optionsDe` mal orthographié
+ * rendrait une liste vide : le clerc verrait un sélecteur sans aucun choix et n'aurait aucun
+ * moyen de comprendre pourquoi. Le contrôle H de `verifier-sections-questionnaire.mjs`
+ * vérifie que chaque `optionsDe` déclaré figure dans cette liste.
+ */
+export const SOURCES_OPTIONS_DYNAMIQUES = ['personnesDuDossier', 'gerantsEnFonction'];
+
+/**
+ * Les gérants que le registre dit en fonction.
+ *
+ * ⚠️ **Le nom d'un gérant sortant est une clé, lui aussi.** `appliquerGerance()` s'en sert pour
+ * clôturer son mandat ; mal orthographié, le mandat n'est **pas** clôturé et le nouveau gérant
+ * s'ajoute quand même — la société se retrouve avec deux gérants en fonction, deux lignes
+ * parfaitement valides que rien ne signale.
+ *
+ * Liste séparée de `personnesDuDossier` : on ne propose pas un associé comme gérant sortant.
+ */
+export function gerantsEnFonction({ etatSociete = null } = {}) {
+    return (etatSociete?.gerants ?? [])
+        .filter(g => g?.nom)
+        .map(g => ({
+            valeur: g.nom,
+            label: g.nom,
+            origine: 'registre',
+        }));
+}
+
+/**
+ * Résout les options dynamiques d'un questionnaire, prêtes pour le rendu.
+ *
+ * Les moteurs appellent ceci et passent le résultat à `RepeatableGroup` : la **décision**
+ * reste une fonction pure, les composants n'en portent que l'affichage.
+ */
+export function optionsDynamiques(contexte) {
+    return {
+        personnesDuDossier: personnesDuDossier(contexte),
+        gerantsEnFonction:  gerantsEnFonction(contexte),
+    };
+}
+
 export function champsDuRole(questionnaire, clientRole) {
     const groupe = groupFieldsBySection(questionnaire).find(g => g.clientRole === clientRole);
 

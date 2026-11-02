@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ModeTraitement;
 use App\Enums\StatutSociete;
 use App\Enums\TypeModificationStatutaire;
 use App\Enums\VarianteDissolution;
@@ -158,5 +159,42 @@ class ParitesVariantesSocieteTest extends TestCase
             'La phase choisie au questionnaire décide de la variante, donc des actes produits '
             . "et de l'effet sur la fiche société. Un libellé divergent ne déclenche rien.",
         );
+    }
+
+    // ── Mode de traitement ───────────────────────────────────────────────────
+
+    public function test_les_libelles_de_mode_de_traitement_php_et_js_sont_identiques(): void
+    {
+        // Le champ est déclaré **deux fois** — une carte « société » par questionnaire de
+        // société. Les deux listes sont vérifiées, et l'une ne couvre pas l'autre : c'est
+        // exactement la forme de divergence que le dépôt a déjà payée trois fois, une règle
+        // posée sur un seul des moteurs de rendu.
+        $source = file_get_contents(resource_path('js/data/questionnaires.js'));
+
+        $this->assertSame(
+            2,
+            substr_count($source, "id: 'mode_traitement'"),
+            'Le mode de traitement doit être posé sur les deux questionnaires de société — '
+            . 'modification et dissolution. Le § 5.2 de la spec le fait porter sur les deux.',
+        );
+
+        $php = array_map(fn (ModeTraitement $m) => $m->label(), ModeTraitement::cases());
+
+        // Chaque carte est ancrée sur **sa** section : un motif commun n'aurait vérifié que la
+        // première occurrence, et laissé l'autre dériver — la divergence qu'on veut interdire.
+        foreach (['Société dissoute', 'Société concernée'] as $section) {
+            $js = $this->litterauxJs(
+                'js/data/questionnaires.js',
+                "/\{ id: 'mode_traitement'.*?section: '{$section}'.*?options: \[(.*?)\],/s",
+            );
+
+            $this->assertSame(
+                $php,
+                $js,
+                "Carte « {$section} » : un libellé divergent rend "
+                . '`ModeTraitement::depuisLibelle()` null, et le mode enregistré au '
+                . "questionnaire cesse d'être lisible par le serveur — sans erreur.",
+            );
+        }
     }
 }

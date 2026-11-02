@@ -147,6 +147,14 @@ class Facture extends Model
                 'remisePourcentage' => $l->remisePourcentage(),
                 'remiseAutorisee'   => $l->remiseAutorisee(),
                 'remiseDepasse'     => $l->remiseDepasseLaLigne(),
+                // Le montant vient-il d'une note de frais de l'étude, ou de nulle part ?
+                // Porté jusqu'ici parce que c'est **sur la note** que la question se pose :
+                // la relire à l'écran d'administration suppose d'y penser, la voir sur la
+                // ligne qu'on s'apprête à envoyer ne le suppose pas.
+                //
+                // Une ligne saisie à la main n'a pas de barème : elle n'est pas « à
+                // confirmer » pour autant — quelqu'un l'a voulue.
+                'montantAConfirmer' => (bool) $l->bareme?->a_confirmer,
             ]),
             'paiements' => $this->paiements->map(fn ($p) => [
                 'id'             => $p->id,

@@ -29,8 +29,63 @@ import { piecesRequisesPour } from '@/lib/piecesRequises';
  *                  — voir attachPartieIds() dans Show.jsx). Absent/vide pour Create.jsx, où
  *                  aucune Partie n'existe encore avant la création du dossier.
  */
-export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false, poolClients = [], onClientCreated, partiesById = {}, piecesRequises = {}, stagedPieces = {}, onStagedPieceChange, piecesBrouillon = {}, onRetirerPieceBrouillon }) {
+/**
+ * D'où vient cette ligne, et a-t-elle bougé depuis ?
+ *
+ * Muette sur une ligne saisie à la main : il n'y a rien à comparer.
+ */
+function MentionRegistre({ item }) {
+    const origine = item?.__registre;
+
+    if (!origine) return null;
+
+    const actuelles = String(item.parts_chiffres ?? '');
+    const reprises  = origine.nb_parts === null || origine.nb_parts === undefined ? '' : String(origine.nb_parts);
+
+    if (actuelles === reprises) {
+        return (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-px text-[10px] font-normal text-slate-500">
+                depuis le registre
+            </span>
+        );
+    }
+
+    return (
+        <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-normal text-amber-700">
+            modifié — {reprises === '' ? 'absent' : reprises} au registre
+        </span>
+    );
+}
+
+export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false, poolClients = [], onClientCreated, partiesById = {}, piecesRequises = {}, stagedPieces = {}, onStagedPieceChange, piecesBrouillon = {}, onRetirerPieceBrouillon, optionsDynamiques = {} }) {
     const { fields = [], min = 1, max = 10, label, clientRole } = fieldDef;
+
+    /**
+     * Les choix d'un champ : son tableau `options` figé, ou une liste `optionsDe` fournie par
+     * l'écran — les associés que le registre connaît, par exemple.
+     *
+     * ⚠️ Une source inconnue rend une liste **vide** : le clerc verrait un sélecteur sans
+     * aucun choix sans pouvoir comprendre pourquoi. Le contrôle H de
+     * `verifier-sections-questionnaire.mjs` interdit qu'un `optionsDe` désigne une source que
+     * personne ne fournit.
+     */
+    const optionsDe = (f) => {
+        if (f.optionsDe) {
+            return (optionsDynamiques[f.optionsDe] ?? []).map(o =>
+                (typeof o === 'string' ? { valeur: o, label: o } : o));
+        }
+
+        return (f.options ?? []).map(o => ({ valeur: o, label: o }));
+    };
+
+    /**
+     * Ce champ est-il en saisie libre sur cette ligne ?
+     *
+     * Un entrant ne figure dans aucune liste : il faut pouvoir sortir du sélecteur. Le
+     * marqueur est posé **par ligne et par champ** (`__libre_associe`), comme
+     * `__saisieLibre` l'est pour l'identité d'une personne.
+     */
+    const enSaisieLibre = (item, f) => !!item?.[`__libre_${f.id}`];
     const [creatingForIndex, setCreatingForIndex] = useState(null);
     const [editingIndex, setEditingIndex] = useState(null);
     const [previewKey, setPreviewKey] = useState(null);
@@ -201,8 +256,16 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                         className="rounded-lg border border-seal-light bg-white p-4 shadow-sm"
                     >
                         <div className="mb-3 flex items-center justify-between">
-                            <span className="text-sm font-semibold text-seal">
+                            <span className="flex items-center gap-2 text-sm font-semibold text-seal">
                                 {label} {idx + 1}
+                                {/* ⚠️ La reprise se **voit**, et l'écart aussi. La composition du
+                                    registre peut être périmée — elle n'est mise à jour qu'au
+                                    retour de la formalité RCCM — et un préremplissage muet serait
+                                    le réalignement silencieux que le dépôt refuse ailleurs. Dès
+                                    que le clerc change les parts, la ligne rappelle ce que le
+                                    registre disait : il n'a pas à s'en souvenir, et la relecture
+                                    le voit aussi. */}
+                                <MentionRegistre item={item} />
                             </span>
                             {value.length > min && (
                                 <button
@@ -224,22 +287,71 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                     <Label className="mb-1 block text-xs text-gray-600">
                                         {f.label}
                                         {f.required && <span className="ml-1 text-red-500">*</span>}
+                                        {/* ⚠️ `readonly` n'était **pas lu ici**. `ChampQuestionnaire`
+                                            l'honore pour les champs scalaires, ce rendu-ci l'ignorait :
+                                            un champ calculé dans un bloc répétable restait librement
+                                            éditable, et une saisie à la main écrasait le calcul sans
+                                            rien dire. C'est ce qui empêchait de calculer le
+                                            pourcentage de la répartition. */}
+                                        {f.readonly && (
+                                            <span className="ml-1.5 text-[10px] font-normal text-slate-400">calculé</span>
+                                        )}
                                     </Label>
-                                    {f.type === 'select' ? (
-                                        <select
-                                            value={item[f.id] ?? ''}
-                                            onChange={e => updateItem(idx, f.id, e.target.value)}
-                                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm focus:border-seal focus:outline-none focus:ring-1 focus:ring-seal"
-                                        >
-                                            <option value="">— Choisir —</option>
-                                            {(f.options ?? []).map(opt => (
-                                                <option key={opt} value={opt}>{opt}</option>
-                                            ))}
-                                        </select>
+                                    {f.type === 'select' && !enSaisieLibre(item, f) ? (
+                                        <>
+                                            <select
+                                                value={item[f.id] ?? ''}
+                                                onChange={e => updateItem(idx, f.id, e.target.value)}
+                                                disabled={!!f.readonly}
+                                                className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm focus:border-seal focus:outline-none focus:ring-1 focus:ring-seal disabled:bg-slate-50 disabled:text-slate-500"
+                                            >
+                                                <option value="">— Choisir —</option>
+                                                {optionsDe(f).map(opt => (
+                                                    <option key={opt.valeur} value={opt.valeur}>
+                                                        {opt.label}{opt.origine === 'registre' ? ' — au registre' : ''}
+                                                    </option>
+                                                ))}
+                                                {/* Une valeur héritée d'un dossier antérieur peut ne plus
+                                                    figurer dans la liste. L'offrir quand même évite de
+                                                    l'effacer en silence à la première ouverture. */}
+                                                {item[f.id] && !optionsDe(f).some(o => o.valeur === item[f.id]) && (
+                                                    <option value={item[f.id]}>{item[f.id]}</option>
+                                                )}
+                                            </select>
+                                            {f.saisieLibreAutorisee && !readOnly && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateItem(idx, `__libre_${f.id}`, true)}
+                                                    className="mt-1 text-[11px] text-seal hover:underline"
+                                                >
+                                                    Saisir un autre nom
+                                                </button>
+                                            )}
+                                        </>
+                                    ) : f.type === 'select' ? (
+                                        /* Échappement : la personne n'est dans aucune liste — un
+                                           entrant, typiquement. On revient au texte, en le disant. */
+                                        <>
+                                            <Input
+                                                type="text"
+                                                value={item[f.id] ?? ''}
+                                                onChange={e => updateItem(idx, f.id, e.target.value)}
+                                                placeholder={f.placeholder ?? ''}
+                                                className="text-sm"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => updateItem(idx, `__libre_${f.id}`, false)}
+                                                className="mt-1 text-[11px] text-seal hover:underline"
+                                            >
+                                                Revenir à la liste
+                                            </button>
+                                        </>
                                     ) : f.type === 'date' ? (
                                         <DateField
                                             value={item[f.id] ?? ''}
                                             onValueChange={val => updateItem(idx, f.id, val)}
+                                            disabled={!!f.readonly}
                                             className="text-sm"
                                         />
                                     ) : f.type === 'number' ? (
@@ -248,7 +360,8 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                             value={item[f.id] ?? ''}
                                             onValueChange={val => updateItem(idx, f.id, val)}
                                             placeholder={f.placeholder ?? ''}
-                                            className={`text-sm ${f.mono ? 'font-ref' : ''}`}
+                                            disabled={!!f.readonly}
+                                            className={`text-sm ${f.mono ? 'font-ref' : ''} ${f.readonly ? 'bg-slate-50 text-slate-500' : ''}`}
                                         />
                                     ) : f.type === 'year' ? (
                                         <Input
@@ -268,6 +381,7 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                             value={item[f.id] ?? ''}
                                             onValueChange={val => updateItem(idx, f.id, val)}
                                             placeholder={f.placeholder ?? ''}
+                                            disabled={!!f.readonly}
                                             className="text-sm"
                                         />
                                     ) : (
@@ -276,7 +390,8 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                             value={item[f.id] ?? ''}
                                             onChange={e => updateItem(idx, f.id, e.target.value)}
                                             placeholder={f.placeholder ?? ''}
-                                            className={`text-sm ${f.mono ? 'font-ref' : ''}`}
+                                            disabled={!!f.readonly}
+                                            className={`text-sm ${f.mono ? 'font-ref' : ''} ${f.readonly ? 'bg-slate-50 text-slate-500' : ''}`}
                                         />
                                     )}
                                 </div>

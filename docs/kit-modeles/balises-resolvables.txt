@@ -825,8 +825,12 @@ liquidateur.type_personne
 loc.adresse
 loc.civilite
 loc.comparution
+loc.date_naissance
+loc.date_naissance_jma
+loc.date_naissance_lettres
 loc.email
 loc.nationalite
+loc.ne_a
 loc.piece_numero
 loc.piece_type
 loc.prenom_nom
@@ -929,6 +933,7 @@ membres.repr_titre_reference
 membres.repr_type_personne
 membres.repr_ville
 membres.type_personne
+mode_traitement
 modif.agrement_associes
 modif.augmentation_banque
 modif.augmentation_capital_apres
@@ -1112,6 +1117,9 @@ modif.cessionnaires.type_personne
 modif.date_cession
 modif.date_cession_jma
 modif.date_cession_lettres
+modif.decision_mandataire
+modif.decision_objet
+modif.decision_texte
 modif.denomination_nouvelle
 modif.diminution_capital_apres
 modif.diminution_montant

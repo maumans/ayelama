@@ -131,6 +131,91 @@ la procédure choisie.
 **Brouillons** : une saisie inachevée peut être enregistrée comme brouillon. Le brouillon est
 propre à son auteur et **ne consomme pas de référence de dossier**. Il se reprend plus tard.
 
+### Registre des sociétés (`/societes`)
+
+Toutes les fiches société de l'étude, avec leur statut de cycle de vie.
+
+**Les lacunes du registre sont cliquables.** Sous le titre, une puce par donnée manquante —
+sociétés immatriculées dont le RCCM n'a jamais atteint le registre, fiches sans NIF, sans date
+d'immatriculation, sans dossier constitutif. Un clic isole les fiches concernées, un second
+relâche le filtre. Une lacune qui ne concerne aucune fiche n'est pas affichée.
+
+**Sur chaque ligne** : le RCCM, le NIF, l'email et le téléphone se copient d'un clic — ce sont
+eux qu'on recopie sans cesse dans les formalités et les courriers. Le nombre de dossiers mène à
+la liste filtrée sur cette société, et la référence en dessous ouvre le **dossier constitutif**,
+où se trouvent statuts, PV, RCCM et DNSV.
+
+> **Une fiche société ne se corrige pas depuis le registre**, et ce n'est pas un oubli : une
+> modification de société est l'objet d'un **dossier**, et elle n'est portée au registre qu'une
+> fois l'acte expédié — après le procès-verbal, la certification et les formalités. Un formulaire
+> d'édition ici permettrait à la fiche de dire autre chose que les actes.
+>
+> L'avertissement « immatriculée — RCCM absent du registre » n'a donc pas de bouton : le numéro
+> arrive au retour de la formalité, ou se saisit dans le prochain dossier de la société.
+
+> Les colonnes **Prochaine échéance** et **Liquidateur** n'apparaissent que si au moins une
+> société affichée est en liquidation. Elles seraient vides le reste du temps et repousseraient
+> hors de vue le siège et le capital.
+
+**« Radier »** n'apparaît que sur une liquidation clôturée — la radiation est constatée à la main,
+sur la pièce du greffe, car aucune étape de dossier ne la prouve.
+
+---
+
+### Fiche société (`/societes/{id}/fiche`)
+
+Depuis le registre, cliquer sur une dénomination ouvre sa fiche.
+
+En haut, **l'état actuel** : capital, parts, valeur nominale, durée, RCCM, NIF, siège, objet.
+Puis deux onglets.
+
+**Associés & gérants** — qui détient la société aujourd'hui, avec le nombre de parts, le
+pourcentage et la date d'entrée ; la gérance, statutaire ou non ; et, plus bas, **les anciens**,
+avec leurs dates de sortie et le motif de fin de mandat. Une personne qui sort n'est pas effacée :
+sa ligne est datée. C'est ce qui permet de savoir qui détenait quoi à une date donnée.
+
+> Si la répartition ne couvre pas toutes les parts du capital, la fiche le dit — et la prochaine
+> opération sur cette société sera refusée tant que l'écart subsiste.
+
+**Historique** — la suite des opérations appliquées, de la plus récente à la plus ancienne, avec
+pour chacune la date d'effet (celle de l'assemblée, pas celle du traitement), le dossier qui l'a
+portée, son auteur, et le détail de ce qui a changé : « Capital : 10 000 000 → 25 000 000 GNF ».
+
+> **L'historique ne se corrige pas et ne s'efface pas.** Une opération appliquée est un fait
+> daté ; pour revenir dessus, on en enregistre une nouvelle. Il survit à la suppression du
+> dossier qui l'a produite.
+
+---
+
+### Anniversaires (`/anniversaires`)
+
+La liste des clients dont l'anniversaire approche, avec de quoi le souhaiter sans quitter l'écran.
+
+**Quatre filtres**, combinables, et inscrits dans l'adresse de la page — une vue filtrée se
+partage donc par simple copie du lien :
+
+- **Fenêtre** 7, 30 ou 90 jours ;
+- **Statut** : tous, à souhaiter, déjà souhaités ;
+- **Mois civil** : tous les anniversaires d'octobre, par exemple, **y compris ceux déjà passés**
+  ce mois-ci — c'est fait pour préparer ou rattraper une série ;
+- **Recherche** par nom.
+
+**Sur chaque ligne** : l'email et le téléphone se copient d'un clic, un bouton ouvre votre
+messagerie avec un message d'anniversaire déjà rédigé, un autre ouvre WhatsApp avec le même
+texte, et un lien mène aux dossiers du client.
+
+> **« Marquer souhaité »** enregistre qui a souhaité, quand, et par quel moyen. C'est **vous**
+> qui souhaitez : l'application n'envoie rien — un message d'anniversaire envoyé par une machine
+> se voit. Elle retient ce que vous déclarez avoir fait, pour que la personne suivante ne
+> redouble pas l'appel et qu'un client ne soit pas oublié.
+>
+> La marque porte sur **l'anniversaire fêté**, pas sur le jour du geste : souhaiter le
+> 31 décembre pour un anniversaire du 2 janvier coche bien l'année qui vient.
+
+Seuls les clients **personnes physiques** ayant une date de naissance apparaissent.
+
+---
+
 ### D.3 Fiche dossier (`/dossiers/{référence}`)
 
 L'écran central de l'application. Il se compose de :

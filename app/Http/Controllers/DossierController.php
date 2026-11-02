@@ -150,6 +150,10 @@ class DossierController extends Controller
                 $qq->where('reference', 'like', "%{$s}%")
                    ->orWhere('objet', 'like', "%{$s}%")))
             ->when($request->etape,     fn ($q, $e)   => $q->where('etape', $e))
+            // Filtre exact par societe : le registre y renvoie depuis sa colonne
+            // « Dossiers ». Une recherche textuelle sur la denomination aurait ramene
+            // les homonymes et manque ceux dont l'objet ne la cite pas.
+            ->when($request->societe,   fn ($q, $id)  => $q->where('societe_id', $id))
             ->when($request->categorie, fn ($q, $cat) => $q->whereHas('typeActe', fn ($qq) => $qq->where('categorie', $cat)))
             ->when($request->retard === '1', fn ($q)  => $q->where('etape', '!=', 'cloture')->whereNotNull('echeance')->where('echeance', '<', $today))
             ->when($request->sort === 'echeance',  fn ($q) => $q->orderBy('echeance'))
@@ -235,6 +239,7 @@ class DossierController extends Controller
             'filters'    => [
                 'q'         => $request->q         ?? '',
                 'etape'     => $request->etape      ?? '',
+                'societe'   => $request->societe    ?? '',
                 'categorie' => $request->categorie  ?? '',
                 'retard'    => $request->retard     ?? '',
                 'sort'      => $request->sort       ?? '',
@@ -362,8 +367,8 @@ class DossierController extends Controller
 
         // Le dossier naît en Initialisation : on atterrit sur l'onglet Informations, où se
         // trouvent l'accord client à déposer, les pièces des personnes et le questionnaire
-        // — c'est le travail de cette étape. `focus=pieces` fait en plus défiler jusqu'à
-        // la checklist quand il y a des pièces à fournir (voir
+        // — c'est le travail de cette étape. `focus=pieces` affiche une bannière sur la
+        // checklist quand il y a des pièces à fournir (voir
         // DossierStepService::verifierInitialisation(), qui bloque l'avancement sans elles).
         // Dérivé de la checklist elle-même plutôt que d'une liste de rôles recopiée ici :
         // les modifications statutaires en ont ajouté quatre (cédant, cessionnaire,

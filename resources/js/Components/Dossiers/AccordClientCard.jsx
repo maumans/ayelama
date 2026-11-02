@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { router } from '@inertiajs/react';
 import { AlertTriangle, CheckCircle2, Download, Eye, Printer, RefreshCw, Upload } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,15 +52,12 @@ export function AccordClientCard({ dossier, can }) {
     const [preview, setPreview] = useState(false);
     const [uploading, setUploading] = useState(false);
     const inputRef = useRef(null);
-    const cardRef  = useRef(null);
-
-    // ?focus=accord — permet à un lien (message de blocage, notification) d'amener
-    // directement l'attention ici, sur le même principe que ?focus=pieces.
-    useEffect(() => {
-        if (new URLSearchParams(window.location.search).get('focus') === 'accord') {
-            cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    }, []);
+    // ⚠️ Il y avait ici un défilement sur `?focus=accord`, « sur le même principe que
+    // ?focus=pieces ». Retiré le 2026-10-05 avec son jumeau, pour deux raisons : **aucun
+    // émetteur** — rien dans le dépôt ne produisait cette URL, c'était un gestionnaire qui
+    // attendait un paramètre que personne n'envoyait — et la navigation vers cette carte passe
+    // déjà par `ANCRE_ACCORD_CLIENT`, que le panneau des blocages vise par `allerAuBlocage()`.
+    // Deux mécanismes pour un même besoin, dont un mort.
 
     // ⚠️ « Sans objet » masque la **demande**, jamais une pièce déjà déposée : la catégorie reste
     // `accord_client`, donc le document est exclu de l'onglet Actes et cette carte est le seul
@@ -117,7 +114,6 @@ export function AccordClientCard({ dossier, can }) {
     return (
         <Card
             id={ANCRE_ACCORD_CLIENT}
-            ref={cardRef}
             className={cn(!accordRecu && bloquante && 'border-warning/40 ring-2 ring-warning/40')}
         >
             <CardHeader className="pb-3">

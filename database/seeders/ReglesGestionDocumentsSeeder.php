@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\TypeModificationStatutaire;
+use App\Enums\VarianteDissolution;
 use App\Models\DocumentAttendu;
 use App\Models\TypeActe;
 use App\Support\VariantesTypeActe;
@@ -81,6 +82,16 @@ class ReglesGestionDocumentsSeeder extends Seeder
      */
     private static function procedures(): array
     {
-        return ['SOC-MOD' => TypeModificationStatutaire::class];
+        return [
+            'SOC-MOD' => TypeModificationStatutaire::class,
+            // Ajoutée le 2026-10-30. La dissolution n'y figurait pas, et c'était juste : le
+            // compte rendu de juillet 2026 n'en disait rien, et `documentsReference()` rendait
+            // `null` délibérément. Le **tableau de validation signé le 2026-10-28** (lignes 15
+            // et 17) décrit les deux procédures acte par acte : la source existe désormais.
+            //
+            // Conséquence mesurée : sans liste, `ActesGeneratorService` ne filtrait rien et une
+            // **clôture de liquidation** produisait l'acte et l'insertion de **dissolution**.
+            'SOC-DIS' => VarianteDissolution::class,
+        ];
     }
 }

@@ -2,7 +2,7 @@
 
 namespace App\Enums;
 
-use App\Contracts\VarianteTypeActe;
+use App\Contracts\OperationDeSociete;
 
 /**
  * Les deux phases d'une dissolution-liquidation, variantes du type d'acte `SOC-DIS`.
@@ -26,7 +26,7 @@ use App\Contracts\VarianteTypeActe;
  * vivent dans {@see JalonLiquidation}, marqués à vérifier, et **alertent sans jamais bloquer**.
  * Une contrainte inventée est pire qu'une contrainte absente.
  */
-enum VarianteDissolution: string implements VarianteTypeActe
+enum VarianteDissolution: string implements OperationDeSociete
 {
     case Dissolution        = 'dissolution';
     case ClotureLiquidation = 'cloture_liquidation';
@@ -42,6 +42,91 @@ enum VarianteDissolution: string implements VarianteTypeActe
             self::Dissolution        => 'Dissolution anticipée',
             self::ClotureLiquidation => 'Clôture de la liquidation',
         };
+    }
+
+    /**
+     * Le code d'opération selon l'addendum v1.2 § 5 — implémentation de {@see OperationDeSociete}.
+     */
+    public function codeOperation(): string
+    {
+        return match ($this) {
+            self::Dissolution        => 'DISSOLUTION',
+            self::ClotureLiquidation => 'CLOTURE_LIQUIDATION',
+        };
+    }
+
+    /**
+     * L'assemblée exigée par cette phase — addendum v1.2 § 2 & § 5.
+     */
+    public function assemblee(): TypeAssemblee
+    {
+        return match ($this) {
+            self::Dissolution        => TypeAssemblee::Age,
+            self::ClotureLiquidation => TypeAssemblee::AgCloture,
+        };
+    }
+
+    /**
+     * Modifie-t-elle les statuts ?
+     *
+     * Une dissolution ou clôture de liquidation ne produit pas de statuts mis à jour.
+     */
+    public function impacteStatuts(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Modifie-t-elle l'inscription au RCCM ?
+     *
+     * La dissolution comme la radiation font l'objet d'un dépôt au greffe.
+     */
+    public function impacteRccm(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Impose-t-elle une publication au JAL ? — addendum v1.2 § 5.
+     *
+     * La dissolution impose un avis de dissolution au JAL. La clôture, non — et ce n'est plus
+     * un défaut prudent : la ligne 17 du tableau de validation du 2026-10-28, cochée « Oui »,
+     * énumère les quatre étapes de la liquidation sans en citer aucune publication, là où la
+     * ligne 15 la cite pour la dissolution.
+     */
+    public function publicationJal(): bool
+    {
+        return match ($this) {
+            self::Dissolution        => true,
+            self::ClotureLiquidation => false,
+        };
+    }
+
+    /**
+     * Ne se combine avec aucune autre opération dans le même dossier — règle C1.
+     */
+    public function exclusive(): bool
+    {
+        return true;
+    }
+
+    /**
+     * La règle est-elle validée par l'étude (✅) ou à confirmer (⚠) ? — addendum v1.2 § 5.
+     *
+     * **Les deux le sont désormais**, par le tableau de validation signé par Maître Bah le
+     * 28 octobre 2026 (`docs/Addvalis_Tableau_Validation_Modif_Dissol_Liquid_OK (1).docx`) :
+     *
+     *  - ligne 15, cochée « Oui » : la dissolution passe par un PV d'AGE, sa publication au
+     *    journal d'annonces légales, le dépôt au greffe, puis un RCCM de dissolution ;
+     *  - ligne 17, cochée « Oui » : la clôture statue sur les comptes en assemblée de clôture,
+     *    le greffe délivre un RCCM de liquidation, la société est radiée. **Aucune publication
+     *    au JAL n'y figure**, alors que la ligne 15 la mentionne pour la dissolution et que la
+     *    ligne 5 a été annotée pour l'ajouter là où elle manquait. Cette absence-là est donc
+     *    une réponse, pas un oubli : {@see publicationJal()} reste faux, et il est validé.
+     */
+    public function regleValidee(): bool
+    {
+        return true;
     }
 
     /**
@@ -113,8 +198,32 @@ enum VarianteDissolution: string implements VarianteTypeActe
     public function documentsReference(): ?array
     {
         return match ($this) {
-            self::Dissolution,
-            self::ClotureLiquidation => null,
+            // Lignes 15 et 17 du tableau de validation signé par Maître Bah le 2026-10-28.
+            //
+            // ⚠️ **Ces deux listes ont longtemps rendu `null`, et c'était juste** : le compte
+            // rendu de juillet 2026 ne disait rien de la dissolution, et fabriquer une
+            // « référence légale » aurait fait afficher une invention comme faisant foi, que
+            // `divergeDeLaReference()` aurait ensuite défendue contre les corrections de
+            // l'étude. Le tableau signé a changé cela — la source existe, datée et cochée.
+            //
+            // Ligne 15 : « PV d'AGE qui constate la dissolution et nomme un liquidateur ·
+            // publication du PV dans un journal d'annonces légales · dépôt du PV et du journal
+            // au greffe · le greffe délivre un RCCM de dissolution ». Les deux premiers points
+            // sont des actes que l'étude établit, le troisième une formalité, le quatrième un
+            // retour — seuls les actes figurent ici.
+            self::Dissolution => [
+                'acte_principal'   => 'Procès-verbal de dissolution et nomination du liquidateur',
+                'insertion'        => "Insertion au journal d'annonces légales",
+                'declaration_rccm' => 'Déclaration RCCM de dissolution',
+            ],
+            // Ligne 17 : « clôturée dans les 3 ans · l'assemblée de clôture statue sur les
+            // comptes · le greffe délivre un RCCM de liquidation · la société est radiée ».
+            // **Aucune publication n'y figure**, là où la ligne 15 la cite : l'absence est une
+            // réponse, pas un oubli — voir {@see publicationJal()}.
+            self::ClotureLiquidation => [
+                'acte_principal'   => 'Procès-verbal de clôture de liquidation',
+                'declaration_rccm' => 'Déclaration de radiation RCCM',
+            ],
         };
     }
 

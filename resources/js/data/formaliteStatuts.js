@@ -10,12 +10,21 @@ export const STATUT_META = {
     rejete:      { label: 'Rejeté — à corriger', badge: 'bg-danger-bg text-danger-text border-red-200', border: 'border-l-danger' },
 };
 
+// Miroir de App\Enums\OrganismeFormalite — les clés et les libellés doivent correspondre
+// exactement à `value` et `abrege()`, ce que verrouille OrganismesFormaliteTest.
+//
+// ⚠️ Deux entrées manquaient, et leur absence coûtait cher : `autre` — sous lequel des barèmes
+// posaient déjà des formalités, invisibles faute de libellé et d'onglet — et `jal`, la
+// publication au journal d'annonces légales, exigée par le tableau signé du 2026-10-28 pour
+// chaque modification et pour la dissolution.
 export const ORGANISME_META = {
     apip:                   { label: 'APIP',                  badge: 'bg-blue-50 text-blue-700 border-blue-200' },
     impots:                 { label: 'IMPÔTS',                badge: 'bg-sky-50 text-sky-700 border-sky-200' },
     conservation_fonciere:  { label: 'FONCIER',               badge: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
     cnss:                   { label: 'CNSS',                  badge: 'bg-teal-50 text-teal-700 border-teal-200' },
     greffe:                 { label: 'GREFFE',                badge: 'bg-purple-50 text-purple-700 border-purple-200' },
+    jal:                    { label: 'JAL',                   badge: 'bg-amber-50 text-amber-700 border-amber-200' },
+    autre:                  { label: 'AUTRE',                 badge: 'bg-slate-100 text-slate-600 border-slate-200' },
 };
 
 export function organismeBadgeClass(organisme) {

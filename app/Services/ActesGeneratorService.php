@@ -246,8 +246,25 @@ class ActesGeneratorService
                 continue;
             }
 
+            // ⚠️ **Le nom se cherche parmi les gabarits qui servent cette variante**, pas parmi
+            // tous ceux du type d'acte. `firstWhere('type_document', …)` seul rendait le
+            // premier venu : une **clôture de liquidation** s'annonçait « Acte de dissolution
+            // et liquidation », nom du marque-place de l'autre variante. Rien de faux n'était
+            // produit — le gabarit est nul dans les deux cas — mais l'écran nommait à l'étude
+            // un acte qu'elle n'allait pas établir, ce qui est pire qu'un libellé générique.
+            // ⚠️ **Aucun repli sur un gabarit d'une autre variante.** La première version en
+            // gardait un (`?? firstWhere('type_document', …)`), et il suffisait qu'aucun
+            // gabarit ne serve la variante courante pour que le nom d'une autre remonte :
+            // une dissolution s'annonçait « PV de clôture de liquidation ». Faute de gabarit
+            // pour cette variante-ci, c'est le libellé générique du rôle qui s'affiche — il
+            // ne dit pas grand-chose, mais il ne dit rien de faux.
+            $marquePlace = $modeles->first(
+                fn (ModeleActe $m) => $m->type_document === $role
+                    && $this->sertUneVariante($m, $typeActe, $variantes),
+            );
+
             $prevus[] = [
-                'nom'           => $modeles->firstWhere('type_document', $role)?->nom
+                'nom'           => $marquePlace?->nom
                     ?? self::TYPES_A_GABARIT_HERITABLE[$role]
                     ?? ModeleActe::TYPES_DOCUMENT[$role]
                     ?? $role,

@@ -1,0 +1,1 @@
+import{u as e}from"./app-CnmGOmMG.js";var t=null,n=null;function r(){return n?Promise.resolve(n):t||(t=e.get(`/lieux/referentiel`).then(({data:e})=>(n=e??{},n)).catch(e=>{throw t=null,e}),t)}function i(e,t=null){if(!n)return null;let r=n[e]??[];return t?r.filter(e=>e.parent===t):e===`ville`?r:[]}function a(){t=null,n=null}export{a as n,i as r,r as t};

@@ -47,6 +47,8 @@ export function ChampQuestionnaire({
     onNombreOptions = null,
     rendreChoixMultiple = null,
     rendreRepeatable = null,
+    /** Listes calculées par l'écran, pour les champs qui déclarent `optionsDe`. */
+    optionsDynamiques = {},
     disabled = false,
     /**
      * Préfixe des `id` DOM. Le modal d'édition s'ouvre **au-dessus** de la fiche, qui rend déjà les
@@ -92,6 +94,8 @@ export function ChampQuestionnaire({
                 {field.required && <span className="ml-1 text-danger">*</span>}
             </Label>
 
+            <ValeurActuelle field={field} valeurs={valeurs} />
+
             <Note field={field} />
 
             <Controle
@@ -107,6 +111,7 @@ export function ChampQuestionnaire({
                 onNombreOptions={onNombreOptions}
                 rendreChoixMultiple={rendreChoixMultiple}
                 rendreRepeatable={rendreRepeatable}
+                optionsDynamiques={optionsDynamiques}
                 disabled={disabled}
             />
 
@@ -119,6 +124,7 @@ export function ChampQuestionnaire({
 function Controle({
     field, domId, value, valeurs, geo, onPatch, changer, peutAjouter,
     referentielHorsLigne, onNombreOptions, rendreChoixMultiple, rendreRepeatable, disabled,
+    optionsDynamiques = {},
 }) {
     // ── Lieu du référentiel ──────────────────────────────────────────────────
     // Le rôle vient de TRIPLETS_GEO, **jamais du suffixe du nom** :
@@ -172,6 +178,29 @@ function Controle({
     }
 
     if (field.type === 'select') {
+        // Options figées, ou liste calculée par l'écran (`optionsDe`) — les gérants que le
+        // registre dit en fonction, par exemple.
+        const choix = field.optionsDe
+            ? (optionsDynamiques[field.optionsDe] ?? []).map(o => (typeof o === 'string' ? { valeur: o, label: o } : o))
+            : (field.options ?? []).map(o => ({ valeur: o, label: o }));
+
+        // ⚠️ **Une liste vide retombe en saisie libre.** `soc.gerant_actuel` est aussi rendu
+        // par le formulaire public, où aucune société n'est rattachée : un `<select>` sans
+        // option y aurait été un champ que le client voit sans pouvoir le remplir. Même cas
+        // pour une société dont le registre ignore le dirigeant.
+        if (field.optionsDe && choix.length === 0) {
+            return (
+                <Input
+                    id={domId}
+                    type="text"
+                    value={value || ''}
+                    disabled={disabled}
+                    onChange={(e) => changer(e.target.value)}
+                    placeholder={field.placeholder ?? ''}
+                />
+            );
+        }
+
         return (
             <select
                 id={domId}
@@ -181,7 +210,13 @@ function Controle({
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal"
             >
                 <option value="">— Choisir —</option>
-                {(field.options ?? []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                {choix.map(opt => <option key={opt.valeur} value={opt.valeur}>{opt.label}</option>)}
+                {/* Une valeur héritée d'un dossier antérieur, ou calculée autrement que par la
+                    table des mandats, peut ne plus figurer dans la liste. L'offrir évite de
+                    l'effacer en silence à la première ouverture. */}
+                {value && !choix.some(o => o.valeur === value) && (
+                    <option value={value}>{value}</option>
+                )}
             </select>
         );
     }
@@ -274,6 +309,35 @@ function Controle({
                 </datalist>
             )}
         </>
+    );
+}
+
+/**
+ * La valeur que ce champ remplace — « actuel : FAYA DISTRIBUTION SARLU ».
+ *
+ * Addendum v1.2 § 6.2 : « le formulaire affiche, pour chaque opération, la valeur actuelle
+ * (en lecture seule) **à côté** de la nouvelle valeur à saisir ». Rien ne le faisait : pour
+ * savoir ce qu'il remplaçait, le clerc devait remonter à la carte « Société concernée » — et
+ * une note du questionnaire l'y renvoyait explicitement, ce qui disait bien le problème.
+ *
+ * Déclaré par `compareA: 'soc.denomination'` sur le champ, et lu **ici** : les trois moteurs
+ * de rendu passent par ce composant, donc aucun ne peut l'oublier.
+ *
+ * ⚠️ Silencieux quand la valeur actuelle est vide — une société hors registre, ou une donnée
+ * que la fiche ne porte pas. Afficher « actuel : — » occuperait la place sans rien apprendre.
+ */
+function ValeurActuelle({ field, valeurs }) {
+    if (!field.compareA) return null;
+
+    const actuelle = valeurs?.[field.compareA];
+
+    if (actuelle === null || actuelle === undefined || String(actuelle).trim() === '') return null;
+
+    return (
+        <p className="text-xs text-slate-500">
+            <span className="text-slate-400">actuel : </span>
+            <span className="font-medium text-slate-600">{String(actuelle)}</span>
+        </p>
     );
 }
 

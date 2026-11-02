@@ -372,11 +372,19 @@ class ReglesSocieteTest extends TestCase
     public function test_regle8_seul_le_gerant_non_statutaire_nimpacte_pas_les_statuts(): void
     {
         foreach (TypeModificationStatutaire::cases() as $type) {
+            if ($type === TypeModificationStatutaire::DecisionGestion) {
+                // DecisionGestion ne touche ni aux statuts ni au RCCM (addendum v1.2 § 5)
+                $this->assertFalse($type->impacteRccm(), "{$type->value} ne doit pas impacter le RCCM.");
+                $this->assertFalse($type->impacteStatuts(), "{$type->value} ne doit pas impacter les statuts.");
+                continue;
+            }
             $this->assertTrue($type->impacteRccm(), "{$type->value} doit impacter le RCCM.");
         }
 
         $this->assertFalse(TypeModificationStatutaire::GerantNonStatutaire->impacteStatuts());
         foreach ([
+            TypeModificationStatutaire::DenominationSociale,
+            TypeModificationStatutaire::FormeJuridique,
             TypeModificationStatutaire::GerantStatutaire,
             TypeModificationStatutaire::SiegeSocial,
             TypeModificationStatutaire::CapitalAugmentation,

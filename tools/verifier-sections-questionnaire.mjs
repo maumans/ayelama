@@ -65,7 +65,9 @@ const urlQuestionnaires = copier('resources/js/data/questionnaires.js', (t) => t
 const urlParties = copier('resources/js/lib/partiesPayload.js');
 
 const { QUESTIONNAIRES } = await import(urlQuestionnaires);
-const { groupFieldsBySection, buildPartiesPayload, rolesARattacherDoffice } = await import(urlParties);
+const { groupFieldsBySection, buildPartiesPayload, rolesARattacherDoffice,
+        lignesDeRepartitionDepuisRegistre, repartitionEstVierge,
+        optionsDynamiques, SOURCES_OPTIONS_DYNAMIQUES } = await import(urlParties);
 const { suffixesIdentite, mapClientToPrefixedFields, mapClientToRepeatableItem } = await import(urlChampsClient);
 
 fs.rmSync(tmp, { recursive: true, force: true });
@@ -369,3 +371,176 @@ if (ecarts.length > 0) {
 }
 
 console.log(`E. Rattachement d'office : ${attendus.length} cas — une action, quatre abstentions.`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F. `compareA` désigne une clé que le questionnaire sait remplir
+//
+// Un champ d'écart affiche la valeur qu'il remplace : `compareA: 'soc.denomination'`
+// (addendum § 6.2). Mais `ChampQuestionnaire` lit simplement `valeurs[field.compareA]` —
+// une clé mal écrite ne lève rien, n'affiche rien, et le clerc **ne voit jamais** qu'il lui
+// manque l'information. C'est le défaut silencieux par excellence : l'écran est juste un peu
+// moins utile qu'il ne devrait, et personne ne le remarque.
+//
+// On vérifie donc que chaque cible existe bien comme champ du **même** questionnaire.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const cibleManquante = [];
+let nbComparaisons = 0;
+
+for (const [nomQ, champs] of Object.entries(QUESTIONNAIRES)) {
+    const connus = new Set();
+
+    const recenser = (liste) => {
+        for (const f of liste) {
+            connus.add(f.id);
+            if (Array.isArray(f.fields)) recenser(f.fields);
+        }
+    };
+    recenser(champs);
+
+    for (const f of champs) {
+        if (!f.compareA) continue;
+        nbComparaisons += 1;
+        if (!connus.has(f.compareA)) {
+            cibleManquante.push(`  ${nomQ} : ${f.id} compare à « ${f.compareA} », qui n'existe pas`);
+        }
+    }
+}
+
+if (cibleManquante.length > 0) {
+    console.error(
+        `\nUn champ compare sa valeur à une clé absente du questionnaire :\n\n${cibleManquante.join('\n')}\n\n` +
+        "ChampQuestionnaire lit `valeurs[field.compareA]` : une cible inexistante n'affiche rien\n" +
+        'et ne signale rien. Le clerc saisit alors à l\'aveugle, sans savoir ce qu\'il remplace.',
+    );
+    process.exit(1);
+}
+
+console.log(`F. ${nbComparaisons} champ(s) « actuel → nouveau » — toutes les cibles existent.`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G. La reprise des associés : une action, trois abstentions
+//
+// Au rattachement d'une société, « Nouvelle répartition » se remplit avec les associés du
+// registre — le clerc ne saisit plus que l'écart. Mais une aide qui écrase du travail déjà
+// fait coûte plus cher que l'absence d'aide : ce contrôle vérifie que la reprise s'abstient
+// dès que la carte porte quoi que ce soit.
+//
+// Même forme que le contrôle E, et pour la même raison : la décision est une fonction pure,
+// donc vérifiable sans navigateur.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const etatDeuxAssocies = {
+    associes: [
+        { nom: 'Mamadou CAMARA', client_id: 7, nb_parts: 600, pourcentage: 60 },
+        { nom: 'Aïssatou SOW', client_id: null, nb_parts: 400, pourcentage: 40 },
+    ],
+};
+
+const casReprise = [
+    ['deux associés au registre, carte vierge', etatDeuxAssocies, undefined, 2],
+    ['carte avec des lignes vides (min)', etatDeuxAssocies, [{ associe: '', parts_chiffres: '', pourcentage: '' }], 2],
+    ['carte déjà saisie', etatDeuxAssocies, [{ associe: 'Quelqu\'un', parts_chiffres: '10', pourcentage: '' }], 0],
+    ['société sans associé connu', { associes: [] }, undefined, 0],
+];
+
+const ecartsReprise = [];
+
+for (const [titre, etat, existant, attendu] of casReprise) {
+    const lignes = lignesDeRepartitionDepuisRegistre(etat);
+    const reprend = repartitionEstVierge(existant);
+    const obtenu = reprend ? lignes.length : 0;
+
+    if (obtenu !== attendu) {
+        ecartsReprise.push(`  ${titre} : ${obtenu} ligne(s) reprise(s), ${attendu} attendue(s)`);
+    }
+}
+
+// Et la reprise doit porter les parts, pas seulement les noms — c'est tout son intérêt.
+const premiere = lignesDeRepartitionDepuisRegistre(etatDeuxAssocies)[0];
+if (premiere?.parts_chiffres !== '600' || premiere?.pourcentage !== '60') {
+    ecartsReprise.push(
+        `  les parts ne sont pas reprises : ${JSON.stringify(premiere)}`,
+    );
+}
+
+// L'instantané du registre : sans lui, impossible de montrer qu'une ligne a été modifiée.
+if (premiere?.__registre?.nb_parts !== 600) {
+    ecartsReprise.push(
+        `  l'instantané du registre manque ou est faux : ${JSON.stringify(premiere?.__registre)}`,
+    );
+}
+
+if (ecartsReprise.length > 0) {
+    console.error(
+        `\nLa reprise des associés ne se comporte pas comme prévu :\n\n${ecartsReprise.join('\n')}\n\n` +
+        'Voir lignesDeRepartitionDepuisRegistre() et repartitionEstVierge() dans\n' +
+        "lib/partiesPayload.js. Écraser une saisie en cours fait perdre du travail ; ne pas\n" +
+        'reprendre les parts fait retaper ce que le registre sait déjà.',
+    );
+    process.exit(1);
+}
+
+console.log(`G. Reprise des associés : ${casReprise.length} cas — une action, trois abstentions.`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H. Les options dynamiques désignent une source qui existe, et ne doublonnent pas
+//
+// Un champ peut tirer ses choix d'une liste calculée (`optionsDe: 'personnesDuDossier'`)
+// plutôt que d'un tableau figé. Deux manières de se tromper, toutes deux muettes :
+//
+//   1. nommer une source que personne ne fournit → le sélecteur s'affiche **vide**, et le
+//      clerc n'a aucun moyen de comprendre pourquoi il n'a aucun choix ;
+//   2. proposer deux fois la même personne — une associée du registre qui est aussi
+//      cessionnaire — ce qui laisse choisir « laquelle » d'une personne unique.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sourcesInconnues = [];
+let nbChampsDynamiques = 0;
+
+for (const [nomQ, champs] of Object.entries(QUESTIONNAIRES)) {
+    const parcourir = (liste) => {
+        for (const f of liste) {
+            if (f.optionsDe) {
+                nbChampsDynamiques += 1;
+                if (!SOURCES_OPTIONS_DYNAMIQUES.includes(f.optionsDe)) {
+                    sourcesInconnues.push(`  ${nomQ} : ${f.id} demande « ${f.optionsDe} », que rien ne fournit`);
+                }
+            }
+            if (Array.isArray(f.fields)) parcourir(f.fields);
+        }
+    };
+    parcourir(champs);
+}
+
+// Une personne au registre **et** cessionnaire ne doit apparaître qu'une fois.
+const listes = optionsDynamiques({
+    etatSociete: { associes: [{ nom: 'Mamadou CAMARA' }, { nom: 'Aïssatou SOW' }] },
+    formValues: {
+        'modif.cessionnaires': [{ nom: 'Ibrahima BARRY' }, { nom: 'mamadou  camara' }],
+        'gerant_entrant.prenom_nom': 'Ibrahima BARRY',
+    },
+});
+
+const noms = listes.personnesDuDossier.map(p => p.valeur);
+
+if (noms.length !== 3) {
+    sourcesInconnues.push(`  doublon ou oubli dans personnesDuDossier : ${JSON.stringify(noms)}`);
+}
+
+// Et le registre l'emporte sur le dossier pour une même personne.
+if (listes.personnesDuDossier.find(p => p.valeur === 'Mamadou CAMARA')?.origine !== 'registre') {
+    sourcesInconnues.push("  « Mamadou CAMARA » doit rester marqué comme venant du registre");
+}
+
+if (sourcesInconnues.length > 0) {
+    console.error(
+        `\nLes options dynamiques ne se comportent pas comme prévu :\n\n${sourcesInconnues.join('\n')}\n\n` +
+        'Voir personnesDuDossier() et SOURCES_OPTIONS_DYNAMIQUES dans lib/partiesPayload.js.\n' +
+        "Un sélecteur vide ou doublonné ne dit pas au clerc ce qui ne va pas : il choisit, ou\n" +
+        'il ne peut pas choisir, et dans les deux cas il ne sait pas pourquoi.',
+    );
+    process.exit(1);
+}
+
+console.log(`H. ${nbChampsDynamiques} champ(s) à options dynamiques — sources connues, aucun doublon.`);

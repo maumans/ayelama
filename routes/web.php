@@ -148,6 +148,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Anniversaires Clients
     Route::get('/anniversaires', [\App\Http\Controllers\AnniversaireController::class, 'index'])->name('anniversaires.index');
+    // Bascule : une seule route pour marquer et demarquer — le bouton a deux etats, pas
+    // l'ecran deux appels a choisir.
+    Route::post('/anniversaires/{client}/souhait', [\App\Http\Controllers\AnniversaireController::class, 'basculer'])
+        ->name('anniversaires.souhait');
 
     // Brouillons de l'assistant de création de dossier (saisie inachevée, propre à
     // son auteur — pas un Dossier, pour ne pas consommer de référence notariale)
@@ -183,6 +187,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Déclarée AVANT `/societes/{societe}` : sans quoi « pieces » serait pris pour un identifiant.
     Route::delete('/societes/pieces/{piece}', [SocietePieceController::class, 'destroy'])->name('societes.pieces.destroy');
     Route::get('/societes/{societe}', [SocieteController::class, 'show'])->name('societes.show');
+    // La fiche (page Inertia) et `show` (JSON pour le selecteur de l'assistant) servent la
+    // meme societe sous deux formes : le segment supplementaire les separe sans ambiguite.
+    Route::get('/societes/{societe}/fiche', [SocieteController::class, 'fiche'])->name('societes.fiche');
     Route::post('/societes', [SocieteController::class, 'store'])->name('societes.store');
     Route::patch('/societes/{societe}', [SocieteController::class, 'update'])->name('societes.update');
     // Seule transition de cycle de vie qui ne soit pas automatique : la radiation n'est
@@ -228,6 +235,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // référence du CR de juillet 2026 et réinitialisable à tout moment.
         Route::patch('/types-actes/{typeActe}/documents-attendus', [ParametresController::class, 'updateDocumentsAttendus'])->name('documents_attendus.update');
         Route::post('/types-actes/{typeActe}/documents-attendus/reinitialiser', [ParametresController::class, 'reinitialiserDocumentsAttendus'])->name('documents_attendus.reinitialiser');
+        // Catalogue des opérations sur les sociétés (addendum v1.2 § 5) — second onglet du même
+        // écran. Même motif que les documents attendus : la règle de référence est dans l'enum,
+        // sa copie réglable en base, et le bouton « Réinitialiser » rejoue le semis.
+        //
+        // ⚠️ Pas de `prefix('types-actes/{typeActe}')` : une opération appartient à un **code**
+        // de type d'acte (`SOC-MOD`), pas à une ligne de `types_actes`. L'imbriquer aurait
+        // imposé un identifiant que le catalogue ne porte pas.
+        Route::patch('/operations-societe/{operation}', [ParametresController::class, 'updateOperationSociete'])->name('operations_societe.update');
+        Route::post('/operations-societe/{operation}/reinitialiser', [ParametresController::class, 'reinitialiserOperationSociete'])->name('operations_societe.reinitialiser');
         // Référentiel des lieux : correction et validation des lieux amorcés au seeder.
         Route::get('/lieux', [ParametresController::class, 'lieux'])->name('lieux');
         // ⚠️ **Avant** `/lieux/{lieu}` : déclarée après, « valider » serait pris pour un

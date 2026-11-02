@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\DonneeAuRetour;
+use App\Enums\OrganismeFormalite;
 use App\Enums\StatutFormalite;
 use Illuminate\Database\Eloquent\Model;
 
@@ -127,14 +128,10 @@ class Formalite extends Model
 
     public function labelOrganisme(): string
     {
-        return match($this->organisme) {
-            'apip'                => 'APIP',
-            'impots'              => 'Direction des Impôts',
-            'conservation_fonciere' => 'Conservation foncière',
-            'cnss'                => 'CNSS',
-            'greffe'              => 'Greffe',
-            default               => ucfirst($this->organisme),
-        };
+        // Un `match` sans branche par défaut dans l'enum : un organisme ajouté sans son
+        // libellé échoue à l'exécution plutôt que de s'afficher `Ucfirst(slug)`.
+        return OrganismeFormalite::tryFrom($this->organisme)?->label()
+            ?? OrganismeFormalite::Autre->label();
     }
 
     public function labelAffiche(): string

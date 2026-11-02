@@ -31,7 +31,11 @@ import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 
 const fmt = (n) => n ? Number(n).toLocaleString('fr-FR') : '0';
 
-const ORGANISMES_ONGLETS = ['apip', 'impots', 'conservation_fonciere', 'cnss', 'greffe'];
+// Les onglets de l'écran, dans l'ordre où l'étude les parcourt. `autre` n'en ouvre pas —
+// c'est un fourre-tout, pas une file de dépôt — mais `jal` si : la publication au journal
+// est une démarche à part entière, exigée par le tableau signé du 2026-10-28 pour chaque
+// modification et pour la dissolution. Miroir de OrganismeFormalite::suivis().
+const ORGANISMES_ONGLETS = ['apip', 'impots', 'conservation_fonciere', 'cnss', 'greffe', 'jal'];
 
 function formatDelai(f) {
     if (f.joursRetardOuAvance == null) return { text: '—', cls: 'text-slate-400' };

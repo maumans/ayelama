@@ -680,6 +680,17 @@ const PP_BAILLEUR = [
 const LOC_PRENEUR = [
     { id: 'loc.civilite', label: 'Civilité du locataire/preneur', type: 'select', options: ['M.', 'Mme', 'Mlle', 'M. et Mme', 'Société'], required: true, section: 'Locataire / Preneur', clientRole: 'locataire' },
     { id: 'loc.prenom_nom', label: 'Nom et prénoms / Dénomination', type: 'text', placeholder: 'Mariama SOW / Société XYZ SARL', required: true },
+    // ⚠️ Ajoutés le 2026-11-02, et pas par symétrie : les contrats de bail fournis par
+    // l'étude citent `${loc.ne_a}` et `${loc.date_naissance}`, que le questionnaire ne
+    // collectait pas. Les deux balises ressortaient donc **littéralement** dans l'acte —
+    // le générateur laisse en l'état ce qu'il ne sait pas remplir.
+    //
+    // Facultatifs comme `pp.ne_a` et `acq.ne_a` dans les autres questionnaires : un locataire
+    // peut être une société, qui ne naît nulle part. Les deux suffixes figurent déjà dans
+    // `SUFFIXES_IDENTITE`, donc une fiche client rattachée les renseigne — le contrôle B de
+    // `verifier-sections-questionnaire.mjs` le vérifie.
+    { id: 'loc.ne_a', label: 'Né(e) à', type: 'text', placeholder: 'Conakry', required: false },
+    { id: 'loc.date_naissance', label: 'Date de naissance', type: 'date', placeholder: '01/01/1990', required: false },
     { id: 'loc.nationalite', label: 'Nationalité / Pays', type: 'text', placeholder: 'Guinéenne', required: false },
     { id: 'loc.adresse', label: 'Adresse du locataire', type: 'text', placeholder: 'Quartier, Commune, Ville', required: true },
     { id: 'loc.piece_type', label: "Type de pièce", type: 'text', placeholder: 'CNI CEDEAO / RCCM', required: true, datalist: PIECES_TYPES },
@@ -891,7 +902,29 @@ export const QUESTIONNAIRES = {
         // ressaisis à la main d'un dossier à l'autre, d'où un capital à 23,9 millions sur une
         // pièce et 23,9 milliards sur la suivante. La fiche est la source de vérité
         // (décision #33) ; le questionnaire n'en est qu'une projection.
-        { id: 'soc.denomination', label: 'Dénomination de la société dissoute', type: 'text', placeholder: 'Faya Distribution SARLU', required: true, section: 'Société dissoute', societePicker: true, publicIntake: true },
+        // ── 0. Mode de traitement ────────────────────────────────────────────
+        // Première question de la carte, parce qu'elle commande tout le reste : deux dossiers
+        // portant la même opération ne produisent pas les mêmes actes selon que l'étude rédige
+        // ou se borne à déposer le procès-verbal du client (addendum v1.2 § 5.2).
+        //
+        // Miroir de App\Enums\ModeTraitement — libellés identiques, verrouillés par
+        // ParitesVariantesSocieteTest. Jamais `publicIntake` : le client ne qualifie pas la
+        // prestation de l'étude.
+        //
+        // ⚠️ Porte `section` et `societePicker` : groupFieldsBySection ouvre la carte au
+        // **premier** champ qui déclare une section, et remonte le drapeau du picker depuis ce
+        // même champ. Les deux marqueurs suivent donc le champ de tête — les laisser sur
+        // `soc.denomination` aurait relégué ce select dans la carte précédente.
+        { id: 'mode_traitement', label: "Qui rédige l'acte ?", type: 'select', required: true,
+          section: 'Société dissoute', societePicker: true,
+          options: ["Rédaction par l'étude", 'Dépôt au rang des minutes'],
+          // ⚠️ Note volontairement **courte** : la première tenait trois lignes et occupait
+          // plus de place que le champ lui-même, au point de repousser « Gérant actuel » en
+          // bas de carte. Le détail — gabarits du dépôt au rang des minutes en cours de
+          // numérisation — vit dans `App\Enums\ModeTraitement`, pas sous un select.
+          note: 'Les actes propres au dépôt au rang des minutes restent à câbler.' },
+
+        { id: 'soc.denomination', label: 'Dénomination de la société dissoute', type: 'text', placeholder: 'Faya Distribution SARLU', required: true, publicIntake: true },
         { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: FORMES_SOCIETE, required: true, publicIntake: true },
         { id: 'soc.rccm', label: 'Numéro RCCM', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true, publicIntake: true },
         // Ces deux champs ne sont pas décoratifs : `dissolution.docx` les consomme dans la phrase
@@ -1206,7 +1239,29 @@ export const QUESTIONNAIRES = {
         // remplis par la fiche (même parti pris que pour les clients liés). Ils
         // restent déclarés parce qu'ils sont la projection ${soc.*} attendue par
         // les modèles Word.
-        { id: 'soc.denomination', label: 'Dénomination sociale', type: 'text', placeholder: 'Raison sociale exacte', required: true, section: 'Société concernée', societePicker: true, publicIntake: true },
+        // ── 0. Mode de traitement ────────────────────────────────────────────
+        // Première question de la carte, parce qu'elle commande tout le reste : deux dossiers
+        // portant la même opération ne produisent pas les mêmes actes selon que l'étude rédige
+        // ou se borne à déposer le procès-verbal du client (addendum v1.2 § 5.2).
+        //
+        // Miroir de App\Enums\ModeTraitement — libellés identiques, verrouillés par
+        // ParitesVariantesSocieteTest. Jamais `publicIntake` : le client ne qualifie pas la
+        // prestation de l'étude.
+        //
+        // ⚠️ Porte `section` et `societePicker` : groupFieldsBySection ouvre la carte au
+        // **premier** champ qui déclare une section, et remonte le drapeau du picker depuis ce
+        // même champ. Les deux marqueurs suivent donc le champ de tête — les laisser sur
+        // `soc.denomination` aurait relégué ce select dans la carte précédente.
+        { id: 'mode_traitement', label: "Qui rédige l'acte ?", type: 'select', required: true,
+          section: 'Société concernée', societePicker: true,
+          options: ["Rédaction par l'étude", 'Dépôt au rang des minutes'],
+          // ⚠️ Note volontairement **courte** : la première tenait trois lignes et occupait
+          // plus de place que le champ lui-même, au point de repousser « Gérant actuel » en
+          // bas de carte. Le détail — gabarits du dépôt au rang des minutes en cours de
+          // numérisation — vit dans `App\Enums\ModeTraitement`, pas sous un select.
+          note: 'Les actes propres au dépôt au rang des minutes restent à câbler.' },
+
+        { id: 'soc.denomination', label: 'Dénomination sociale', type: 'text', placeholder: 'Raison sociale exacte', required: true, publicIntake: true },
         { id: 'soc.sigle', label: 'Sigle', type: 'text', placeholder: 'Ex : FD', required: false, publicIntake: true },
         { id: 'soc.forme', label: 'Forme juridique', type: 'select', options: FORMES_SOCIETE, required: true, publicIntake: true },
         { id: 'soc.rccm', label: 'Numéro RCCM actuel', type: 'text', placeholder: 'GN-CON-2020-B-XXXX', required: true, mono: true, publicIntake: true },
@@ -1223,7 +1278,17 @@ export const QUESTIONNAIRES = {
         { id: 'soc.siege_commune', label: 'Commune du siège actuel', type: 'text', placeholder: 'Kaloum', required: true, publicIntake: true },
         { id: 'soc.siege_quartier', label: 'Quartier du siège actuel', type: 'text', placeholder: 'Almamya', required: true, publicIntake: true },
         { id: 'soc.objet_social', label: 'Objet social actuel', type: 'textarea', placeholder: 'Commerce général, import-export…', required: false, publicIntake: true },
-        { id: 'soc.gerant_actuel', label: 'Gérant / dirigeant actuel', type: 'text', placeholder: 'Ibrahima DIALLO', required: false, publicIntake: true },
+        // ⚠️ **Prérempli depuis le registre mais resté modifiable, et c'était documenté** :
+        // `estChampSociete()` l'exclut volontairement des champs masqués, parce que le
+        // dirigeant était *calculé* (json `direction`, parties du dossier d'origine) et pouvait
+        // être périmé ou inconnu.
+        //
+        // La première raison a vieilli : depuis le lot 1, `societe_gerants` tient les mandats
+        // et `EtatSocieteService::courant()` rend les gérants en fonction. La seconde reste
+        // vraie — d'où une **liste** plutôt qu'un verrou, avec l'échappement « Saisir un autre
+        // nom » pour une société dont le registre ignore le dirigeant.
+        { id: 'soc.gerant_actuel', label: 'Gérant / dirigeant actuel', type: 'select', optionsDe: 'gerantsEnFonction',
+          placeholder: 'Ibrahima DIALLO', required: false, publicIntake: true, saisieLibreAutorisee: true },
         { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
         { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
 
@@ -1236,6 +1301,12 @@ export const QUESTIONNAIRES = {
         { id: 'modif.types', label: 'Modifications décidées', type: 'checkbox_group', required: true, section: 'Modification(s) décidée(s)',
           // Fait afficher sous les cases l'impact, les actes produits et les droits
           // d'enregistrement de la sélection courante (voir ConsequencesModification).
+          //
+          // ⚠️ Aucun commentaire à l'intérieur de `options` : le test de parité extrait
+          // tout littéral entre guillemets du bloc, et une apostrophe de commentaire
+          // y passe pour un libellé. « Décision de gestion » est la seule opération du
+          // catalogue qui ne touche ni les statuts ni le RCCM — elle se prend en AGO et
+          // ne produit qu'un procès-verbal.
           consequences: 'modification',
           options: [
             'Changement de gérant statutaire',
@@ -1247,6 +1318,7 @@ export const QUESTIONNAIRES = {
             "Modification de l'objet social",
             'Modification de dénomination',
             'Modification de forme juridique',
+            'Décision de gestion',
           ],
           note: 'Détermine les actes à produire, les formalités à engager et les droits à percevoir.' },
 
@@ -1294,10 +1366,13 @@ export const QUESTIONNAIRES = {
         // ── 5. Transfert du siège social ─────────────────────────────────────
         // Documents établis : statuts mis à jour et procès-verbal.
         { id: 'modif.siege_nouveau_ville', section: 'Transfert du siège social', label: 'Nouvelle ville', type: 'text', placeholder: 'Conakry', required: true,
+          compareA: 'soc.siege_ville',
           showIf: { field: 'modif.types', includes: 'Transfert du siège social' } },
         { id: 'modif.siege_nouveau_commune', label: 'Nouvelle commune', type: 'text', placeholder: 'Kaloum', required: true,
+          compareA: 'soc.siege_commune',
           showIf: { field: 'modif.types', includes: 'Transfert du siège social' } },
         { id: 'modif.siege_nouveau_quartier', label: 'Nouveau quartier du siège', type: 'text', placeholder: 'Almamya', required: true,
+          compareA: 'soc.siege_quartier',
           showIf: { field: 'modif.types', includes: 'Transfert du siège social' } },
         { id: 'modif.siege_justificatif', label: "Titre d'occupation du nouveau siège", type: 'select',
           options: ['Bail', 'Titre foncier', 'Attestation de domiciliation', 'Autre'], required: false,
@@ -1308,6 +1383,7 @@ export const QUESTIONNAIRES = {
         { id: 'modif.augmentation_montant', label: "Montant de l'augmentation (GNF)", type: 'number', placeholder: '50 000 000', required: true, mono: true, section: 'Augmentation de capital',
           showIf: { field: 'modif.types', includes: 'Augmentation de capital' } },
         { id: 'modif.augmentation_capital_apres', label: 'Capital après augmentation (GNF)', type: 'number', placeholder: '100 000 000', required: false, mono: true, readonly: true,
+          compareA: 'soc.capital_chiffres',
           showIf: { field: 'modif.types', includes: 'Augmentation de capital' },
           note: 'Calculé : capital actuel + montant de l’augmentation.' },
         { id: 'modif.augmentation_modalite', label: "Modalité de l'augmentation", type: 'select',
@@ -1331,6 +1407,7 @@ export const QUESTIONNAIRES = {
         { id: 'modif.diminution_montant', label: 'Montant de la réduction (GNF)', type: 'number', placeholder: '20 000 000', required: true, mono: true, section: 'Diminution de capital',
           showIf: { field: 'modif.types', includes: 'Diminution de capital' } },
         { id: 'modif.diminution_capital_apres', label: 'Capital après réduction (GNF)', type: 'number', placeholder: '30 000 000', required: false, mono: true, readonly: true,
+          compareA: 'soc.capital_chiffres',
           showIf: { field: 'modif.types', includes: 'Diminution de capital' },
           note: 'Calculé : capital actuel − montant de la réduction.' },
         { id: 'modif.diminution_motif', label: 'Motif de la réduction', type: 'select',
@@ -1352,9 +1429,20 @@ export const QUESTIONNAIRES = {
             min: 1, max: 20,
             showIf: { field: 'modif.types', includesAny: ['Cession de parts sociales', 'Augmentation de capital', 'Diminution de capital'] },
             fields: [
-                { id: 'associe', label: 'Associé', type: 'text', placeholder: 'Ibrahima DIALLO', required: true },
+                // ⚠️ **Une liste, pas une zone de texte.** Ce nom est la clé qui retrouve
+                // l'associé au registre : `SocieteMutationService::appliquerRepartition()`
+                // s'en sert pour savoir qui perd ses parts. La casse et les espaces sont
+                // normalisés, mais une faute de frappe ne l'est pas — « Maurice MANSARE »
+                // pour « Maurice Mansaré » fait sortir l'associé réel et entrer un fantôme
+                // avec ses parts, en silence. `optionsDe` propose les personnes que le
+                // dossier connaît déjà ; un entrant passe par « Saisir un autre nom ».
+                { id: 'associe', label: 'Associé', type: 'select', optionsDe: 'personnesDuDossier',
+                  placeholder: 'Ibrahima DIALLO', required: true, saisieLibreAutorisee: true },
                 { id: 'parts_chiffres', label: 'Nombre de parts détenues', type: 'number', placeholder: '60', required: true, mono: true },
-                { id: 'pourcentage', label: 'Pourcentage (%)', type: 'number', placeholder: '60', required: false, mono: true, decimals: 2 },
+                // Déduit de `parts / total projeté`, jamais saisi : le laisser libre permettait
+                // à l'acte d'annoncer 60 % quand les parts en disaient 55. Voir
+                // `pourcentagesRepartition()` dans `lib/calculsSociete.js`.
+                { id: 'pourcentage', label: 'Pourcentage (%)', type: 'number', placeholder: '60', required: false, mono: true, decimals: 2, readonly: true },
             ],
         },
 
@@ -1365,7 +1453,12 @@ export const QUESTIONNAIRES = {
         //
         // Le gérant sortant est une mention de l'acte, pas un fournisseur de pièces :
         // sans `clientRole`, il n'ouvre pas de checklist. Le gérant entrant, si.
-        { id: 'gerant_sortant.prenom_nom', label: 'Gérant sortant', type: 'text', placeholder: 'Ibrahima DIALLO', required: true, section: 'Gérant sortant',
+        // ⚠️ **Une liste, pas une zone de texte** — même raison que l'associé de la
+        // répartition : ce nom est la clé qui clôture le mandat au registre. Mal orthographié,
+        // le mandat n'est pas clôturé et le nouveau gérant s'ajoute quand même : la société
+        // compte alors deux gérants en fonction, sans que rien ne le signale.
+        { id: 'gerant_sortant.prenom_nom', label: 'Gérant sortant', type: 'select', optionsDe: 'gerantsEnFonction',
+          placeholder: 'Ibrahima DIALLO', required: true, section: 'Gérant sortant', saisieLibreAutorisee: true,
           showIf: { field: 'modif.types', includesAny: ['Changement de gérant statutaire', 'Changement de gérant non statutaire'] } },
         { id: 'gerant_sortant.motif', label: 'Motif de la cessation', type: 'select',
           options: ['Démission', 'Révocation', 'Décès', 'Fin de mandat'], required: true,
@@ -1383,19 +1476,43 @@ export const QUESTIONNAIRES = {
           options: ["Ajout d'activités", "Retrait d'activités", "Remplacement complet de l'objet"], required: true, section: 'Objet social',
           showIf: { field: 'modif.types', includes: "Modification de l'objet social" } },
         { id: 'modif.objet_nouveau', label: 'Nouvel objet social', type: 'textarea', placeholder: "Texte complet du nouvel objet social, tel qu'il figurera aux statuts", required: true,
-          showIf: { field: 'modif.types', includes: "Modification de l'objet social" },
-          note: "L'objet actuel est repris dans la section « Société concernée » ci-dessus." },
+          // ⚠️ La note disait « L'objet actuel est repris dans la section « Société concernée »
+          // ci-dessus » : elle renvoyait le clerc à une autre carte pour savoir ce qu'il
+          // remplaçait, ce qui nommait exactement le défaut que `compareA` corrige.
+          compareA: 'soc.objet_social',
+          showIf: { field: 'modif.types', includes: "Modification de l'objet social" } },
 
         // ── 10. Modification de dénomination ─────────────────────────────────
+        // `compareA` fait afficher la valeur actuelle sous l'intitulé — addendum § 6.2.
+        // Lu par `ChampQuestionnaire`, donc acquis aux trois moteurs de rendu d'un coup.
         { id: 'modif.denomination_nouvelle', label: 'Nouvelle dénomination sociale', type: 'text', placeholder: 'Nouvelle Raison Sociale', required: true, section: 'Modification de dénomination',
+          compareA: 'soc.denomination',
           showIf: { field: 'modif.types', includes: 'Modification de dénomination' } },
         { id: 'modif.sigle_nouveau', label: 'Nouveau sigle (facultatif)', type: 'text', placeholder: 'NRS', required: false,
+          compareA: 'soc.sigle',
           showIf: { field: 'modif.types', includes: 'Modification de dénomination' } },
 
         // ── 11. Modification de forme juridique ──────────────────────────────
         { id: 'modif.forme_nouvelle', label: 'Nouvelle forme juridique', type: 'select',
           options: FORMES_SOCIETE, required: true, section: 'Modification de forme juridique',
+          compareA: 'soc.forme',
           showIf: { field: 'modif.types', includes: 'Modification de forme juridique' } },
+
+        // ── 11 bis. Décision de gestion ──────────────────────────────────────
+        // Aucune liste fermée de natures : le droit guinéen n'en pose pas, et une liste
+        // inventée écarterait la décision que l'étude doit passer. Le texte de la résolution
+        // est repris mot pour mot au procès-verbal — c'est la seule pièce produite.
+        { id: 'modif.decision_objet', label: 'Objet de la décision', type: 'text',
+          placeholder: "Constitution d'une hypothèque sur l'immeuble sis à Kaloum", required: true,
+          section: 'Décision de gestion',
+          showIf: { field: 'modif.types', includes: 'Décision de gestion' } },
+        { id: 'modif.decision_texte', label: 'Texte de la résolution', type: 'textarea',
+          placeholder: "Rédaction complète, telle qu'elle figurera au procès-verbal", required: true,
+          showIf: { field: 'modif.types', includes: 'Décision de gestion' },
+          note: "Reprise mot pour mot dans l'acte : ni la fiche société ni le RCCM n'en gardent trace." },
+        { id: 'modif.decision_mandataire', label: 'Personne habilitée à exécuter la décision', type: 'text',
+          placeholder: 'Ibrahima DIALLO, gérant', required: false,
+          showIf: { field: 'modif.types', includes: 'Décision de gestion' } },
 
         // ── 12. Précisions ───────────────────────────────────────────────────
         // Conservé mais rétrogradé : ce champ portait à lui seul toute l'information

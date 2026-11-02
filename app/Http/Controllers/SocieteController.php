@@ -6,6 +6,9 @@ use App\Enums\StatutSociete;
 use App\Models\JournalActivite;
 use App\Models\Partie;
 use App\Models\Societe;
+use App\Models\SocieteHistorique;
+use App\Services\EtatSocieteService;
+use App\Services\SocieteMutationService;
 use App\Support\Normalisation;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -31,9 +34,26 @@ class SocieteController extends Controller
      * complète, pas d'historique de fiche. La correction d'une fiche se fait déjà depuis
      * l'assistant de dossier ({@see update()}).
      */
+    /**
+     * Les lacunes qu'on peut isoler depuis l'en-tête, et la façon de les requêter.
+     *
+     * ⚠️ **Une alerte doit mener quelque part.** L'en-tête annonçait « 5 immatriculées sans
+     * RCCM » en texte simple : elle comptait un problème sans offrir de le voir, ni donc de le
+     * corriger. Même travers que le blocage de clôture qui réclamait un dossier déjà ouvert
+     * (décision 75) — un chiffre sans sortie se contemple.
+     *
+     * `rccm` passe par le scope du modèle, miroir requêtable du prédicat d'affichage
+     * ({@see Societe::manqueRccm()}) ; les trois autres sont de simples absences de colonne.
+     */
+    private const LACUNES = ['rccm', 'nif', 'date_constitution', 'sans_dossier'];
+
     public function index(Request $request)
     {
         $this->authorize('viewAny', Societe::class);
+
+        $lacune = in_array((string) $request->string('manque'), self::LACUNES, true)
+            ? (string) $request->string('manque')
+            : null;
 
         $societes = Societe::query()
             ->withCount('dossiers')
@@ -41,48 +61,81 @@ class SocieteController extends Controller
             ->with('dossier:id,reference', 'dossiers:id,societe_id,etape')
             ->when($request->q, fn ($query, $terme) => $query->recherche($terme))
             ->when($request->statut, fn ($query, $statut) => $query->where('statut', $statut))
+            ->when($lacune, fn ($query, $quoi) => match ($quoi) {
+                'rccm'              => $query->manqueRccm(),
+                'nif'               => $query->where(fn ($q) => $q->whereNull('nif')->orWhere('nif', '')),
+                'date_constitution' => $query->whereNull('date_constitution'),
+                'sans_dossier'      => $query->whereNull('dossier_id'),
+            })
             ->orderBy('denomination')
             ->paginate(25)
             ->withQueryString();
 
+        $lignes = $societes->through(fn (Societe $s) => [
+            'id'                => $s->id,
+            'denomination'      => $s->denomination,
+            'sigle'             => $s->sigle,
+            'forme'             => $s->forme,
+            'forme_label'       => $s->formeLabel(),
+            'rccm_numero'       => $s->rccm_numero,
+            'nif'               => $s->nif,
+            'date_constitution' => $s->date_constitution?->format('d/m/Y'),
+            // Toujours renseignés (mesuré : 15 fiches sur 15), et absents du tableau jusqu'ici
+            // pendant que deux colonnes de liquidation y restaient vides 14 fois sur 15.
+            'siege'             => $s->siegeComplet(),
+            'capital_chiffres'  => $s->capital_chiffres,
+            'email_societe'     => $s->email_societe,
+            'telephone_societe' => $s->telephone_societe,
+            'statut'            => $s->statut->value,
+            'statut_label'      => $s->statut->label(),
+            'dissolution_at'    => $s->dissolution_at?->format('d/m/Y'),
+            'cloture_at'        => $s->cloture_liquidation_at?->format('d/m/Y'),
+            'radiation_at'      => $s->radiation_at?->format('d/m/Y'),
+            'liquidateur'       => $s->liquidateurActuel(),
+            'dossiers_count'    => $s->dossiers_count,
+            'dossier_origine'   => $s->dossier?->reference,
+            // Badge « externe » (§ 7.1) : constituée ailleurs, donc son état vient de pièces
+            // fournies et non d'un dossier de l'étude. Dérivé de `dossier_id`, comme le filtre
+            // « sans dossier constitutif » ci-dessus — une seule vérité pour les deux.
+            'externe'           => $s->estExterne(),
+            // Un seul calcul d'échéance dans tout le projet, partagé avec la commande
+            // d'alerte — voir Societe::echeancesLiquidation().
+            'echeance'          => $this->presenterEcheance($s->prochaineEcheanceLiquidation()),
+            // Seule une liquidation clôturée peut être radiée : le bouton n'apparaît que
+            // là, et la route le revérifie — l'interface n'est pas un contrôle.
+            'peut_etre_radiee'  => $s->statut === StatutSociete::LiquidationCloturee,
+            // Les données perdues avant la capture au retour de formalité : l'étude les
+            // corrige en une saisie, et le mécanisme empêche que cela se reproduise.
+            'manque_rccm'       => $s->immatriculeeSansRccm(),
+        ]);
+
         return Inertia::render('Societes/Index', [
-            'societes' => $societes->through(fn (Societe $s) => [
-                'id'                => $s->id,
-                'denomination'      => $s->denomination,
-                'sigle'             => $s->sigle,
-                'forme'             => $s->forme,
-                'forme_label'       => $s->formeLabel(),
-                'rccm_numero'       => $s->rccm_numero,
-                'statut'            => $s->statut->value,
-                'statut_label'      => $s->statut->label(),
-                'dissolution_at'    => $s->dissolution_at?->format('d/m/Y'),
-                'cloture_at'        => $s->cloture_liquidation_at?->format('d/m/Y'),
-                'radiation_at'      => $s->radiation_at?->format('d/m/Y'),
-                'liquidateur'       => $s->liquidateurActuel(),
-                'dossiers_count'    => $s->dossiers_count,
-                'dossier_origine'   => $s->dossier?->reference,
-                // Un seul calcul d'échéance dans tout le projet, partagé avec la commande
-                // d'alerte — voir Societe::echeancesLiquidation().
-                'echeance'          => $this->presenterEcheance($s->prochaineEcheanceLiquidation()),
-                // Seule une liquidation clôturée peut être radiée : le bouton n'apparaît que
-                // là, et la route le revérifie — l'interface n'est pas un contrôle.
-                'peut_etre_radiee'  => $s->statut === StatutSociete::LiquidationCloturee,
-                // Les données perdues avant la capture au retour de formalité : l'étude les
-                // corrige en une saisie, et le mécanisme empêche que cela se reproduise.
-                'manque_rccm'       => $s->immatriculeeSansRccm(),
-            ]),
-            'statuts' => StatutSociete::toutes(),
-            'filters' => [
+            'societes' => $lignes,
+            'statuts'  => StatutSociete::toutes(),
+            'filters'  => [
                 'q'      => $request->q ?? '',
                 'statut' => $request->statut ?? '',
+                'manque' => $lacune ?? '',
             ],
+            // ⚠️ **Les colonnes de liquidation s'affichent quand la page a de quoi les remplir**,
+            // et non selon le filtre choisi. Mesuré : « Liquidateur » et « Prochaine échéance »
+            // étaient vides sur 14 fiches sur 15 — deux colonnes sur cinq qui ne disaient rien
+            // et repoussaient hors de vue ce qui est toujours renseigné. Les masquer sur un
+            // critère de filtre aurait caché l'unique société en liquidation dans la vue par
+            // défaut ; les lier aux données ne cache jamais rien.
+            'afficherLiquidation' => collect($lignes->items())
+                ->contains(fn (array $l) => $l['liquidateur'] !== null || $l['echeance'] !== null),
             'stats' => [
                 'total'         => Societe::count(),
                 'enLiquidation' => Societe::statut([StatutSociete::EnLiquidation])->count(),
                 'aRadier'       => Societe::statut([StatutSociete::LiquidationCloturee])->count(),
-                'manqueRccm'    => Societe::with('dossiers:id,societe_id,etape')->get()
-                    ->filter(fn (Societe $s) => $s->immatriculeeSansRccm())
-                    ->count(),
+                // Un `count()` SQL, et non plus `->get()->filter()` sur tout le registre à
+                // chaque affichage : le scope dit la même chose que le prédicat, et un test
+                // l'affirme fiche par fiche.
+                'manqueRccm'    => Societe::manqueRccm()->count(),
+                'manqueNif'     => Societe::where(fn ($q) => $q->whereNull('nif')->orWhere('nif', ''))->count(),
+                'manqueDate'    => Societe::whereNull('date_constitution')->count(),
+                'sansDossier'   => Societe::whereNull('dossier_id')->count(),
             ],
         ]);
     }
@@ -130,22 +183,46 @@ class SocieteController extends Controller
             'radiation_at.before_or_equal' => 'La radiation ne peut pas être constatée dans le futur.',
         ]);
 
+        $etats = app(EtatSocieteService::class);
+        $avant = $etats->courant($societe);
+
         $societe->update([
             'statut'       => StatutSociete::Radiee,
             'radiation_at' => $data['radiation_at'],
         ]);
 
-        JournalActivite::enregistrer(
-            $societe->dossier,
-            sprintf(
-                'Fiche société « %s » : radiation au RCCM constatée au %s',
-                $societe->denomination,
-                $societe->radiation_at->format('d/m/Y'),
-            ),
-            'societe',
-            ['statut' => ['avant' => StatutSociete::LiquidationCloturee->value, 'apres' => StatutSociete::Radiee->value]],
-            $request->user(),
-        );
+        // La radiation clôt le cycle de vie : elle a sa place dans l'historique de la société,
+        // qui accepte un dossier nul — précisément pour ce cas.
+        SocieteHistorique::create([
+            'societe_id'    => $societe->id,
+            'dossier_id'    => null,
+            'operations'    => ['radiation'],
+            'date_effet'    => $societe->radiation_at->toDateString(),
+            'etat_avant'    => $avant,
+            'etat_apres'    => $etats->courant($societe->fresh()),
+            'appliquee_le'  => now(),
+            'appliquee_par' => $request->user()?->id,
+        ]);
+
+        // ⚠️ **Le journal d'activité est attaché à un dossier, et exige un `Dossier` non nul.**
+        // `$societe->dossier` est nul pour toute fiche entrée au registre à la main — c'est-à-dire
+        // précisément les sociétés constituées ailleurs, dont la radiation est le cas courant.
+        // Le `TypeError` était latent (zéro fiche concernée au 2026-10-26) et serait apparu avec
+        // la première société externe. L'historique ci-dessus porte la trace dans tous les cas ;
+        // le journal ne la double que lorsqu'il y a un dossier où la lire.
+        if ($societe->dossier) {
+            JournalActivite::enregistrer(
+                $societe->dossier,
+                sprintf(
+                    'Fiche société « %s » : radiation au RCCM constatée au %s',
+                    $societe->denomination,
+                    $societe->radiation_at->format('d/m/Y'),
+                ),
+                'societe',
+                ['statut' => ['avant' => StatutSociete::LiquidationCloturee->value, 'apres' => StatutSociete::Radiee->value]],
+                $request->user(),
+            );
+        }
 
         return back()->with('success', "Radiation de « {$societe->denomination} » enregistrée.");
     }
@@ -189,6 +266,81 @@ class SocieteController extends Controller
      * sortant, plutôt que de les faire ressaisir — et donc d'éviter la création de fiches
      * clients concurrentes pour les mêmes personnes (décision #33).
      */
+    /**
+     * La fiche d'une société — écran E2 de l'addendum v1.2.
+     *
+     * ⚠️ Distincte de {@see show()}, qui rend du **JSON** au sélecteur de l'assistant. Les deux
+     * servent la même société et ne peuvent pas fusionner : l'un alimente une carte de synthèse
+     * en axios, l'autre une page Inertia. Leur donner la même route aurait obligé l'un des deux
+     * à deviner ce que l'autre attend.
+     *
+     * L'état courant vient de {@see EtatSocieteService}, le même calcul que la projection et que
+     * l'application — pour que la fiche ne puisse pas afficher autre chose que ce que le
+     * registre enregistre.
+     */
+    public function fiche(Societe $societe)
+    {
+        $this->authorize('view', $societe);
+
+        $societe->loadMissing(['associes.client', 'gerants.client', 'historique.auteur', 'historique.dossier', 'dossier']);
+
+        return Inertia::render('Societes/Fiche', [
+            'societe' => [
+                ...$this->presenter($societe),
+                'etat'             => app(EtatSocieteService::class)->courant($societe),
+                'parts_reparties'  => $societe->partsReparties(),
+                'echeance'         => $this->presenterEcheance($societe->prochaineEcheanceLiquidation()),
+                'peut_etre_radiee' => $societe->statut === StatutSociete::LiquidationCloturee,
+                'manque_rccm'      => $societe->immatriculeeSansRccm(),
+                'dossiers_count'   => $societe->dossiers()->count(),
+            ],
+            'associes' => $societe->associes->map(fn ($a) => [
+                'id'          => $a->id,
+                'nom'         => $a->nom,
+                'client_id'   => $a->client_id,
+                'nb_parts'    => $a->nb_parts,
+                'pourcentage' => $a->pourcentage((int) $societe->nombre_parts),
+                'date_entree' => $a->date_entree?->format('d/m/Y'),
+                'date_sortie' => $a->date_sortie?->format('d/m/Y'),
+                'actuel'      => $a->estActuel(),
+            ])->values(),
+            'gerants' => $societe->gerants->map(fn ($g) => [
+                'id'              => $g->id,
+                'nom'             => $g->nom,
+                'client_id'       => $g->client_id,
+                'statutaire'      => $g->statutaire,
+                'date_nomination' => $g->date_nomination?->format('d/m/Y'),
+                'date_fin'        => $g->date_fin?->format('d/m/Y'),
+                'motif_fin'       => $g->motifFinLabel(),
+                'en_fonction'     => $g->estEnFonction(),
+            ])->values(),
+            'historique' => $societe->historique->map(fn ($h) => [
+                'id'          => $h->id,
+                'operations'  => $h->operations,
+                'date_effet'  => $h->date_effet?->format('d/m/Y'),
+                'dossier'     => $h->dossier?->reference,
+                'auteur'      => $h->auteur?->name,
+                'differences' => $h->differences(),
+                'associes'    => $h->etat_apres['associes'] ?? [],
+            ])->values(),
+            // Libellés des champs pour le diff — « capital_chiffres » ne se lit pas.
+            'libelles' => [
+                'denomination'     => 'Dénomination',
+                'sigle'            => 'Sigle',
+                'forme'            => 'Forme juridique',
+                'siege'            => 'Siège social',
+                'capital_chiffres' => 'Capital',
+                'nombre_parts'     => 'Nombre de parts',
+                'valeur_nominale'  => 'Valeur nominale',
+                'objet_social'     => 'Objet social',
+                'duree'            => 'Durée',
+                'rccm_numero'      => 'RCCM',
+                'nif'              => 'NIF',
+                'statut'           => 'Statut',
+            ],
+        ]);
+    }
+
     public function show(Societe $societe)
     {
         $this->authorize('view', $societe);
@@ -196,6 +348,16 @@ class SocieteController extends Controller
         return response()->json([
             ...$this->presenter($societe),
             'personnesConnues' => $societe->personnesConnuesPourEcran(),
+            // ⚠️ **La composition n'arrivait jamais au formulaire.** `personnesConnues` porte
+            // les noms, les rôles et les fiches, mais **pas les parts** : le clerc devait donc
+            // retaper la répartition que le registre connaissait déjà, puis recalculer les
+            // pourcentages de tête.
+            //
+            // `courant()` rend exactement ce que l'écran demande — associés avec `nb_parts` et
+            // `pourcentage`, capital, nombre de parts, valeur nominale. Son docblock nomme
+            // d'ailleurs « le tableau *Nouvelle répartition* de l'écran » comme premier
+            // consommateur ; il n'avait simplement jamais été branché.
+            'etat' => app(EtatSocieteService::class)->courant($societe),
         ]);
     }
 
@@ -272,7 +434,18 @@ class SocieteController extends Controller
 
         $societe = Societe::create($this->normaliserDates($request)->validate($this->regles(), $this->messagesValidation()));
 
-        return response()->json($this->presenter($societe), 201);
+        // Cas T5 de l'addendum : « l'historique commence à l'état initialisé ». Sans cette
+        // ligne, la timeline d'une société externe débuterait à sa première modification,
+        // comme si l'état d'où elle part n'existait pas — et le premier diff n'aurait rien à
+        // quoi se comparer. Même écriture que `ayelema:backfill-associes`, par le même service.
+        app(SocieteMutationService::class)->poserEtatInitial(
+            $societe,
+            app(EtatSocieteService::class),
+            null,
+            auth()->id(),
+        );
+
+        return response()->json($this->presenter($societe->fresh()), 201);
     }
 
     /**
@@ -321,6 +494,9 @@ class SocieteController extends Controller
             // Dossier constitutif : seules les sociétés que l'étude n'a pas constituées doivent le
             // fournir — pour les autres, le dossier d'origine fait foi et la checklist ne s'affiche
             // pas du tout.
+            // Badge « externe » du § 7.1 : une société constituée ailleurs se signale, parce
+            // que son état vient de pièces fournies et non d'un dossier de l'étude.
+            'externe'          => $societe->estExterne(),
             'exige_pieces'     => $societe->exigePiecesConstitutives(),
             'pieces'           => $societe->exigePiecesConstitutives()
                 ? $societe->piecesConstitutivesChecklist()

@@ -8,6 +8,8 @@ import { NumberField } from '@/components/ui/number-field';
 import { Button } from '@/components/ui/button';
 import { FileText, Search, Check, X, Pencil } from 'lucide-react';
 import { PanneauProcessus } from '@/Components/Parametres/PanneauProcessus';
+import { CatalogueOperations } from '@/Components/Parametres/CatalogueOperations';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const CAT_COLORS = {
     immobilier:  'bg-blue-50 text-blue-700 border-blue-200',
@@ -139,7 +141,7 @@ function InlineDelaiEdit({ typeActe }) {
 }
 
 export default function ParametresTypesActes() {
-    const { typesActes = [] } = usePage().props;
+    const { typesActes = [], operations = [], assemblees = [] } = usePage().props;
 
     const [search, setSearch] = useState('');
 
@@ -197,6 +199,26 @@ export default function ParametresTypesActes() {
                     </div>
                 </div>
 
+                {/* Deux réglages, un même écran : ce qu'une procédure attend (colonne de
+                    gauche, gabarits, accord initial) et, pour les sociétés, ce que chaque
+                    opération entraîne. Les séparer en deux entrées de menu aurait obligé
+                    l'étude à chercher une règle de modification ailleurs que sous SOC-MOD. */}
+                <Tabs defaultValue="types">
+                    <TabsList>
+                        <TabsTrigger value="types">Types d'actes</TabsTrigger>
+                        <TabsTrigger value="operations">
+                            Opérations sur les sociétés
+                            {operations.some(o => !o.regle_validee) && (
+                                <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                            )}
+                        </TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="operations">
+                        <CatalogueOperations operations={operations} assemblees={assemblees} />
+                    </TabsContent>
+
+                    <TabsContent value="types" className="space-y-5">
                 {/* Groupes */}
                 <AnimatePresence mode="popLayout">
                     {grouped.length === 0 && (
@@ -274,6 +296,8 @@ export default function ParametresTypesActes() {
                         );
                     })}
                 </AnimatePresence>
+                    </TabsContent>
+                </Tabs>
             </div>
         </AppLayout>
     );

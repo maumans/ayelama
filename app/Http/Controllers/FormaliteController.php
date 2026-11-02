@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\OrganismeFormalite;
 use App\Enums\RoleUtilisateur;
 use App\Enums\StatutFormalite;
+use Illuminate\Validation\Rule;
 use App\Models\DocumentFichier;
 use App\Models\Dossier;
 use App\Http\Requests\EnregistrerRetourFormaliteRequest;
@@ -124,7 +126,11 @@ class FormaliteController extends Controller
         $this->authorize('gererFormalites', $dossier);
 
         $data = $request->validate([
-            'organisme'    => ['required', 'string', 'in:apip,impots,conservation_fonciere,cnss,greffe'],
+            // ⚠️ La liste était écrite en clair, et ne connaissait pas `autre` : une
+            // formalité posée sous cet organisme par un barème était **refusée** à la
+            // moindre correction manuelle. Elle vient désormais de l'enum, seul endroit
+            // où les organismes se déclarent.
+            'organisme'    => ['required', 'string', Rule::in(OrganismeFormalite::valeurs())],
             'libelle'      => ['nullable', 'string', 'max:150'],
             'statut'       => ['required', 'string'],
             'montant_base' => ['nullable', 'numeric', 'min:0'],

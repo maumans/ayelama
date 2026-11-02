@@ -2,7 +2,7 @@
 
 namespace App\Enums;
 
-use App\Contracts\VarianteTypeActe;
+use App\Contracts\OperationDeSociete;
 
 /**
  * Types de modification statutaire, leur impact et leurs documents (règles 8 et 9 du CR
@@ -24,7 +24,7 @@ use App\Contracts\VarianteTypeActe;
  * transfert de siège. Les documents à produire sont l'**union** de leurs exigences —
  * voir `documentsRequisPour()`, qui ne produit qu'un seul procès-verbal.
  */
-enum TypeModificationStatutaire: string implements VarianteTypeActe
+enum TypeModificationStatutaire: string implements OperationDeSociete
 {
     case DenominationSociale = 'denomination_sociale';
     case FormeJuridique      = 'forme_juridique';
@@ -35,6 +35,20 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     case CapitalDiminution   = 'capital_diminution';
     case CapitalCession      = 'capital_cession';
     case ObjetSocial         = 'objet_social';
+
+    /**
+     * Décision de fonctionnement prise en AGO — consentir une hypothèque, par exemple.
+     *
+     * Ajoutée le 2026-10-28 (addendum v1.2 § 5, `DECISION_GESTION`). C'est la seule opération
+     * du catalogue de la spec que le dépôt n'avait pas, et la seule qui **ne touche ni les
+     * statuts ni le RCCM** : son effet se borne à produire un procès-verbal et une ligne
+     * d'historique. Elle n'est donc portée par aucune mutation de fiche — et c'est voulu, pas
+     * un oubli : il n'y a rien à y porter.
+     *
+     * ⚠️ Son impact RCCM est marqué « à confirmer » par la spec (question Q2 à Maître Bah), avec
+     * « non » pour défaut. Le catalogue éditable permettra de le corriger sans redéploiement.
+     */
+    case DecisionGestion     = 'decision_gestion';
 
     /**
      * Ordre de rédaction des actes d'un dossier de modification.
@@ -62,9 +76,54 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
         return $this->value;
     }
 
+    /**
+     * Le code d'opération selon l'addendum v1.2 § 5 — implémentation de {@see OperationDeSociete}.
+     */
+    public function codeOperation(): string
+    {
+        return match($this) {
+            self::DenominationSociale => 'MOD_DENOMINATION',
+            self::FormeJuridique      => 'MOD_FORME',
+            self::GerantStatutaire    => 'CHG_GERANT_STAT',
+            self::GerantNonStatutaire => 'NOM_GERANT',
+            self::SiegeSocial         => 'MOD_SIEGE',
+            self::CapitalAugmentation => 'AUG_CAPITAL',
+            // ⚠️ **Absente du § 5 de l'addendum**, qui ne la nomme pas — mais la ligne 2 du
+            // tableau de validation du 2026-10-28 dit « Augmentation **ou réduction** de
+            // capital » : l'étude la pratique, et le dépôt aussi depuis l'origine. Le code est
+            // dérivé par symétrie avec `AUG_CAPITAL` ; écart de nommage à remonter à Thierno
+            // plutôt qu'à résoudre en supprimant une opération utilisée.
+            self::CapitalDiminution   => 'DIM_CAPITAL',
+            self::CapitalCession      => 'CESSION_PARTS',
+            self::ObjetSocial         => 'MOD_OBJET',
+            self::DecisionGestion     => 'DECISION_GESTION',
+        };
+    }
+
+    /**
+     * L'assemblée exigée par cette opération — addendum v1.2 § 2 & § 5.
+     */
+    public function assemblee(): TypeAssemblee
+    {
+        return match($this) {
+            self::GerantNonStatutaire,
+            self::DecisionGestion     => TypeAssemblee::Ago,
+            self::DenominationSociale,
+            self::FormeJuridique,
+            self::GerantStatutaire,
+            self::SiegeSocial,
+            self::CapitalAugmentation,
+            self::CapitalDiminution,
+            self::CapitalCession,
+            self::ObjetSocial         => TypeAssemblee::Age,
+        };
+    }
+
+
     public function label(): string
     {
         return match($this) {
+            self::DecisionGestion     => 'Décision de gestion',
             self::DenominationSociale => 'Modification de dénomination',
             self::FormeJuridique      => 'Modification de forme juridique',
             self::GerantStatutaire    => 'Changement de gérant statutaire',
@@ -81,6 +140,9 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     public function impacteStatuts(): bool
     {
         return match($this) {
+            // Une décision de fonctionnement ne touche pas au pacte social : elle se prend
+            // en AGO et les statuts restent ce qu'ils sont.
+            self::DecisionGestion     => false,
             // Le seul cas qui ne touche pas les statuts : un gérant non statutaire n'y est
             // pas nommé, seul le RCCM enregistre le changement.
             self::GerantNonStatutaire => false,
@@ -100,6 +162,10 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     {
         // Toutes, sans exception, d'après le tableau du document.
         return match($this) {
+            // **Tranché** par la ligne 6 du tableau de validation signé le 2026-10-28, cochée
+            // « Oui » : « Ni les statuts ni le RCCM ne changent ». L'addendum la marquait à
+            // confirmer (question Q2) ; elle ne l'est plus. Reste réglable au catalogue.
+            self::DecisionGestion     => false,
             self::DenominationSociale,
             self::FormeJuridique,
             self::GerantStatutaire,
@@ -109,6 +175,89 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
             self::CapitalDiminution,
             self::CapitalCession,
             self::ObjetSocial => true,
+        };
+    }
+
+    /**
+     * Impose-t-elle une publication au Journal d'Annonces Légales ? — addendum v1.2 § 5.
+     *
+     * Toutes, sauf la décision de gestion. Le tableau de validation du 2026-10-28 le confirme
+     * de deux côtés : la ligne 5 a été **annotée pour ajouter** la publication là où elle
+     * manquait (gérant non statutaire), et la ligne 6 — cochée, annotée elle aussi — ne la
+     * mentionne pas. Une relectrice qui ajoute la mention où elle manque et ne l'ajoute pas
+     * ailleurs répond deux fois.
+     */
+    public function publicationJal(): bool
+    {
+        return match($this) {
+            self::DecisionGestion     => false,
+            self::DenominationSociale,
+            self::FormeJuridique,
+            self::GerantStatutaire,
+            self::GerantNonStatutaire,
+            self::SiegeSocial,
+            self::CapitalAugmentation,
+            self::CapitalDiminution,
+            self::CapitalCession,
+            self::ObjetSocial         => true,
+        };
+    }
+
+    /**
+     * Ne se combine avec aucune autre opération dans le même dossier — règle C1.
+     *
+     * Aucune modification statutaire n'est exclusive : une assemblée peut décider
+     * plusieurs modifications statutaires à la fois (ex. cession + transfert de siège).
+     */
+    public function exclusive(): bool
+    {
+        return false;
+    }
+
+    /**
+     * La règle est-elle validée par l'étude (✅) ou à confirmer (⚠) ? — addendum v1.2 § 5.
+     */
+    public function regleValidee(): bool
+    {
+        return match($this) {
+            // ── Non validées : la case « Oui » du tableau est restée vide ────────
+            //
+            // Ligne 7, non cochée, annotée par Maître Bah : « Rapport du commissaire aux
+            // comptes (art. 374 de l'acte uniforme relatif au Droit des Sociétés Commerciales
+            // et du GIE, révisé, en vigueur le 5 mai 2014) ». La règle s'est donc **précisée**
+            // sans être validée : un document de plus est exigé, les règles de majorité
+            // restent inconnues. Le rapport n'est pas encore dans `documentsRequis()` — il y
+            // entrera avec les gabarits du lot 5, et l'écart reste visible d'ici là.
+            self::FormeJuridique,
+            // Lignes 2 et 3, non cochées et sans correction. Le silence n'est pas un accord :
+            // les quatorze autres lignes du tableau portent une croix. La règle reste celle
+            // que le dépôt applique — elle est simplement signalée comme non relue.
+            //
+            // ⚠️ La ligne 2 réunit **augmentation et réduction** de capital. La diminution,
+            // absente du § 5 de l'addendum, est donc bien une opération de l'étude : c'est ce
+            // qui a justifié de l'activer au catalogue. Elle n'est pas pour autant validée.
+            self::CapitalDiminution,
+            self::CapitalCession      => false,
+            // ── Validées par le tableau signé du 2026-10-28 ──────────────────────
+            //
+            // Ligne 1 (dénomination, siège, objet), ligne 4 (gérant statutaire), ligne 8
+            // (cumul dans un même PV) : cochées « Oui », sans correction.
+            self::DenominationSociale,
+            self::GerantStatutaire,
+            self::SiegeSocial,
+            self::ObjetSocial,
+            // Ligne 2, partie augmentation : cochée pour ce que le dépôt en fait. La seule
+            // annotation porte sur l'origine de l'attestation de dépôt — banque si les fonds
+            // y sont versés, notaire sinon — et non sur la règle elle-même.
+            self::CapitalAugmentation,
+            // Ligne 5, cochée « Oui » et **annotée pour ajouter** « Publication obligatoire au
+            // journal d'annonces légales ». L'addendum la marquait ⚠ sur ce point précis
+            // (question Q1) : la réponse est oui, et elle est écrite.
+            self::GerantNonStatutaire,
+            // Ligne 6, cochée « Oui », annotée : « Toutes décisions qui n'entraînent pas la
+            // modification des statuts doivent être prises en AGO ». L'impact RCCM — ⚠ Q2 de
+            // l'addendum — est tranché : ni statuts ni RCCM ne changent.
+            self::DecisionGestion     => true,
         };
     }
 
@@ -149,6 +298,9 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
             // Le document ne mentionne pas de statuts pour un gérant non statutaire —
             // cohérent avec impacteStatuts() : seul le PV est produit.
             self::GerantNonStatutaire => [...$pv, ...$rccm],
+            // Ni statuts, ni déclaration RCCM : le procès-verbal **est** l'acte. C'est la
+            // seule opération du catalogue dont l'effet se borne au document produit.
+            self::DecisionGestion     => $pv,
 
             self::DenominationSociale,
             self::FormeJuridique,
@@ -251,6 +403,7 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
             self::GerantStatutaire    => [self::GerantNonStatutaire],
             self::GerantNonStatutaire => [self::GerantStatutaire],
 
+            self::DecisionGestion,
             self::DenominationSociale,
             self::FormeJuridique,
             self::SiegeSocial,
@@ -319,6 +472,7 @@ enum TypeModificationStatutaire: string implements VarianteTypeActe
     public function blocQuestionnaire(): string
     {
         return match($this) {
+            self::DecisionGestion     => 'modif_decision_gestion',
             self::DenominationSociale => 'modif_denomination',
             self::FormeJuridique      => 'modif_forme',
             self::GerantStatutaire,
