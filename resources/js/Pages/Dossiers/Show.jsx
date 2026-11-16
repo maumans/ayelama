@@ -7,6 +7,7 @@ import {
     AlertTriangle,
     FileText,
     FilePen,
+    FilePlus,
     Download,
     Eye,
     Building,
@@ -2817,25 +2818,11 @@ function DocumentsTab({
                             Déposer un acte
                         </Button>
                     )}
-                    {can?.genererDocuments && (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 gap-1"
-                            onClick={handleGenererModeles}
-                            disabled={generating}
-                        >
-                            <RefreshCw
-                                className={cn(
-                                    "h-3.5 w-3.5",
-                                    generating && "animate-spin",
-                                )}
-                            />
-                            {generating
-                                ? "Génération…"
-                                : "Générer depuis les modèles"}
-                        </Button>
-                    )}
+                    {/* « Générer depuis les modèles » retiré d'ici le 2026-11-16 : affiché en
+                        permanence avec l'icône de rafraîchissement, il se lisait comme la
+                        régénération supprimée au lot 2 (R10), alors qu'il ne produit que les actes
+                        manquants. Il ne reste offert que là où il sert — l'encart des actes
+                        manquants et la liste vide, ci-dessous. */}
                 </div>
             </CardHeader>
             <CardContent className="px-0 pb-0">
@@ -2968,10 +2955,12 @@ function DocumentsTab({
                             onClick={handleGenererModeles}
                             disabled={generating}
                         >
-                            <RefreshCw
+                            {/* Icône « ajouter » et non « rafraîchir » : ce bouton crée ce qui
+                                manque, il ne régénère rien (2026-11-16). */}
+                            <FilePlus
                                 className={cn(
                                     "h-3.5 w-3.5",
-                                    generating && "animate-spin",
+                                    generating && "animate-pulse",
                                 )}
                             />
                             {generating
@@ -2994,10 +2983,10 @@ function DocumentsTab({
                                 onClick={handleGenererModeles}
                                 disabled={generating}
                             >
-                                <RefreshCw
+                                <FilePlus
                                     className={cn(
                                         "h-3.5 w-3.5",
-                                        generating && "animate-spin",
+                                        generating && "animate-pulse",
                                     )}
                                 />
                                 {generating
