@@ -2,14 +2,20 @@
 
 namespace App\Models;
 
+use App\Enums\StatutFacture;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class Facture extends Model
 {
     protected $fillable = [
         'dossier_id',
+        'statut',
+        'emise_at',
         'note_numero',
         'note_date',
+        'expediteur',
         'compte_numero',
         'objet',
         'assiette_chiffres',
@@ -20,6 +26,8 @@ class Facture extends Model
     {
         return [
             'note_date'          => 'date',
+            'statut'             => StatutFacture::class,
+            'emise_at'           => 'datetime',
             'assiette_chiffres'  => 'decimal:2',
             'total_chiffres'     => 'decimal:2',
         ];
@@ -83,8 +91,56 @@ class Facture extends Model
         return round((float) $this->total_chiffres - $this->totalPayeEnBase($saufPaiementId), 2);
     }
 
+    public function estProforma(): bool
+    {
+        return $this->statut === StatutFacture::Proforma;
+    }
+
+    /**
+     * Émettre la facture : lui attribuer son numéro, la dater du jour, nommer qui l'expédie
+     * (retours R20 et R11, 2026-11-16).
+     *
+     * ⚠️ Sous verrou, dans une transaction : deux émissions simultanées liraient sinon la même
+     * séquence. L'index unique sur `note_numero` est le second filet — une course perdue échoue
+     * bruyamment au lieu de dupliquer un numéro de facture.
+     */
+    public function emettre(?string $expediteur = null): self
+    {
+        if (! $this->estProforma()) {
+            throw ValidationException::withMessages(['facture' => ['Cette facture est déjà émise.']]);
+        }
+        if ((float) $this->total_chiffres <= 0) {
+            throw ValidationException::withMessages([
+                'facture' => ["Une facture sans montant ne s'émet pas : ajoutez d'abord une ligne."],
+            ]);
+        }
+
+        DB::transaction(function () use ($expediteur) {
+            $facture = self::whereKey($this->id)->lockForUpdate()->firstOrFail();
+            if (! $facture->estProforma()) {
+                throw ValidationException::withMessages(['facture' => ['Cette facture vient d\'être émise par quelqu\'un d\'autre.']]);
+            }
+
+            $facture->update([
+                'statut'      => StatutFacture::Emise,
+                'emise_at'    => now(),
+                'note_numero' => self::genererNumero(verrouiller: true),
+                'note_date'   => now(),
+                'expediteur'  => filled($facture->expediteur) ? $facture->expediteur : $expediteur,
+            ]);
+
+            $this->setRawAttributes($facture->getAttributes(), true);
+        });
+
+        return $this;
+    }
+
     public function peutRecevoirPaiement(): bool
     {
+        // Une proforma n'encaisse rien : on paie une facture émise (question Q5 du suivi,
+        // règle provisoire — la sortie d'Expédition exige de toute façon une facture soldée).
+        if ($this->estProforma()) return false;
+
         // Une facture à 0 (aucun barème applicable) n'a rien à encaisser.
         return (float) $this->total_chiffres > 0 && $this->soldeRestant() > 0;
     }
@@ -118,8 +174,15 @@ class Facture extends Model
 
         return [
             'id'                => $this->id,
+            'statutFacture'     => $this->statut?->value,
+            'statutFactureLabel' => $this->statut?->label(),
+            'estProforma'       => $this->estProforma(),
+            'emise_at'          => $this->emise_at?->format('d/m/Y'),
             'note_numero'       => $this->note_numero,
             'note_date'         => $this->note_date?->format('d/m/Y'),
+            // ISO pour le champ date de la modale d'en-tête (R11).
+            'note_date_iso'     => $this->note_date?->toDateString(),
+            'expediteur'        => $this->expediteur,
             'objet'             => $this->objet,
             'assiette_chiffres' => (float) ($this->assiette_chiffres ?? 0),
             'total_chiffres'    => (float) ($this->total_chiffres ?? 0),
@@ -215,19 +278,24 @@ class Facture extends Model
     }
 
     /**
-     * Génère un numéro de note automatique au format "N°XXX/MAB/AA"
+     * Prochain numéro « NNN/MAB/AA » de l'année.
+     *
+     * ⚠️ **La séquence la plus haute, et non la dernière ligne par id** (corrigé le 2026-11-16).
+     * Depuis la proforma, les factures sont émises dans un autre ordre que celui de leur création :
+     * la dernière par id peut porter un numéro plus petit qu'une autre, et l'ancienne lecture aurait
+     * redonné un numéro déjà attribué.
      */
-    public static function genererNumero(): string
+    public static function genererNumero(bool $verrouiller = false): string
     {
         $annee = date('y'); // "26"
-        $last  = self::where('note_numero', 'like', "%/MAB/{$annee}")
-            ->orderByDesc('id')
-            ->value('note_numero');
 
-        $seq = 1;
-        if ($last && preg_match('/^(\d+)\//', $last, $m)) {
-            $seq = (int) $m[1] + 1;
-        }
+        $numeros = self::where('note_numero', 'like', "%/MAB/{$annee}")
+            ->when($verrouiller, fn ($q) => $q->lockForUpdate())
+            ->pluck('note_numero');
+
+        $seq = 1 + (int) $numeros
+            ->map(fn (string $n) => preg_match('/^(\d+)\//', $n, $m) ? (int) $m[1] : 0)
+            ->max();
 
         return sprintf('%03d/MAB/%s', $seq, $annee);
     }

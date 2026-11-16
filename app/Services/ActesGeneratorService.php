@@ -48,13 +48,8 @@ class ActesGeneratorService
             return false;
         }
 
-        // Le contenu change : la vérification déjà enregistrée pour ce document n'est
-        // plus fiable, on la marque périmée plutôt que de la supprimer — le verdict et
-        // le commentaire du certificateur restent visibles (contexte pour le rédacteur)
-        // jusqu'au prochain envoi en certification, qui les purgera (Revision::resetPoints()).
-        RevisionPoint::where('point_id', (string) $document->id)
-            ->whereHas('revision', fn ($q) => $q->where('dossier_id', $dossier->id))
-            ->update(['perime' => true]);
+        // Le contenu change : la vérification déjà enregistrée n'est plus fiable.
+        RevisionPoint::perimerPour($document, $dossier);
 
         $referenceActe = $document->reference_acte;
         if (! $referenceActe) {
@@ -909,9 +904,29 @@ class ActesGeneratorService
     // ── Génération réelle ────────────────────────────────────────────────────
 
     /** @return int Nombre de balises restées sans valeur — 0 pour un gabarit sans aucune balise. */
+    /** Balises mises en gras dans un acte de constitution — retour R15, déclarées ici seulement. */
+    private const BALISES_EN_GRAS_CONSTITUTION = [
+        'soc.denomination', 'soc.sigle', 'soc.siege', 'soc.siege_quartier', 'soc.siege_commune', 'soc.siege_ville',
+    ];
+
+    /** Un dossier de constitution de société — le type d'acte désigne une forme (SARLU, SAS…). */
+    private function estConstitution(Dossier $dossier): bool
+    {
+        $dossier->loadMissing('typeActe');
+
+        return \App\Enums\FormeSociete::depuisCodeTypeActe($dossier->typeActe?->code) !== null;
+    }
+
     private function genererDepuisModele(Dossier $dossier, string $templateAbsPath, string $outputAbsPath, string $outputName, ?string $referenceActe = null): int
     {
-        $tp = new TemplateProcessor($templateAbsPath);
+        $tp = new \App\Support\GabaritWord($templateAbsPath);
+
+        // Retour R15 (2026-11-16) : dans un acte de **constitution**, la dénomination, le sigle et
+        // le siège sont en gras — appliqué ici plutôt que fichier par fichier, les onze gabarits
+        // actifs étant incohérents (voir GabaritWord). Avant le remplissage : on repère les balises.
+        if ($this->estConstitution($dossier)) {
+            $tp->mettreEnGras(self::BALISES_EN_GRAS_CONSTITUTION);
+        }
 
         $this->remplirConstantesOffice($tp);
         $this->remplirInfosDossier($tp, $dossier, $referenceActe);
@@ -1054,17 +1069,46 @@ class ActesGeneratorService
                 }
             }
 
+            // Une heure (`ag.heure`, champ `time` depuis le 2026-11-16 — retour R02) : « A DIX
+            // HEURES TRENTE » dans un PV, que le dictionnaire de balises annonce (« A …… HEURES »).
+            // Lue par `Heure`, qui accepte aussi les graphies libres d'avant (« 10H », « 10h30 ») :
+            // le questionnaire est un instantané, on ne le réécrit pas.
+            if (str_ends_with($cle, 'heure') && ($heure = \App\Support\Heure::normaliser($valeur)) !== null) {
+                if (!isset($donnees["{$cle}_lettres"])) {
+                    $tp->setValue("{$cle}_lettres", \App\Support\Heure::enLettres($heure));
+                }
+                if (!isset($donnees["{$cle}_formate"])) {
+                    $tp->setValue("{$cle}_formate", \App\Support\Heure::formatee($heure));
+                }
+            }
+
             if (str_ends_with($cle, '_chiffres') && is_numeric($valeur)) {
                 // _lettres : sans devise (le template apporte lui-même "FRANCS GUINÉENS")
                 $cleLettre = str_replace('_chiffres', '_lettres', $cle);
                 if (!isset($donnees[$cleLettre])) {
                     $tp->setValue($cleLettre, NombreEnLettres::convertir((float) $valeur, ''));
                 }
-                // _formate : 30000000 → "30 000 000" (espace fine insécable)
+                // _formate : 30000000 → « 30.000.000 ». Espace fine insécable jusqu'au 2026-11-16 ;
+                // désormais le point, comme partout dans les documents (FormatNombre).
                 $cleFormate = str_replace('_chiffres', '_formate', $cle);
                 if (!isset($donnees[$cleFormate])) {
-                    $tp->setValue($cleFormate, number_format((float) $valeur, 0, ',', "\u{202F}"));
+                    $tp->setValue($cleFormate, \App\Support\FormatNombre::milliers($valeur));
                 }
+            }
+
+            // La balise **brute** d'un montant ou d'un compte porte elle aussi le séparateur
+            // (retour R13, 2026-11-16) : `${soc.capital_chiffres}` et `${soc.nombre_parts}`, les plus
+            // employées des modèles actifs, sortaient « 50000000 ». Un nombre de moins de mille
+            // ne change pas — une durée de 99 ans reste « 99 ».
+            if (\App\Support\FormatNombre::doitFormater($cle) && is_scalar($valeur)) {
+                $valeur = \App\Support\FormatNombre::milliers($valeur);
+            }
+
+            // Retour R15 : la dénomination d'une société **constituée** s'écrit en majuscules dans
+            // ses actes, quelle que soit la casse saisie. La fiche et le questionnaire gardent la
+            // saisie (un instantané ne se réécrit pas) ; seul l'acte la met en capitales.
+            if ($cle === 'soc.denomination' && is_string($valeur) && $this->estConstitution($dossier)) {
+                $valeur = mb_strtoupper($valeur, 'UTF-8');
             }
 
             $tp->setValue($cle, htmlspecialchars((string) $valeur, ENT_XML1 | ENT_COMPAT, 'UTF-8'));
@@ -1231,8 +1275,17 @@ class ActesGeneratorService
                 if (str_ends_with($champ, '_chiffres') && is_numeric($valeur)) {
                     $champLettres = str_replace('_chiffres', '_lettres', $champ);
                     if (!isset($item[$champLettres])) {
-                        $tp->setValue("{$bloc}.{$champLettres}#{$index}", NombreEnLettres::convertir((float) $valeur));
+                        // Sans devise, comme à la racine (2026-11-16) : `convertir()` ajoutait par
+                        // défaut « Francs Guinéens », d'où « CENT FRANCS GUINÉENS » pour
+                        // `${associes.parts_chiffres}` — un nombre de parts. Aucun modèle actif
+                        // n'emploie de `_lettres` de bloc ; le modèle apporte sa devise.
+                        $tp->setValue("{$bloc}.{$champLettres}#{$index}", NombreEnLettres::convertir((float) $valeur, ''));
                     }
+                }
+
+                // Séparateur de milliers, comme à la racine (retour R13).
+                if (\App\Support\FormatNombre::doitFormater($champ)) {
+                    $valeur = \App\Support\FormatNombre::milliers($valeur);
                 }
 
                 $tp->setValue(

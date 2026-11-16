@@ -56,6 +56,9 @@ const copier = (relatif, transformer = (t) => t) => {
 
 copier('resources/js/lib/dates.js');
 copier('resources/js/lib/piecesRequises.js');
+// Importé par partiesPayload.js depuis le 2026-11-16 (groupe des pièces du représentant d'une
+// ligne de bloc) : sans copie, l'import échoue et l'outil s'arrête avant le premier contrôle.
+copier('resources/js/lib/piecesStagees.js');
 const urlChampsClient = copier('resources/js/lib/clientFields.js');
 
 const urlQuestionnaires = copier('resources/js/data/questionnaires.js', (t) => t.replace(

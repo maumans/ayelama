@@ -343,6 +343,8 @@ function CourrierRow({ c, onEdit, onPreview, idx }) {
                                 </Tooltip>
                             )}
 
+                            {/* Droit décidé par le serveur (CourrierPolicy + verrou signé) — retour R07. */}
+                            {c.peut_supprimer && (
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button variant="ghost" size="icon-sm"
@@ -354,6 +356,7 @@ function CourrierRow({ c, onEdit, onPreview, idx }) {
                                 </TooltipTrigger>
                                 <TooltipContent><p className="text-xs">Supprimer</p></TooltipContent>
                             </Tooltip>
+                            )}
                         </div>
                     </div>
 

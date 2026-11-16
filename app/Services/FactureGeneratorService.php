@@ -177,7 +177,7 @@ class FactureGeneratorService
 
     private function formaterMontant(float $montant): string
     {
-        return number_format($montant, 0, ',', ' ');
+        return \App\Support\FormatNombre::milliers(round($montant)); // « . », comme tous les documents (R13)
     }
 
     private function echapper(?string $texte): string

@@ -14,6 +14,7 @@ use App\Models\Dossier;
 use App\Models\JournalActivite;
 use App\Models\ModeleActe;
 use App\Models\ModeleCourrier;
+use App\Models\DocumentFichier;
 use App\Models\Partie;
 use App\Models\Questionnaire;
 use App\Models\Setting;
@@ -293,6 +294,9 @@ class DossierController extends Controller
             // on ne découvrait les actes et les coûts qu'après la création du dossier. Dérivés
             // de l'enum, jamais dupliqués en JavaScript.
             'typesModification' => TypeModificationStatutaire::toutes(),
+            // Préremplissage de « Nature de la décision » (retour R05) — à la création seulement :
+            // la modale de modification ouvre un instantané, qu'on ne réécrit pas.
+            'natureDecision' => \App\Enums\TypeAssemblee::reglesNatureDecision(),
         ]);
     }
 
@@ -464,6 +468,9 @@ class DossierController extends Controller
 
             // Seconde passe : le représentant n'existait pas quand le représenté a été créé.
             $this->resoudreRepresentations($data['parties'] ?? [], $parCle ?? []);
+
+            // Après la résolution des représentations, qui fixe le motif et donc le jeu exigé.
+            $this->reprendrePiecesConnues($dossier);
 
             // Avant toute génération : réaligner le questionnaire sur les fiches
             // clients rattachées. Le frontend n'envoie plus l'identité des personnes
@@ -657,6 +664,36 @@ class DossierController extends Controller
      *
      * @param array<string, mixed> $pieces catégorie → fichier téléversé
      */
+    /**
+     * Reprend, pour chaque personne liée à une fiche client, les pièces encore manquantes qu'elle
+     * a déjà fournies dans un autre dossier (retour R08, 2026-11-16).
+     *
+     * « Lorsque je sélectionne les clients qui existent déjà pendant la création d'un dossier,
+     * n'oublie pas les fichiers qui leur sont liés » : la reprise n'existait qu'**après** création,
+     * bouton par bouton sur la fiche dossier. Elle se fait désormais d'office, ici, côté serveur :
+     *
+     *  - aucun identifiant de pièce ne transite par le navigateur — on ne peut pas faire copier
+     *    la pièce d'un autre client en forgeant une requête ;
+     *  - **un fichier choisi à l'écran l'emporte** : seules les pièces encore absentes après
+     *    `enregistrerPiecesPartie()` sont reprises ;
+     *  - la procuration n'est jamais reprise (`Partie::PIECES_NON_REPRENABLES`) : elle vaut pour un
+     *    acte déterminé.
+     *
+     * Même règle et même copie physique que le bouton « Reprendre » (`Partie::reprendrePiece()`,
+     * version `source = 'reprise'`) : un seul comportement pour le même geste.
+     */
+    private function reprendrePiecesConnues(Dossier $dossier): void
+    {
+        foreach ($dossier->parties()->whereNotNull('client_id')->with('pieces.versionActuelle')->get() as $partie) {
+            foreach ($partie->piecesReprenables() as $categorie => $reprise) {
+                $source = DocumentFichier::with('versionActuelle')->find($reprise['piece_id']);
+                if ($source) {
+                    $partie->reprendrePiece($categorie, $source);
+                }
+            }
+        }
+    }
+
     private function enregistrerPiecesPartie(Partie $partie, array $pieces, string $reference): void
     {
         if ($pieces === []) {
@@ -1107,10 +1144,18 @@ class DossierController extends Controller
     {
         $this->authorize('enregistrerSignatures', $dossier);
 
-        $data = $request->validate([
-            'date_signature_client'  => ['sometimes', 'nullable', 'date'],
-            'date_signature_notaire' => ['sometimes', 'nullable', 'date'],
-        ]);
+        // Bornes servies par le modèle, les mêmes que les champs de l'écran (retour R09).
+        ['min' => $min, 'max' => $max] = $dossier->bornesDateSignature();
+        $borne = ['sometimes', 'nullable', 'date', "after_or_equal:{$min}", "before_or_equal:{$max}"];
+
+        $data = $request->validate(
+            ['date_signature_client' => $borne, 'date_signature_notaire' => $borne],
+            [
+                '*.after_or_equal'  => 'Une signature ne peut pas précéder la création du dossier ('
+                    . \Carbon\Carbon::parse($min)->format('d/m/Y') . ').',
+                '*.before_or_equal' => 'Une date de signature ne peut pas être dans le futur.',
+            ],
+        );
 
         $dossier->update($data);
 
@@ -1277,6 +1322,7 @@ class DossierController extends Controller
             'notes'      => $d->notes,
             'date_signature_client'  => $d->date_signature_client?->toDateString(),
             'date_signature_notaire' => $d->date_signature_notaire?->toDateString(),
+            'bornesDateSignature'    => $d->bornesDateSignature(),
             'estEnRetard' => $d->estEnRetard(),
             'updated_at' => $d->updated_at->diffForHumans(),
         ];
@@ -1309,6 +1355,11 @@ class DossierController extends Controller
             'url_preview'       => route('documents.preview', $doc),
             'url_versions'      => route('documents.versions', $doc),
             'url_televerser_signe' => route('documents.televerser_signe', $doc),
+            // Décidés par DocumentFichierPolicy, par document : l'écran ne recalcule plus le droit
+            // depuis un `can.*` global au dossier, qui affichait des boutons que le serveur refusait.
+            'peut_supprimer' => auth()->user()?->can('supprimer', $doc) ?? false,
+            'peut_restaurer' => auth()->user()?->can('restaurer', $doc) ?? false,
+            'peut_corriger'  => auth()->user()?->can('corriger', $doc) ?? false,
         ];
     }
 

@@ -2,6 +2,7 @@ import { buildPartieFields, estChampRepresentation } from '@/lib/clientFields';
 import { typePersonneCanonique } from '@/lib/piecesRequises';
 import { MOTIF_REPRESENTATION_PAR_LIBELLE, FORME_TITRE_PAR_LIBELLE } from '@/data/questionnaires';
 import { frDateToISO } from '@/lib/dates';
+import { groupeRepresentant } from '@/lib/piecesStagees';
 
 // Regroupe les champs d'un questionnaire par section. Une nouvelle section démarre
 // à chaque champ portant `section`. Partagé entre la création et l'édition d'un
@@ -129,10 +130,21 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks, stag
             // une clé à trois parties le casserait en silence. Le parseur ci-dessus est ainsi
             // réutilisé tel quel, comme construireFormDataBrouillon() qui itère les groupes
             // en aveugle.
-            const piecesRepr = stagedPieces[`${field.id}#repr`] ?? {};
+            //
+            // ⚠️ Jusqu'au 2026-11-16, aucun écran n'écrivait dans ce groupe : la lecture ci-dessous
+            // tombait toujours sur `{}`, et le représentant d'une ligne de bloc naissait sans pièce
+            // (retour R06). RepeatableGroup les met désormais en attente sous `groupeRepresentant()`.
+            const piecesRepr = stagedPieces[groupeRepresentant(field.id)] ?? {};
             const reprPieces = {};
             for (const key of Object.keys(piecesRepr)) {
                 if (key.startsWith(`${idx}:`) && piecesRepr[key]) reprPieces[key.split(':')[1]] = piecesRepr[key];
+            }
+            // Idem pour celles héritées d'un brouillon — omises jusqu'ici dans cette branche, alors
+            // que la branche scalaire les transmettait.
+            const brouillonRepr = piecesBrouillon[groupeRepresentant(field.id)] ?? {};
+            const reprBrouillon = {};
+            for (const key of Object.keys(brouillonRepr)) {
+                if (key.startsWith(`${idx}:`) && brouillonRepr[key]?.chemin) reprBrouillon[key.split(':')[1]] = brouillonRepr[key];
             }
 
             parties.push({
@@ -157,6 +169,7 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks, stag
                     client: item.representant_client ?? null,
                     partieId: item.representant_partie_id ?? undefined,
                     stagedPieces: reprPieces,
+                    piecesBrouillon: reprBrouillon,
                 }),
             });
         });

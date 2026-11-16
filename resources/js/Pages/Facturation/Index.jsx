@@ -188,6 +188,15 @@ export default function FacturationIndex() {
                                                         <span className={cn('inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border', meta.badge)}>
                                                             {meta.label}
                                                         </span>
+                                                        {/* Proforma (R20) : pas encore de numéro. Sinon le numéro, qui
+                                                            n'apparaissait nulle part dans cette liste. */}
+                                                        {f.estProforma ? (
+                                                            <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+                                                                Proforma
+                                                            </span>
+                                                        ) : f.note_numero && (
+                                                            <span className="font-ref text-[11px] text-slate-500">N° {f.note_numero}</span>
+                                                        )}
                                                         {f.dossier.typeActe && (
                                                             <span className="bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5 text-[10px] text-slate-500">
                                                                 {f.dossier.typeActe}

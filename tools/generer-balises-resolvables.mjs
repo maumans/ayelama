@@ -97,10 +97,12 @@ for (const d of ['rccm_date', 'jal_date_parution']) {
 }
 
 // Variantes automatiques — mêmes règles que remplirQuestionnaire() : `_jma`/`_lettres`
-// pour une date, `_lettres`/`_formate` pour un nom finissant par `_chiffres`. Rien d'autre.
+// pour une date, `_lettres`/`_formate` pour un nom finissant par `_chiffres` ou par `heure`
+// (champ `time`, 2026-11-16 — App\Support\Heure). Rien d'autre.
 const ajouter = (id, type) => {
     balises.add(id);
     if (type === 'date') { balises.add(`${id}_jma`); balises.add(`${id}_lettres`); }
+    if (id.endsWith('heure')) { balises.add(`${id}_lettres`); balises.add(`${id}_formate`); }
     if (id.endsWith('_chiffres')) {
         balises.add(id.replace('_chiffres', '_lettres'));
         balises.add(id.replace('_chiffres', '_formate'));

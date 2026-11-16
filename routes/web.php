@@ -89,7 +89,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/documents/{document}', [DocumentController::class, 'destroy'])->name('documents.destroy');
     Route::get('/documents/{document}/download',   [DocumentController::class, 'download'])->name('documents.download');
     Route::get('/documents/{document}/preview',    [DocumentController::class, 'preview'])->name('documents.preview');
-    Route::post('/documents/{document}/regenerer', [DocumentController::class, 'regenerer'])->name('documents.regenerer');
+    // `regenerer` retiré le 2026-11-16 (retour R10) : régénérer écrasait une correction faite à la
+    // main. Corriger un acte, c'est déposer sa version retravaillée (retour R19).
+    Route::post('/documents/{document}/corriger', [DocumentController::class, 'corriger'])->name('documents.corriger');
     Route::get('/documents/{document}/versions', [DocumentController::class, 'versions'])->name('documents.versions');
     Route::get('/documents/versions/{version}/telecharger', [DocumentController::class, 'telechargerVersion'])->name('documents.versions.telecharger');
     Route::post('/documents/versions/{version}/restaurer', [DocumentController::class, 'restaurerVersion'])->name('documents.versions.restaurer');
@@ -127,6 +129,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/recus/{recu}/apercu', [FactureController::class, 'apercuRecu'])->name('recus.apercu');
     // La note de frais en PDF, rendue en mémoire — voir FacturePdfService.
     Route::get('/factures/{facture}/telecharger', [FactureController::class, 'telechargerPdf'])->name('factures.telecharger');
+    // Proforma → facture émise (R20), et en-tête modifiable : date et expéditeur (R11).
+    Route::post('/factures/{facture}/emettre', [FactureController::class, 'emettre'])->name('factures.emettre');
+    Route::patch('/factures/{facture}/entete', [FactureController::class, 'updateEntete'])->name('factures.entete');
     Route::post('/factures/{facture}/lignes', [FactureController::class, 'storeLigne'])->name('factures.lignes.store');
     Route::patch('/lignes/{ligne}', [FactureController::class, 'updateLigne'])->name('lignes.update');
     Route::delete('/lignes/{ligne}', [FactureController::class, 'destroyLigne'])->name('lignes.destroy');
@@ -160,6 +165,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Clients (recherche/création rapide depuis le questionnaire de dossier)
     Route::get('/clients/autocomplete', [ClientController::class, 'autocomplete'])->name('clients.autocomplete');
+    // Pièces que ce client a déjà fournies ailleurs et qui seront reprises à la création (R08).
+    Route::get('/clients/{client}/pieces-reprenables', [ClientController::class, 'piecesReprenables'])->name('clients.pieces_reprenables');
     Route::post('/clients', [ClientController::class, 'store'])->name('clients.store');
     // Correction d'une fiche : répercute l'identité sur les dossiers non clôturés
     // qui la référencent (voir ClientProjectionService).

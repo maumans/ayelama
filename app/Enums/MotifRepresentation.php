@@ -80,6 +80,28 @@ enum MotifRepresentation: string
     }
 
     /**
+     * Pièces que ce motif **retire** du jeu de base du représenté.
+     *
+     * L'organique retire `cni_representant` : la CNI du représentant légal est réclamée au
+     * représentant lui-même, partie du dossier avec sa propre checklist (décision #50).
+     *
+     * Déplacé ici le 2026-11-16 depuis un `unset` dans `Partie::piecesRequisesDefinition()` : la
+     * règle doit aussi être **servie** au frontend (`Partie::reglesPiecesRequises()`), qui
+     * l'ignorait — l'assistant de création ne demandait donc jamais la procuration d'une
+     * personne représentée (retour R06). Un `unset` dans une méthode ne se sert pas.
+     *
+     * @return array<int, string>
+     */
+    public function piecesRetirees(): array
+    {
+        return match ($this) {
+            self::Procuration => [],
+            self::Legale      => [],
+            self::Organique   => ['cni_representant'],
+        };
+    }
+
+    /**
      * La date du titre est-elle exigible ?
      *
      * Vrai pour la seule procuration : un acte authentique vise la procuration « en date du… »,

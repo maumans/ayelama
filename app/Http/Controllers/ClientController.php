@@ -11,6 +11,37 @@ use Illuminate\Validation\Rule;
 class ClientController extends Controller
 {
     /**
+     * Ce qui sera **repris** pour ce client s'il entre au dossier sous ce rôle (retour R08).
+     *
+     * Lecture seule, à des fins d'affichage : la reprise elle-même se fait côté serveur à la
+     * création (`DossierController::reprendrePiecesConnues()`), à partir des mêmes règles. Ne sert
+     * ni fichier ni URL — seulement la catégorie, la date et le dossier d'origine, ce qui suffit à
+     * dire à l'écran « déjà fournie le … » et à laisser juger si un scan est trop ancien.
+     *
+     * Interroge une `Partie` **non enregistrée** : c'est la seule façon d'obtenir exactement le jeu
+     * que le serveur exigera (rôle × nature × motif), sans le recomposer ici.
+     */
+    public function piecesReprenables(Request $request, Client $client)
+    {
+        $this->authorize('view', $client);
+
+        $data = $request->validate([
+            'role'          => ['required', 'string', 'max:60'],
+            'type_personne' => ['nullable', 'in:physique,morale'],
+            'motif'         => ['nullable', Rule::enum(\App\Enums\MotifRepresentation::class)],
+        ]);
+
+        $partie = new \App\Models\Partie([
+            'client_id'            => $client->id,
+            'role'                 => $data['role'],
+            'type_personne'        => $data['type_personne'] ?? $client->type ?? 'physique',
+            'representation_motif' => $data['motif'] ?? null,
+        ]);
+
+        return response()->json($partie->piecesReprenables());
+    }
+
+    /**
      * Recherche de clients pour l'auto-complétion (utilisé par le sélecteur de client
      * pendant la création d'un dossier). Réponse JSON brute, pas une page Inertia.
      */

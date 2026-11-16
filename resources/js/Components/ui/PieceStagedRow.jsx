@@ -10,7 +10,12 @@ import { PreviewBody } from '@/Components/documents/DocumentPreviewModal';
  * disque privé du serveur, et exposer une pièce d'identité derrière une URL de
  * prévisualisation pour un dossier qui n'existe pas encore serait excessif).
  */
-export function PieceStagedRow({ piece, file, fichierBrouillon, onFileSelected, onRetirerBrouillon, isPreviewOpen, onTogglePreview, className }) {
+/*
+ * `reprise` ({ dossier, date }) : la personne a déjà fourni cette pièce dans un autre dossier,
+ * et le serveur la **reprendra d'office** à la création (retour R08, 2026-11-16). Un fichier
+ * choisi ici l'emporte — d'où la date affichée : un vieux scan peut mériter d'être remplacé.
+ */
+export function PieceStagedRow({ piece, file, fichierBrouillon, reprise, onFileSelected, onRetirerBrouillon, isPreviewOpen, onTogglePreview, className }) {
     const inputRef = useRef(null);
     const [previewUrl, setPreviewUrl] = useState(null);
 
@@ -51,7 +56,7 @@ export function PieceStagedRow({ piece, file, fichierBrouillon, onFileSelected, 
         }
     }, [file]);
 
-    const fournie = !!file || !!fichierBrouillon;
+    const fournie = !!file || !!fichierBrouillon || !!reprise;
 
     return (
         <div className={className}>
@@ -67,6 +72,13 @@ export function PieceStagedRow({ piece, file, fichierBrouillon, onFileSelected, 
                     {!file && fichierBrouillon && (
                         <span className="ml-1.5 text-xs text-slate-400">
                             — {fichierBrouillon.nom} <span className="text-slate-300">(conservée au brouillon)</span>
+                        </span>
+                    )}
+                    {!file && !fichierBrouillon && reprise && (
+                        <span className="ml-1.5 text-xs text-slate-400">
+                            — déjà fournie{reprise.date ? ` le ${reprise.date}` : ''}
+                            {reprise.dossier ? ` (${reprise.dossier})` : ''}
+                            <span className="text-slate-300"> · reprise à la création</span>
                         </span>
                     )}
                 </span>

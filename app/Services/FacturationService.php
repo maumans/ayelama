@@ -45,6 +45,14 @@ class FacturationService
             ]);
         }
 
+        // Une facture **émise** porte un numéro légal : la supprimer pour la refaire laisserait un
+        // trou dans la numérotation (retour R20, 2026-11-16). Seule une proforma se régénère.
+        if ($dossier->factures()->where('statut', \App\Enums\StatutFacture::Emise)->exists()) {
+            throw ValidationException::withMessages([
+                'facture' => ["Impossible de régénérer la facture : elle a déjà été émise et numérotée."],
+            ]);
+        }
+
         // Essayer de déduire l'assiette du questionnaire si non fournie
         if ($assiette === null) {
             $assiette = $this->deduireAssiette($dossier);
@@ -80,7 +88,9 @@ class FacturationService
             // Créer la facture
             $facture = Facture::create([
                 'dossier_id'       => $dossier->id,
-                'note_numero'      => Facture::genererNumero(),
+                // Proforma, sans numéro : il n'est attribué qu'à l'émission (R20).
+                'statut'           => \App\Enums\StatutFacture::Proforma,
+                'note_numero'      => null,
                 'note_date'        => now(),
                 'objet'            => $objet ?: $dossier->objet,
                 'assiette_chiffres' => $assiette ?? 0,
@@ -279,7 +289,8 @@ class FacturationService
         $tauxStr = rtrim(rtrim(number_format((float) $bareme->taux, 4, ',', ''), '0'), ',');
 
         if ($assiette && $assiette > 0) {
-            $assietteFormatee = number_format($assiette, 0, ',', ' ');
+            // Imprimée dans la désignation de la ligne, donc sur la facture : « . » (R13).
+            $assietteFormatee = \App\Support\FormatNombre::milliers(round($assiette));
             return "{$bareme->libelle} ({$tauxStr}% de {$assietteFormatee} GNF)";
         }
 
@@ -293,7 +304,8 @@ class FacturationService
     {
         return Facture::create([
             'dossier_id'        => $dossier->id,
-            'note_numero'       => Facture::genererNumero(),
+            'statut'            => \App\Enums\StatutFacture::Proforma,
+            'note_numero'       => null, // attribué à l'émission (R20)
             'note_date'         => now(),
             'objet'             => $objet ?: $dossier->objet,
             'assiette_chiffres' => $assiette ?? 0,

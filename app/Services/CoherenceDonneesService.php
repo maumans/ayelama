@@ -56,9 +56,9 @@ class CoherenceDonneesService
      * Dates isolées dont on peut affirmer une borne, **et elles seules**.
      *
      * Ce qui n'y figure pas est délibéré : `bail.date_prise_effet` et
-     * `modif.augmentation_date_versement` sont légitimement futures ; `dissolution.date_assemblee`,
-     * `hypotheque.date_acte`, `modif.date_cession` et `gerant_sortant.date_cessation` restent libres
-     * faute de savoir quelle borne leur donner. Une contrainte inventée est pire qu'une absente.
+     * `modif.augmentation_date_versement` sont légitimement futures ; `hypotheque.date_acte`,
+     * `modif.date_cession` et `gerant_sortant.date_cessation` restent libres faute de savoir quelle
+     * borne leur donner (`dissolution.date_assemblee` a été arbitrée le 2026-11-16, ci-dessous). Une contrainte inventée est pire qu'une absente.
      *
      * @var list<array{champ: string, genre: string, apres?: string, message: string}>
      */
@@ -74,7 +74,53 @@ class CoherenceDonneesService
             'apres'   => 'ag.date',
             'message' => "La date d'effet ne peut pas précéder l'assemblée qui l'a décidée.",
         ],
+        // Retour R02, arbitré le 2026-11-16 : pas d'assemblée avant la constitution ; une date
+        // future reste permise (l'étude prépare des PV à l'avance). Miroir de CONTRAINTES_DATES.
+        [
+            'champ'   => 'ag.date',
+            'genre'   => 'ordre',
+            'apres'   => 'soc.date_constitution',
+            'message' => "L'assemblée ne peut pas précéder la constitution de la société.",
+        ],
+        [
+            'champ'   => 'dissolution.date_assemblee',
+            'genre'   => 'ordre',
+            'apres'   => 'soc.date_constitution',
+            'message' => "L'assemblée ne peut pas précéder la constitution de la société.",
+        ],
+        [
+            'champ'   => 'cloture.date_assemblee',
+            'genre'   => 'ordre',
+            'apres'   => 'soc.date_constitution',
+            'message' => "L'assemblée ne peut pas précéder la constitution de la société.",
+        ],
     ];
+
+    /**
+     * Plafonds numériques — un champ ne peut dépasser un autre (retour R03, 2026-11-16).
+     * Miroir de `PLAFONDS` dans questionnaires.js.
+     *
+     * @var list<array{champ: string, plafond: string, message: string}>
+     */
+    public const PLAFONDS = [
+        [
+            'champ'   => 'ag.parts_representees',
+            'plafond' => 'soc.nombre_parts',
+            'message' => 'Les parts présentes ou représentées ne peuvent dépasser le nombre de parts de la société.',
+        ],
+    ];
+
+    /** Un nombre saisi (« 1 000 », « 100 ») ou null — miroir de `nombre()` dans blocantsEtape.js. */
+    private function nombre(mixed $valeur): ?float
+    {
+        if ($valeur === null || $valeur === '' || is_array($valeur)) {
+            return null;
+        }
+
+        $texte = str_replace(',', '.', preg_replace('/[\s\x{202F}\x{00A0}]/u', '', (string) $valeur));
+
+        return is_numeric($texte) ? (float) $texte : null;
+    }
 
     /**
      * Incohérences trouvées, sous la forme attendue par `ValidationException`.
@@ -121,6 +167,15 @@ class CoherenceDonneesService
 
             if ($message !== null) {
                 $erreurs["donnees.{$contrainte['champ']}"] = $message;
+            }
+        }
+
+        foreach (self::PLAFONDS as $p) {
+            $valeur = $this->nombre($donnees[$p['champ']] ?? null);
+            $max    = $this->nombre($donnees[$p['plafond']] ?? null);
+
+            if ($valeur !== null && $max !== null && $valeur > $max) {
+                $erreurs["donnees.{$p['champ']}"] = $p['message'];
             }
         }
 

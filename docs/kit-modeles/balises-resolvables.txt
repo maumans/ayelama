@@ -185,6 +185,8 @@ ag.date_effet_lettres
 ag.date_jma
 ag.date_lettres
 ag.heure
+ag.heure_formate
+ag.heure_lettres
 ag.lieu
 ag.parts_representees
 ag.president_seance
@@ -1343,6 +1345,9 @@ soc.capital_libere_lettres
 soc.date_constitution
 soc.date_constitution_jma
 soc.date_constitution_lettres
+soc.date_debut_activite
+soc.date_debut_activite_jma
+soc.date_debut_activite_lettres
 soc.denomination
 soc.dg_civilite
 soc.dg_nom

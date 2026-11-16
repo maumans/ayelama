@@ -304,6 +304,28 @@ class Dossier extends Model
         return $this->revision?->statut === \App\Enums\StatutRevision::Valide;
     }
 
+    /**
+     * Bornes d'une date de signature (client ou notaire) — retour R09, arbitré le 2026-11-16.
+     *
+     * Ni dans le futur (une signature se constate, elle ne se prévoit pas), ni avant la création du
+     * dossier. **Délibérément rien de plus**, après mesure sur les 12 dossiers signés : deux ont
+     * le notaire signant la veille du client (SOC-2026-0013, 0014), deux des signatures antérieures
+     * à l'entrée du dossier en étape Signature (SOC-2026-0025, 0026) — l'étude a choisi de ne pas
+     * en faire des incohérences.
+     *
+     * Un seul détenteur : la validation de `enregistrerSignatures()` et les bornes `min`/`max` des
+     * champs de date de l'écran lisent toutes deux ce tableau.
+     *
+     * @return array{min: string, max: string} dates ISO
+     */
+    public function bornesDateSignature(): array
+    {
+        return [
+            'min' => ($this->created_at ?? now())->toDateString(),
+            'max' => now()->toDateString(),
+        ];
+    }
+
     public function estEnRetard(): bool
     {
         return $this->echeance

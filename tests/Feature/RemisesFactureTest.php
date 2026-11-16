@@ -70,6 +70,8 @@ class RemisesFactureTest extends TestCase
     {
         $facture = Facture::create([
             'dossier_id'   => $this->dossier()->id,
+            // Numérotée, donc émise : une proforma ne reçoit pas de paiement (R20, 2026-11-16).
+            'statut'       => \App\Enums\StatutFacture::Emise,
             'note_numero'  => Facture::genererNumero(),
             'note_date'    => now(),
             'objet'        => 'Note de test',

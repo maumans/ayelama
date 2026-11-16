@@ -48,10 +48,8 @@ class BalisesGabaritsActifsTest extends TestCase
         // case sur le gabarit.
         'ger.nom'                    => 'RCCM SARLU — la fiche ne sépare pas nom et prénoms',
         'ger.prenom'                 => 'RCCM SARLU — la fiche ne sépare pas nom et prénoms',
-        // Le greffe demande la date de début d'activité, que ni `societes` ni le questionnaire
-        // de constitution ne portent. Elle n'est pas la date de constitution : une société
-        // peut être immatriculée avant de commencer.
-        'soc.date_debut_activite_jma' => 'RCCM SARLU — aucune colonne ni aucun champ ne porte cette date',
+        // `soc.date_debut_activite_jma` a quitté cette liste le 2026-11-16 (retour R17) : le
+        // questionnaire de constitution porte désormais `soc.date_debut_activite`.
     ];
 
     /** Les blocs répétables : `${associes.nom}` est résolu par le bloc, pas par la liste. */

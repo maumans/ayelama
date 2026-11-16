@@ -10,7 +10,7 @@
 // langage que la fiche.
 
 import { groupFieldsBySection } from '@/lib/partiesPayload';
-import { CONTRAINTES_DATES, PAIRES_DATES, roleGeo } from '@/data/questionnaires';
+import { CONTRAINTES_DATES, PAIRES_DATES, PLAFONDS, roleGeo } from '@/data/questionnaires';
 import { incoherenceOrdre, incoherencePassee, incoherencesTriplet } from '@/lib/coherenceDates';
 
 export const OBJET_LONGUEUR_MIN = 10;
@@ -61,6 +61,7 @@ function raisonChampVide(field, nbOptionsGeo = undefined) {
         case 'checkbox_required': return 'Cette confirmation est obligatoire';
         case 'select':            return 'Choisissez une valeur';
         case 'date':              return 'Renseignez une date';
+        case 'time':              return 'Renseignez une heure';
         default:                  return 'Champ obligatoire';
     }
 }
@@ -76,13 +77,23 @@ function blocantsDates(visibleFields, formValues) {
     const parId = new Map(visibleFields.map(f => [f.id, f]));
     const blocants = [];
 
+    // La section **de la carte qui affiche le champ**, par le même regroupement que le rendu.
+    // ⚠️ Corrigé le 2026-11-16 : on lisait `field.section`, que seul le premier champ d'une section
+    // porte — « Date de l'assemblée » ou « Parts présentes » se rangeaient sous « Informations
+    // générales », et le badge de compte s'allumait sur une autre carte que la leur. C'est l'écueil
+    // que la boucle des champs obligatoires, plus bas, évitait déjà.
+    const sectionDe = new Map();
+    for (const groupe of groupFieldsBySection(visibleFields)) {
+        for (const f of groupe.fields) sectionDe.set(f.id, groupe.name || 'Informations générales');
+    }
+
     const ajouter = (champ, message) => {
         const field = parId.get(champ);
         if (!field) return;
 
         blocants.push({
             cle: champ,
-            section: field.section || 'Informations générales',
+            section: sectionDe.get(champ) ?? 'Informations générales',
             label: field.label,
             raison: message,
             ancre: champ,
@@ -115,7 +126,22 @@ function blocantsDates(visibleFields, formValues) {
         if (anomalie) ajouter(contrainte.champ, anomalie);
     }
 
+    // Plafonds numériques (2026-11-16, retour R03) — miroir de CoherenceDonneesService::PLAFONDS.
+    for (const { champ, plafond, message } of PLAFONDS) {
+        if (!parId.has(champ)) continue;
+        const valeur = nombre(formValues[champ]);
+        const max = nombre(formValues[plafond]);
+        if (valeur !== null && max !== null && valeur > max) ajouter(champ, message);
+    }
+
     return blocants;
+}
+
+/** Un nombre saisi (« 1 000 », « 100 ») ou null — une saisie vide ne se compare à rien. */
+function nombre(valeur) {
+    if (valeur === null || valeur === undefined || valeur === '') return null;
+    const n = Number(String(valeur).replace(/[\s\u202f\u00a0]/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
 }
 
 /**

@@ -105,6 +105,13 @@ class FactureController extends Controller
      */
     private function assertMontantDansSolde(Facture $facture, float $montant, ?int $saufPaiementId = null): void
     {
+        // On paie une facture **émise**, pas une proforma (R20 ; règle provisoire Q5 du suivi).
+        if ($facture->estProforma()) {
+            throw ValidationException::withMessages([
+                'montant' => ["Cette facture est encore une proforma : émettez-la avant d'enregistrer un paiement."],
+            ]);
+        }
+
         if ((float) $facture->total_chiffres <= 0) {
             throw ValidationException::withMessages([
                 'montant' => ["Cette facture n'a aucun montant à encaisser (total à 0 GNF) — ajoutez d'abord une ligne."],
@@ -263,6 +270,53 @@ class FactureController extends Controller
      * Le PDF est désormais rendu **en mémoire** (voir FacturePdfService), ce qui supprime au passage
      * le fichier temporaire d'où venait cette fragilité.
      */
+    /**
+     * Émettre la facture : numéro, date du jour, expéditeur (retours R20 et R11, 2026-11-16).
+     * L'expéditeur déjà saisi est gardé ; à défaut, c'est la personne qui émet.
+     */
+    public function emettre(Facture $facture)
+    {
+        $this->authorize('gererFacturation', $facture->dossier);
+
+        $facture->emettre(auth()->user()->name);
+
+        JournalActivite::enregistrer(
+            $facture->dossier,
+            "Facture émise sous le n° {$facture->note_numero}",
+            'facturation',
+            ['facture_id' => $facture->id, 'numero' => $facture->note_numero],
+        );
+
+        return back()->with('success', "Facture émise sous le n° {$facture->note_numero}.");
+    }
+
+    /**
+     * Date et expéditeur de la facture (retour R11, 2026-11-16) — l'en-tête n'était modifiable
+     * nulle part. L'expéditeur est un texte libre : la personne qui expédie n'a pas toujours de
+     * compte dans l'application.
+     */
+    public function updateEntete(Request $request, Facture $facture)
+    {
+        $this->authorize('gererFacturation', $facture->dossier);
+
+        $data = $request->validate([
+            'note_date'  => ['required', 'date'],
+            'expediteur' => ['nullable', 'string', 'max:150'],
+        ]);
+
+        $facture->update($data);
+
+        JournalActivite::enregistrer(
+            $facture->dossier,
+            'En-tête de la facture modifié — date ' . \Carbon\Carbon::parse($data['note_date'])->format('d/m/Y')
+                . (filled($data['expediteur'] ?? null) ? ", expédiée par {$data['expediteur']}" : ''),
+            'facturation',
+            ['facture_id' => $facture->id],
+        );
+
+        return back()->with('success', 'En-tête de la facture enregistré.');
+    }
+
     public function telechargerPdf(Facture $facture, FacturePdfService $pdfService)
     {
         $this->authorize('view', $facture->dossier);

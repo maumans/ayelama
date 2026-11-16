@@ -318,7 +318,7 @@ export default function Revision() {
                                             <div className="mt-4 pt-4 border-t border-slate-100 flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg p-3">
                                                 <Clock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                                                 <div>
-                                                    <span className="font-medium text-slate-600">Régénéré depuis un renvoi en correction</span>
+                                                    <span className="font-medium text-slate-600">Modifié depuis un renvoi en correction</span>
                                                     {etatDoc.ancienCommentaire && (
                                                         <> — ancien commentaire : « {etatDoc.ancienCommentaire} »</>
                                                     )}

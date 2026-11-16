@@ -16,6 +16,9 @@ use App\Models\User;
 use App\Notifications\CertificationValideeNotification;
 use App\Notifications\DossierRenvoyeNotification;
 use App\Notifications\FormalitesAFaireNotification;
+use App\Notifications\ActesAProduireNotification;
+use App\Notifications\ExpeditionAFaireNotification;
+use App\Notifications\FactureAEncaisserNotification;
 use App\Notifications\RevisionEnAttenteNotification;
 use App\Notifications\SignatureClientEnAttenteNotification;
 use App\Services\ActesGeneratorService;
@@ -80,40 +83,6 @@ class DossierStepService
                 $revision->resetPoints();
             }
 
-            // Le certificateur seul est concerné — l'envoi partait auparavant aux
-            // 4 ayants droit, ce qui noyait le formaliste et le notaire sous des
-            // notifications sur lesquelles ils n'ont aucune action à mener.
-            $this->notifications->notifierRoles(
-                $dossier,
-                RoleUtilisateur::Reviseur,
-                new RevisionEnAttenteNotification($dossier),
-            );
-        }
-
-        if ($etapeSuivante === EtapeDossier::Signature) {
-            // Le notaire doit signer ; le rédacteur apprend que son dossier a
-            // franchi l'étape bloquante.
-            $this->notifications->notifierRoles(
-                $dossier,
-                [RoleUtilisateur::Notaire, RoleUtilisateur::Clerc],
-                new CertificationValideeNotification($dossier),
-            );
-
-            // Le repli est indispensable ici : sans notaire assigné, ce passage
-            // ne notifiait strictement personne.
-            $this->notifications->notifierRoles(
-                $dossier,
-                RoleUtilisateur::Notaire,
-                new SignatureClientEnAttenteNotification($dossier),
-            );
-        }
-
-        if ($etapeSuivante === EtapeDossier::Formalites) {
-            $this->notifications->notifierRoles(
-                $dossier,
-                RoleUtilisateur::Formaliste,
-                new FormalitesAFaireNotification($dossier),
-            );
         }
 
         // Générer automatiquement les lettres de transmission applicables en
@@ -150,6 +119,10 @@ class DossierStepService
             ['de' => $ancienneEtape->value, 'vers' => $etapeSuivante->value],
             $user
         );
+
+        // Après les effets de l'entrée (révision créée, lettres générées) : la notification
+        // décrit un travail qui existe déjà.
+        $this->notifierTachesDEntree($dossier);
 
         return $dossier->fresh();
     }
@@ -513,6 +486,80 @@ class DossierStepService
      * d'origines hétérogènes (actes, CNI, retours d'organismes, courriers, reçus)
      * qu'aucune règle automatique ne peut déclarer complètes.
      */
+    /**
+     * Qui reçoit une tâche — et donc un mail — quand le dossier entre dans une étape
+     * (retour R22, 2026-11-16 : « notification par mail pour chaque tâche à traiter »).
+     *
+     * ⚠️ **`match` exhaustif, sans branche par défaut** : une étape ajoutée à `EtapeDossier`
+     * fait échouer ce code tant qu'on n'a pas décidé qui elle met au travail. Les notifications
+     * vivaient en blocs `if` épars, et deux entrées n'en avaient aucune — l'Édition (le rédacteur
+     * découvrait ses actes à relire en ouvrant le dossier) et l'Expédition (ni le formaliste, ni
+     * le notaire, ni le comptable n'étaient prévenus). `NotificationsParEtapeTest` parcourt
+     * toutes les étapes.
+     *
+     * Le mail part par `CanauxNotification` à tout destinataire qui a une adresse et ne l'a pas
+     * désactivé (mesuré le 2026-11-16 : les 7 comptes actifs le reçoivent).
+     *
+     * @return list<array{roles: RoleUtilisateur|list<RoleUtilisateur>, notification: \Illuminate\Notifications\Notification, pool?: bool}>
+     */
+    public function tachesALEntree(Dossier $dossier, EtapeDossier $etape): array
+    {
+        return match ($etape) {
+            // Pas d'entrée par « Avancer » : un dossier naît en Initialisation, et chaque
+            // assigné est alors prévenu par DossierController::notifierAssignations().
+            EtapeDossier::Initialisation => [],
+
+            EtapeDossier::Edition => [
+                ['roles' => RoleUtilisateur::Clerc, 'notification' => new ActesAProduireNotification($dossier)],
+            ],
+
+            // Le certificateur seul : l'envoi partait auparavant aux quatre assignés.
+            EtapeDossier::Revision => [
+                ['roles' => RoleUtilisateur::Reviseur, 'notification' => new RevisionEnAttenteNotification($dossier)],
+            ],
+
+            // Le notaire doit signer ; le rédacteur apprend que son dossier a franchi
+            // l'étape bloquante. Sans notaire assigné, le repli prévient le pool.
+            EtapeDossier::Signature => [
+                ['roles' => [RoleUtilisateur::Notaire, RoleUtilisateur::Clerc], 'notification' => new CertificationValideeNotification($dossier)],
+                ['roles' => RoleUtilisateur::Notaire, 'notification' => new SignatureClientEnAttenteNotification($dossier)],
+            ],
+
+            EtapeDossier::Formalites => [
+                ['roles' => RoleUtilisateur::Formaliste, 'notification' => new FormalitesAFaireNotification($dossier)],
+            ],
+
+            EtapeDossier::Expedition => [
+                ['roles' => [RoleUtilisateur::Formaliste, RoleUtilisateur::Notaire], 'notification' => new ExpeditionAFaireNotification($dossier)],
+                // Le comptable n'est assigné à aucun dossier : son pool, et non le repli
+                // habituel, qui ajouterait d'office le notaire — déjà prévenu ci-dessus.
+                ...($dossier->estSolde() ? [] : [
+                    ['roles' => RoleUtilisateur::Comptable, 'notification' => new FactureAEncaisserNotification($dossier), 'pool' => true],
+                ]),
+            ],
+
+            // Étape terminale, dossier figé : plus aucune tâche.
+            EtapeDossier::Cloture => [],
+        };
+    }
+
+    private function notifierTachesDEntree(Dossier $dossier): void
+    {
+        foreach ($this->tachesALEntree($dossier, $dossier->etape) as $tache) {
+            if ($tache['pool'] ?? false) {
+                $destinataires = $this->notifications->pool($tache['roles']);
+                // Personne ne porte le rôle : le notaire du dossier reste responsable.
+                $this->notifications->envoyer(
+                    $destinataires->isNotEmpty() ? $destinataires : array_filter([$dossier->notaire]),
+                    $tache['notification'],
+                );
+                continue;
+            }
+
+            $this->notifications->notifierRoles($dossier, $tache['roles'], $tache['notification']);
+        }
+    }
+
     private function verifierExpedition(Dossier $dossier): void
     {
         $erreurs = [];
@@ -520,9 +567,15 @@ class DossierStepService
         // Facture soldée : un dossier clos est un dossier payé. Aucun contrôle n'existait
         // — un dossier avait été clôturé avec 5 195 000 GNF impayés.
         if (!$dossier->estSolde()) {
+            // Une proforma ne reçoit aucun paiement (R20) : dire « non soldée » sans dire
+            // « émettez-la » laisserait le comptable chercher pourquoi l'encaissement est refusé.
+            $proforma = $dossier->factures()->where('statut', \App\Enums\StatutFacture::Proforma)
+                ->where('total_chiffres', '>', 0)->exists();
+
             $erreurs['facturation'] = [sprintf(
-                'Facture non soldée : %s GNF restent à encaisser. Un dossier ne peut pas être clôturé avec un solde impayé.',
+                'Facture non soldée : %s GNF restent à encaisser. Un dossier ne peut pas être clôturé avec un solde impayé.%s',
                 number_format($dossier->soldeRestant(), 0, ',', ' '),
+                $proforma ? ' La facture est encore une proforma : émettez-la pour pouvoir l\'encaisser.' : '',
             )];
         }
 

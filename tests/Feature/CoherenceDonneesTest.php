@@ -195,6 +195,52 @@ class CoherenceDonneesTest extends TestCase
         ]));
     }
 
+    public function test_une_assemblee_ne_precede_pas_la_constitution(): void
+    {
+        // Retour R02, arbitré par l'étude le 2026-11-16 : la borne est la constitution, pas
+        // aujourd'hui — une date future reste permise (PV préparé à l'avance, cf. SOC-2026-0027).
+        foreach (['ag.date', 'dissolution.date_assemblee', 'cloture.date_assemblee'] as $champ) {
+            $this->assertArrayHasKey("donnees.{$champ}", $this->service()->erreurs([
+                'soc.date_constitution' => '05/10/2026',
+                $champ                  => '01/10/2026',
+            ]), "{$champ} antérieure à la constitution doit être refusée.");
+
+            $this->assertSame([], $this->service()->erreurs([
+                'soc.date_constitution' => '05/10/2026',
+                $champ                  => now()->addYear()->format('d/m/Y'),
+            ]), "{$champ} future, postérieure à la constitution, reste permise.");
+        }
+
+        // Sans date de constitution connue, rien à comparer : la contrainte se tait.
+        $this->assertSame([], $this->service()->erreurs(['ag.date' => '01/01/1990']));
+    }
+
+    public function test_les_parts_presentes_ne_depassent_pas_celles_de_la_societe(): void
+    {
+        // Retour R03 (2026-11-16). En parts, pas en pourcentage : mesuré dans tous les PV saisis.
+        $this->assertArrayHasKey('donnees.ag.parts_representees', $this->service()->erreurs([
+            'soc.nombre_parts' => '100', 'ag.parts_representees' => '120',
+        ]));
+        $this->assertSame([], $this->service()->erreurs([
+            'soc.nombre_parts' => '1 000', 'ag.parts_representees' => '1000',
+        ]));
+        // Sans nombre de parts connu, rien à comparer.
+        $this->assertSame([], $this->service()->erreurs(['ag.parts_representees' => '120']));
+    }
+
+    public function test_les_plafonds_php_et_js_sont_identiques(): void
+    {
+        $source = file_get_contents(resource_path('js/data/questionnaires.js'));
+        $this->assertSame(1, preg_match("/export const PLAFONDS = \[(.*?)\n\];/s", $source, $captures));
+        preg_match_all("/champ: '([^']+)',\s*plafond: '([^']+)'/", $captures[1], $js, PREG_SET_ORDER);
+
+        $this->assertSame(
+            array_map(fn ($c) => "{$c['champ']}≤{$c['plafond']}", CoherenceDonneesService::PLAFONDS),
+            array_map(fn ($m) => "{$m[1]}≤{$m[2]}", $js),
+            'Déclarez le plafond aux deux endroits : CoherenceDonneesService::PLAFONDS et questionnaires.js.',
+        );
+    }
+
     // ── Le point d'entrée HTTP ──────────────────────────────────────────────────────────
 
     public function test_la_mise_a_jour_du_questionnaire_refuse_des_dates_incoherentes(): void
@@ -298,12 +344,26 @@ class CoherenceDonneesTest extends TestCase
             'CONTRAINTES_DATES doit être exportée par questionnaires.js.',
         );
 
-        preg_match_all("/champ: '([^']+)'/", $captures[1], $champsJs);
+        // Champ, genre **et borne** (2026-11-16) : comparer les seuls champs laissait passer une
+        // contrainte d'ordre dont la borne (`apres`) différait d'un côté à l'autre.
+        preg_match_all("/\{(.*?)\}/s", $captures[1], $blocs);
+        $js = array_map(function (string $bloc) {
+            preg_match("/champ: '([^']+)'/", $bloc, $c);
+            preg_match("/genre: '([^']+)'/", $bloc, $g);
+            preg_match("/apres: '([^']+)'/", $bloc, $a);
+
+            return ($c[1] ?? '?') . '|' . ($g[1] ?? '?') . '|' . ($a[1] ?? '');
+        }, $blocs[1]);
+
+        $php = array_map(
+            fn (array $c) => $c['champ'] . '|' . $c['genre'] . '|' . ($c['apres'] ?? ''),
+            CoherenceDonneesService::CONTRAINTES,
+        );
 
         $this->assertSame(
-            $champsJs[1],
-            array_column(CoherenceDonneesService::CONTRAINTES, 'champ'),
-            'Ajoutez la contrainte aux deux endroits : CoherenceDonneesService et questionnaires.js.',
+            $js,
+            $php,
+            'Ajoutez la contrainte aux deux endroits, à l\'identique : CoherenceDonneesService et questionnaires.js.',
         );
     }
 

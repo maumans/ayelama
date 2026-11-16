@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, libelleRepresentant } from '@/data/questionnaires';
+import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, libelleRepresentant, MOTIF_REPRESENTATION_PAR_LIBELLE } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { ClientPicker } from '@/Components/ui/client-picker';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
@@ -11,7 +11,10 @@ import { ChoixSociete } from '@/Components/Societes/ChoixSociete';
 import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
 import { mapSocieteToQuestionnaire, estChampSociete, ficheRenseigneChamp, societeDisplayName } from '@/lib/societeFields';
 import { groupFieldsBySection, buildPartiesPayload, roleRepresentant, champsDuRole, rolesARattacherDoffice, candidatsDuRegistre, lignesDeRepartitionDepuisRegistre, repartitionEstVierge, optionsDynamiques } from '@/lib/partiesPayload';
-import { piecesRequisesPour } from '@/lib/piecesRequises';
+import { piecesRequisesPour, piecesDuRepresentant } from '@/lib/piecesRequises';
+import { apresRetraitLigne, sansLigne, sansGroupe, transformerGroupes, groupeRepresentant } from '@/lib/piecesStagees';
+import { useReprenables } from '@/lib/useReprenables';
+import { natureDecisionDeduite, valeurAPreremplir } from '@/lib/natureDecision';
 import { capitauxApresModification, appliquerCalculs, CHAMPS_SOURCES_CAPITAL, pourcentagesRepartition, partsProjetees } from '@/lib/calculsSociete';
 import { construireFormDataBrouillon, libelleBrouillon, compterPieces } from '@/lib/brouillonDossier';
 import { allerAuBlocant, ancreSection, blocantsEtape, compterParSection, motifsParChamp, OBJET_LONGUEUR_MIN } from '@/lib/blocantsEtape';
@@ -166,13 +169,21 @@ function getQuestionnaire(typeActe) {
     ];
 }
 
-// Initialise uniquement les champs répétables (pures valeurs par défaut).
+// Valeurs initiales d'un questionnaire neuf : lignes vides des blocs répétables, et `defaut` des
+// champs qui en déclarent un (ex. `ag.quorum_atteint`, retour R04 du 2026-11-16).
+//
+// ⚠️ Appliquée **ici seulement**, au choix du type d'acte. Le modal « Modifier le questionnaire »
+// et le formulaire public ouvrent un questionnaire existant — un instantané : y poser le défaut
+// cocherait d'office une case que la personne avait laissée vide, et l'acte changerait sans que
+// personne l'ait décidé. Un brouillon repris garde lui aussi ses propres valeurs.
 function initRepeatableFields(fields) {
     const init = {};
     fields.forEach(f => {
         if (f.type === 'repeatable') {
             const emptyItem = Object.fromEntries((f.fields ?? []).map(sf => [sf.id, '']));
             init[f.id] = Array.from({ length: f.min ?? 1 }, () => ({ ...emptyItem }));
+        } else if (f.defaut !== undefined) {
+            init[f.id] = f.defaut;
         }
     });
     return init;
@@ -374,7 +385,10 @@ function RecapPersonne({ person, role, color = 'bg-ink' }) {
 }
 
 export default function DossierCreate() {
-    const { typesActes, notaires, reviseurs, formalistes, defauts, brouillons: brouillonsInitiaux, reglesParTypeActe, typesModification } = usePage().props;
+    const { typesActes, notaires, reviseurs, formalistes, defauts, brouillons: brouillonsInitiaux, reglesParTypeActe, typesModification, piecesRequises, natureDecision } = usePage().props;
+    // `piecesRequises` est lu ici, une fois : il était lu par `usePage()` **dans le JSX** des sections de
+    // rôle, donc un hook appelé seulement quand une telle section se rend — React signalait un
+    // changement d'ordre des hooks au choix d'une procédure (constaté le 2026-11-16).
 
     const [step, setStep] = useState(0);
     const [categorie, setCategorie] = useState(null);
@@ -437,6 +451,9 @@ export default function DossierCreate() {
     // Ajout état pour les pièces justificatives "staged" (upload direct à la création)
     const [stagedPieces, setStagedPieces] = useState({});
     const [previewKey, setPreviewKey] = useState(null);
+    // Pièces déjà fournies ailleurs par une personne existante, reprises d'office à la création
+    // (retour R08) — l'écran les annonce, le serveur les copie.
+    const reprisePour = useReprenables();
 
     // ── Brouillon ────────────────────────────────────────────────────────────
     // Pièces déjà téléversées au brouillon : { groupe: { cle: {chemin, nom} } }.
@@ -588,6 +605,35 @@ export default function DossierCreate() {
     // Champs filtrés selon les valeurs actuelles (showIf)
     const visibleFields = getVisibleFields(questionnaire, formValues);
 
+    // ── Préremplissages déduits (retours R03 et R05, 2026-11-16) ────────────────────────────
+    // « Nature de la décision » d'après la forme et les opérations, « Parts présentes ou
+    // représentées » d'après le nombre de parts (`defautDepuis`). **À la création seulement** — la
+    // modale de modification ouvre un instantané (même doctrine que `defaut`, décision #108). On
+    // n'écrit jamais par-dessus un choix : seulement dans un champ vide, ou qui porte encore la
+    // dernière valeur proposée (valeurAPreremplir).
+    const propositions = useRef({});
+    useEffect(() => {
+        const memoire = (id) => (propositions.current[id] ??= { current: null });
+        const patch = {};
+
+        if (questionnaire.some(f => f.id === 'ag.type')) {
+            const nature = valeurAPreremplir(
+                memoire('ag.type'),
+                formValues['ag.type'],
+                natureDecisionDeduite(natureDecision, formValues['soc.forme'], formValues['modif.types']),
+            );
+            if (nature) patch['ag.type'] = nature;
+        }
+
+        for (const f of questionnaire) {
+            if (!f.defautDepuis) continue;
+            const valeur = valeurAPreremplir(memoire(f.id), formValues[f.id], formValues[f.defautDepuis]);
+            if (valeur) patch[f.id] = valeur;
+        }
+
+        if (Object.keys(patch).length > 0) setFormValues(prev => ({ ...prev, ...patch }));
+    }, [formValues, typeActe?.id]);
+
     /*
      * La section qui désigne la société est rendue **à part**, juste sous le type d'acte.
      *
@@ -621,6 +667,10 @@ export default function DossierCreate() {
         setFormValues(initVals);
         setClientLinks({});
         setSaisieLibreRoles({});
+        // Les pièces choisies appartenaient aux personnes de l'autre type d'acte. Gardées, elles
+        // se rattachaient à quiconque reprenait le même rôle (retour R06, 2026-11-16).
+        setStagedPieces({});
+        setPiecesBrouillon({});
         // Changer de type d'acte remet à zéro le questionnaire : garder la société
         // rattachée laisserait `societe_id` pointer sur une fiche dont plus aucun champ
         // `soc.*` n'est projeté.
@@ -872,7 +922,32 @@ export default function DossierCreate() {
     const completeLaFicheSociete = (fieldId) =>
         !!societeLink && estChampSociete(fieldId) && !ficheRenseigneChamp(societeLink, fieldId);
 
+    /**
+     * Une autre fiche remplace celle d'un rôle : les pièces déjà choisies étaient celles de la
+     * personne précédente. Les garder les rattachait à la nouvelle, sans un mot (retour R06).
+     * Rattacher une fiche à un rôle encore vide ne touche à rien — on peut déposer d'abord.
+     */
+    const oublierPiecesSiAutrePersonne = (groupe, client) => {
+        const precedente = clientLinks[groupe];
+        if (!precedente || precedente.id === client.id) return;
+        setStagedPieces(prev => sansGroupe(prev, groupe));
+        setPiecesBrouillon(prev => sansGroupe(prev, groupe));
+    };
+
+    /** Mêmes règles pour une ligne de bloc, côté personne ou côté représentant. */
+    const ligneRetiree = (blocId, idx) => {
+        const groupes = [blocId, groupeRepresentant(blocId)];
+        setStagedPieces(prev => transformerGroupes(prev, groupes, g => apresRetraitLigne(g, idx)));
+        setPiecesBrouillon(prev => transformerGroupes(prev, groupes, g => apresRetraitLigne(g, idx)));
+    };
+    const personneDeLigneChangee = (blocId, idx, cible) => {
+        const groupe = cible === 'representant' ? groupeRepresentant(blocId) : blocId;
+        setStagedPieces(prev => transformerGroupes(prev, [groupe], g => sansLigne(g, idx)));
+        setPiecesBrouillon(prev => transformerGroupes(prev, [groupe], g => sansLigne(g, idx)));
+    };
+
     const applyClientToSection = (group, client) => {
+        oublierPiecesSiAutrePersonne(group.clientRole, client);
         const prefix = group.fields[0].id.split('.')[0];
         // Le schéma **complet** du rôle, pas le groupe rendu : voir champsDuRole().
         const fieldIds = champsDuRole(questionnaire, group.clientRole);
@@ -889,6 +964,7 @@ export default function DossierCreate() {
      * (`roleRepresentant`) pour que les deux personnes d'une même section ne se confondent pas.
      */
     const applyClientToRepresentant = (group, client) => {
+        oublierPiecesSiAutrePersonne(roleRepresentant(group.clientRole), client);
         const prefix = group.fields[0].id.split('.')[0];
         const fieldIds = champsDuRole(questionnaire, group.clientRole);
         const mapped = mapClientToPrefixedFields(client, prefix, fieldIds, 'repr_');
@@ -983,6 +1059,17 @@ export default function DossierCreate() {
 
     // Pool dédupliqué des clients déjà ajoutés au dossier — proposé en sélection rapide
     // dans chaque section liée à un rôle (gérant, associé…) pour réutilisation immédiate.
+    // La carte « Clients du dossier » n'a pas de sens pour une modification ou une dissolution
+    // de société (retour R01, 2026-11-16) : les personnes y viennent des rôles du questionnaire
+    // (cédant, cessionnaire, gérant, liquidateur…) et du registre de la société. Une « qualité
+    // libre » y créait une partie sans jeu de pièces ni place dans les actes.
+    // ⚠️ Seuls la carte et ses parties à qualité libre sont retirées : `dossierClients` reste le
+    // **pool** de réutilisation, que `addClientToPool` et `importerPersonneConnue` alimentent
+    // encore — le vider casserait la sélection rapide dans les sections de rôle.
+    const carteClientsDossier = !['modification', 'dissolution'].includes(
+        societeGroupe(typeActe?.code),
+    );
+
     const poolClients = Array.from(
         new Map(dossierClients.filter(p => p.client).map(p => [p.client.id, p.client])).values()
     );
@@ -1182,7 +1269,9 @@ export default function DossierCreate() {
             setErrors({ type_acte_id: 'Type d\'acte introuvable. Vérifiez la configuration.' });
             return;
         }
-        const autresPartiesPayload = dossierClients
+        // Sans la carte, une qualité libre héritée d'un brouillon ou d'un changement de type
+        // d'acte ne doit pas devenir une partie invisible (voir `carteClientsDossier`).
+        const autresPartiesPayload = (carteClientsDossier ? dossierClients : [])
             .filter(p => p.client && p.role.trim())
             .map(p => ({ ...buildPartieFields(p.client, {}, ''), role: p.role.trim(), client_id: p.client.id }));
 
@@ -1314,11 +1403,18 @@ export default function DossierCreate() {
                                                                                     onChange={val => setFormValues(prev => ({ ...prev, [f.id]: val }))}
                                                                                     poolClients={poolClients}
                                                                                     onClientCreated={addClientToPool}
-                                                                                    piecesRequises={usePage().props.piecesRequises}
+                                                                                    piecesRequises={piecesRequises}
                                                                                     stagedPieces={stagedPieces[f.id] || {}}
                                                                                     onStagedPieceChange={(key, file) => handleStagedPieceChange(f.id, key, file)}
                                                                                     piecesBrouillon={piecesBrouillon[f.id] || {}}
                                                                                     onRetirerPieceBrouillon={(key) => retirerPieceBrouillon(f.id, key)}
+                                                                                    stagedPiecesRepr={stagedPieces[groupeRepresentant(f.id)] || {}}
+                                                                                    onStagedPieceReprChange={(key, file) => handleStagedPieceChange(groupeRepresentant(f.id), key, file)}
+                                                                                    piecesBrouillonRepr={piecesBrouillon[groupeRepresentant(f.id)] || {}}
+                                                                                    onRetirerPieceBrouillonRepr={(key) => retirerPieceBrouillon(groupeRepresentant(f.id), key)}
+                                                                                    onLigneRetiree={(idx) => ligneRetiree(f.id, idx)}
+                                                                                    onPersonneChangee={(idx, cible) => personneDeLigneChangee(f.id, idx, cible)}
+                                                                                    reprisePour={reprisePour}
                                                                                     optionsDynamiques={listesDynamiques}
                                                                                 />
                                                                             )}
@@ -1431,6 +1527,28 @@ export default function DossierCreate() {
                                                                             onToggleSaisieLibre={(v) => toggleSaisieLibre(roleRepr, v)}
                                                                         >
                                                                             {grilleDe(champsRepr)}
+                                                                            {/* Ses pièces : aucun écran ne les proposait avant le 2026-11-16
+                                                                                (retour R06), alors que le payload les lisait sous ce groupe —
+                                                                                un mandataire naissait sans CNI. */}
+                                                                            {(() => {
+                                                                                const pieces = piecesDuRepresentant(piecesRequises, clientLinks[roleRepr]?.type);
+                                                                                return Object.keys(pieces).map(cat => {
+                                                                                    const previewId = `${roleRepr}:${cat}`;
+                                                                                    return (
+                                                                                        <PieceStagedRow
+                                                                                            key={cat}
+                                                                                            piece={{ label: pieces[cat] }}
+                                                                                            file={stagedPieces[roleRepr]?.[cat]}
+                                                                                            fichierBrouillon={piecesBrouillon[roleRepr]?.[cat]}
+                                                                                            reprise={reprisePour({ clientId: clientLinks[roleRepr]?.id, role: piecesRequises?.roleRepresentant, typePersonne: clientLinks[roleRepr]?.type }, cat)}
+                                                                                            onFileSelected={(f) => handleStagedPieceChange(roleRepr, cat, f)}
+                                                                                            onRetirerBrouillon={() => retirerPieceBrouillon(roleRepr, cat)}
+                                                                                            isPreviewOpen={previewKey === previewId}
+                                                                                            onTogglePreview={() => setPreviewKey(k => k === previewId ? null : previewId)}
+                                                                                        />
+                                                                                    );
+                                                                                });
+                                                                            })()}
                                                                         </ClientRoleSection>
                                                                     </div>
                                                                 )}
@@ -1464,9 +1582,15 @@ export default function DossierCreate() {
                                                             // forçait par ailleurs `associe_unique` en personne physique, d'où le
                                                             // TODO qui l'accompagnait — `type_personne` est désormais passé, et le
                                                             // jour où la section scalaire en gagnera un, il n'y aura rien à changer.
-                                                            const piecesRequisesSection = piecesRequisesPour(usePage().props.piecesRequises, {
+                                                            const prefixePieces = group.fields[0].id.split('.')[0];
+                                                            const piecesRequisesSection = piecesRequisesPour(piecesRequises, {
                                                                 role: group.clientRole,
-                                                                typePersonne: formValues[`${group.fields[0].id.split('.')[0]}.type_personne`],
+                                                                typePersonne: formValues[`${prefixePieces}.type_personne`],
+                                                                // Une personne représentée doit aussi le titre de son représentant —
+                                                                // jamais demandé ici avant le 2026-11-16 (retour R06).
+                                                                motif: formValues[`${prefixePieces}.est_represente`]
+                                                                    ? MOTIF_REPRESENTATION_PAR_LIBELLE[formValues[`${prefixePieces}.representation_motif`]]
+                                                                    : undefined,
                                                             });
                                                             const piecesKeys = Object.keys(piecesRequisesSection);
                                                             
@@ -1486,6 +1610,14 @@ export default function DossierCreate() {
                                                                                 piece={{ label: piecesRequisesSection[key] }}
                                                                                 file={stagedPieces[group.clientRole]?.[key]}
                                                                                 fichierBrouillon={piecesBrouillon[group.clientRole]?.[key]}
+                                                                                reprise={reprisePour({
+                                                                                    clientId: clientLinks[group.clientRole]?.id,
+                                                                                    role: group.clientRole,
+                                                                                    typePersonne: formValues[`${prefixePieces}.type_personne`],
+                                                                                    motif: formValues[`${prefixePieces}.est_represente`]
+                                                                                        ? MOTIF_REPRESENTATION_PAR_LIBELLE[formValues[`${prefixePieces}.representation_motif`]]
+                                                                                        : undefined,
+                                                                                }, key)}
                                                                                 onFileSelected={(f) => handleStagedPieceChange(group.clientRole, key, f)}
                                                                                 onRetirerBrouillon={() => retirerPieceBrouillon(group.clientRole, key)}
                                                                                 isPreviewOpen={previewKey === previewId}
@@ -1761,7 +1893,9 @@ export default function DossierCreate() {
                                     Détails — <span className="text-slate-500">{typeSelected?.label}</span>
                                 </h2>
 
-                                {/* Clients du dossier — créés/choisis en premier, réutilisables ensuite pour un rôle précis */}
+                                {/* Clients du dossier — créés/choisis en premier, réutilisables ensuite pour un rôle précis.
+                                    Absente d'une modification ou d'une dissolution : voir `carteClientsDossier`. */}
+                                {carteClientsDossier && (
                                 <Card>
                                     <CardContent className="p-5 space-y-3">
                                         <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">
@@ -1800,6 +1934,7 @@ export default function DossierCreate() {
                                         </Button>
                                     </CardContent>
                                 </Card>
+                                )}
 
                                 {/* Champs obligatoires du dossier, organisés par sections */}
                                 <Card className="border-seal/30">
@@ -2120,7 +2255,7 @@ export default function DossierCreate() {
                                 })}
 
                                 {/* Clients du dossier */}
-                                {dossierClientsAjoutes.length > 0 && (
+                                {carteClientsDossier && dossierClientsAjoutes.length > 0 && (
                                     <RecapCard icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50" title="Clients du dossier" onEdit={() => setStep(1)}>
                                         <div className="flex flex-wrap gap-2">
                                             {autresValides.map((p, i) => (
@@ -2255,7 +2390,9 @@ export default function DossierCreate() {
                                     ? `${blocants.length} élément(s) à compléter — cliquez pour voir lesquels`
                                     : 'Passer à l\'étape suivante'}
                             >
-                                Suivant
+                                {/* Le bouton nomme sa destination (retour R14, 2026-11-16), comme le
+                                    bouton d'avancement de la fiche dossier. */}
+                                {step === 0 ? 'Passer aux détails' : 'Passer au récapitulatif'}
                                 <ChevronRight className="h-4 w-4" />
                             </Button>
                         ) : (

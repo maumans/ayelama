@@ -60,16 +60,13 @@ class DocumentController extends Controller
         $this->authorize('genererDocuments', $document->documentable);
         abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
 
+        // Le remplacement du fichier ne passe plus par ici (2026-11-16) : il se fait par
+        // `corriger()`, seule voie qui journalise et périme la certification. Ce champ acceptait un
+        // fichier sans qu'aucun écran ne l'appelle — une seconde porte, plus large, vers le même effet.
         $data = $request->validate([
             'statut'  => ['sometimes', 'in:a_editer,edite'],
             'nom'     => ['sometimes', 'string', 'max:200'],
-            'fichier' => ['sometimes', 'nullable', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt,xlsx,xls'],
         ]);
-
-        if ($request->hasFile('fichier')) {
-            $document->nouvelleVersion($request->file('fichier'), 'documents/' . $document->documentable->reference);
-            unset($data['fichier']);
-        }
 
         if (isset($data['statut']) && $data['statut'] === 'edite') {
             $data += ['edite_at' => now(), 'edite_par_id' => auth()->id()];
@@ -80,34 +77,47 @@ class DocumentController extends Controller
         return back()->with('success', 'Document mis à jour.');
     }
 
-    public function regenerer(DocumentFichier $document, \App\Services\ActesGeneratorService $generatorService)
+    /**
+     * Dépôt d'une **version corrigée** d'un acte (retour R19, 2026-11-16) — par le rédacteur, le
+     * certificateur ou l'administrateur, voir `DocumentFichierPolicy::corriger()`.
+     *
+     * Remplace la régénération manuelle, retirée le même jour (retour R10) : régénérer repartait du
+     * modèle et **écrasait** une correction faite à la main. Corriger, c'est déposer le fichier
+     * retravaillé — l'historique des versions garde le précédent, et la restauration reste possible.
+     *
+     * Le point de certification du document est **périmé** : la version certifiée n'est plus celle
+     * du dossier, le certificateur doit se prononcer de nouveau.
+     */
+    public function corriger(Request $request, DocumentFichier $document)
     {
         $this->refuserSiPieceDeRegistre($document);
+        $this->authorize('corriger', $document);
+
+        $request->validate([
+            'fichier' => ['required', 'file', 'max:20480', 'mimes:pdf,doc,docx,odt'],
+        ]);
+
         $dossier = $document->documentable;
-        $this->authorize('genererDocuments', $dossier);
-        abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
-
-        $dossier->load('questionnaire');
-
-        if (! $generatorService->regenererDocument($document)) {
-            return back()->with('error', "Aucun modèle actif trouvé pour « {$document->nom} ».");
-        }
+        $version = $document->nouvelleVersion($request->file('fichier'), 'documents/' . $dossier->reference);
+        RevisionPoint::perimerPour($document, $dossier);
 
         JournalActivite::enregistrer(
             $dossier,
-            "Document « {$document->nom} » régénéré depuis le modèle",
-            'etape',
-            []
+            "Version corrigée de « {$document->nom} » déposée (v{$version->numero})",
+            'modification',
+            ['document_id' => $document->id, 'version' => $version->numero],
         );
 
-        return back()->with('success', "« {$document->nom} » régénéré avec succès.");
+        return back()->with('success', "Version corrigée de « {$document->nom} » enregistrée.");
     }
 
     public function destroy(DocumentFichier $document)
     {
         $this->refuserSiPieceDeRegistre($document);
-        $this->authorize('genererDocuments', $document->dossierGouvernant());
         abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
+        // Par document et non par dossier : une pièce de partie suit `gererPieces`, un acte
+        // `genererDocuments` — voir DocumentFichierPolicy::supprimer().
+        $this->authorize('supprimer', $document);
 
         RevisionPoint::where('point_id', (string) $document->id)
             ->whereHas('revision', fn ($q) => $q->where('dossier_id', $document->documentable_id))
@@ -193,7 +203,7 @@ class DocumentController extends Controller
     /**
      * Dépôt de la version finale signée/cachetée (retour du circuit papier réel :
      * impression → envoi → signature/cachet → retour) — verrouille définitivement le
-     * document (voir abort_if(est_signe_cachete) dans update/regenerer/destroy/restaurerVersion
+     * document (voir abort_if(est_signe_cachete) dans update/corriger/destroy/restaurerVersion
      * ci-dessus, qui empêchent toute modification ultérieure même via appel direct à l'API).
      */
     public function televerserSigne(Request $request, DocumentFichier $document)
@@ -228,10 +238,14 @@ class DocumentController extends Controller
     {
         $document = $version->documentFichier;
         $this->refuserSiPieceDeRegistre($document);
-        $this->authorize('genererDocuments', $document->dossierGouvernant());
         abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
+        $this->authorize('restaurer', $document);
 
         $document->restaurerVersion($version);
+        // Restaurer change le contenu tout autant qu'une correction.
+        if ($document->documentable instanceof Dossier) {
+            RevisionPoint::perimerPour($document, $document->documentable);
+        }
 
         JournalActivite::enregistrer(
             $document->dossierGouvernant(),

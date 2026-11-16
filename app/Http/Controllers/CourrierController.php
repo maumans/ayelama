@@ -26,7 +26,9 @@ class CourrierController extends Controller
         $user = auth()->user();
         $visibles = fn ($q) => $q->whereHas('dossier', fn ($d) => $d->visiblePar($user));
 
-        $query = Courrier::with(['dossier:id,reference,objet', 'redacteur:id,name,initiales'])
+        // Les colonnes d'assignation sont lues par CourrierPolicy (`peut_supprimer` ci-dessous) :
+        // sans elles, la policy verrait un dossier sans personne et refuserait tout non-admin.
+        $query = Courrier::with(['dossier:id,reference,objet,redacteur_id,reviseur_id,notaire_id,formaliste_id', 'redacteur:id,name,initiales'])
             ->tap($visibles)
             ->when($request->q, fn ($q, $s) => $q->where(fn ($q2) =>
                 $q2->where('reference',    'like', "%{$s}%")
@@ -72,6 +74,10 @@ class CourrierController extends Controller
             'dossierRef'   => $c->dossier?->reference,
             'dossierObjet' => $c->dossier?->objet,
             'created_at'   => $c->created_at->format('d/m/Y'),
+            // Le bouton « Supprimer » s'affichait à tous — y compris au comptable, qui voit tous les
+            // dossiers mais que CourrierPolicy exclut, et sur un courrier signé, que `destroy`
+            // refuse (retour R07, 2026-11-16).
+            'peut_supprimer' => ! $c->est_signe_cachete && $user->can('delete', $c),
             'chemin_fichier' => $c->chemin_fichier,
             'has_file'       => (bool) $c->chemin_fichier,
             'url_download'   => $c->chemin_fichier ? route('courriers.download', $c) : null,
@@ -171,7 +177,14 @@ class CourrierController extends Controller
             ->where('objet', $modele->nom)
             ->latest('id')
             ->first();
-        abort_if($dernier?->est_signe_cachete, 403, 'Ce courrier est déjà signé/cacheté — verrouillé, non régénérable.');
+        // Un courrier se génère une fois (retour R10, 2026-11-16) : chaque appel en créait un de plus,
+        // sans versionnage, et la liste du dossier se remplissait de doublons. Pour le refaire, on
+        // supprime le précédent — geste explicite, soumis à CourrierPolicy::delete.
+        abort_if(
+            $dernier !== null,
+            422,
+            "« {$modele->nom} » a déjà été généré pour ce dossier. Supprimez-le depuis l'écran Courriers pour le refaire.",
+        );
 
         $dossier->load('questionnaire');
 

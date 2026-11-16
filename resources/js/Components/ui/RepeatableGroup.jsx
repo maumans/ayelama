@@ -10,10 +10,10 @@ import { PhoneField } from '@/Components/ui/phone-field';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { mapClientToRepeatableItem, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
-import { getVisibleFields, libelleRepresentant } from '@/data/questionnaires';
+import { getVisibleFields, libelleRepresentant, MOTIF_REPRESENTATION_PAR_LIBELLE } from '@/data/questionnaires';
 import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
-import { piecesRequisesPour } from '@/lib/piecesRequises';
+import { piecesRequisesPour, piecesDuRepresentant } from '@/lib/piecesRequises';
 
 /**
  * RepeatableGroup — bloc de formulaire répétable pour associés, gérants, administrateurs, etc.
@@ -28,6 +28,14 @@ import { piecesRequisesPour } from '@/lib/piecesRequises';
  *                  pièces requises sous l'item déjà rattaché à une Partie réelle (item.partie_id
  *                  — voir attachPartieIds() dans Show.jsx). Absent/vide pour Create.jsx, où
  *                  aucune Partie n'existe encore avant la création du dossier.
+ *   stagedPiecesRepr / onStagedPieceReprChange / piecesBrouillonRepr / onRetirerPieceBrouillonRepr
+ *                — pièces du **représentant** de chaque ligne, groupe `{bloc}#repr` (2026-11-16).
+ *   onLigneRetiree(idx) — la ligne idx disparaît : l'écran décale les clés de ses pièces
+ *                (voir lib/piecesStagees.js — sans ça, elles passaient à la ligne suivante).
+ *   reprisePour(personne, catégorie) — pièce déjà fournie ailleurs et reprise d'office à la
+ *                création (R08) ; absent hors de l'assistant de création.
+ *   onPersonneChangee(idx, cible) — une autre fiche est rattachée à la ligne (cible `partie`)
+ *                ou à son représentant : les pièces déjà choisies étaient celles de l'autre.
  */
 /**
  * D'où vient cette ligne, et a-t-elle bougé depuis ?
@@ -57,7 +65,7 @@ function MentionRegistre({ item }) {
     );
 }
 
-export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false, poolClients = [], onClientCreated, partiesById = {}, piecesRequises = {}, stagedPieces = {}, onStagedPieceChange, piecesBrouillon = {}, onRetirerPieceBrouillon, optionsDynamiques = {} }) {
+export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false, poolClients = [], onClientCreated, partiesById = {}, piecesRequises = {}, stagedPieces = {}, onStagedPieceChange, piecesBrouillon = {}, onRetirerPieceBrouillon, stagedPiecesRepr = {}, onStagedPieceReprChange, piecesBrouillonRepr = {}, onRetirerPieceBrouillonRepr, onLigneRetiree, onPersonneChangee, reprisePour, optionsDynamiques = {} }) {
     const { fields = [], min = 1, max = 10, label, clientRole } = fieldDef;
 
     /**
@@ -104,6 +112,7 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
     const removeItem = (idx) => {
         if (value.length <= min) return;
         onChange(value.filter((_, i) => i !== idx));
+        onLigneRetiree?.(idx);
     };
 
     const updateItem = (idx, fieldId, fieldValue) => {
@@ -125,6 +134,8 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
      * récapitulative) ; côté serveur, ClientProjectionService fait autorité.
      */
     const applyClient = (idx, client) => {
+        const precedente = value[idx]?.client;
+        if (precedente && precedente.id !== client.id) onPersonneChangee?.(idx, 'partie');
         const fieldIds = fields.map(f => f.id);
         const mapped = mapClientToRepeatableItem(client, fieldIds);
         const next = value.map((item, i) =>
@@ -205,6 +216,8 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
 
     /** Rattache une fiche au représentant de CETTE ligne — miroir exact de `applyClient`. */
     const applyClientRepresentant = (idx, client) => {
+        const precedente = value[idx]?.representant_client;
+        if (precedente && precedente.id !== client.id) onPersonneChangee?.(idx, 'representant');
         const mapped = mapClientToRepeatableItem(client, fields.map(f => f.id), 'repr_');
         onChange(value.map((item, i) =>
             i === idx
@@ -437,6 +450,37 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                             champsManquants={champsManquants(item, 'representant')}
                                             readOnly={readOnly}
                                         />
+                                        {/* Ses pièces, choisies dès maintenant. Aucun écran ne les
+                                            proposait (2026-11-16, retour R06) : le représentant d'une
+                                            ligne naissait sans CNI et bloquait l'Initialisation. Un
+                                            représentant déjà enregistré a sa checklist sur la fiche
+                                            dossier — on ne la double pas ici. */}
+                                        {!readOnly && !item.representant_partie_id && (() => {
+                                            const pieces = piecesDuRepresentant(piecesRequises, item.representant_client?.type);
+                                            const cles = Object.keys(pieces);
+                                            if (cles.length === 0) return null;
+                                            return (
+                                                <div className="mt-2 divide-y divide-gray-50">
+                                                    {cles.map(cat => {
+                                                        const key = `${idx}:${cat}`;
+                                                        const previewId = `repr:${key}`;
+                                                        return (
+                                                            <PieceStagedRow
+                                                                key={cat}
+                                                                piece={{ label: pieces[cat] }}
+                                                                file={stagedPiecesRepr?.[key]}
+                                                                fichierBrouillon={piecesBrouillonRepr?.[key]}
+                                                                reprise={reprisePour?.({ clientId: item.representant_client?.id, role: piecesRequises?.roleRepresentant, typePersonne: item.representant_client?.type }, cat)}
+                                                                onFileSelected={(f) => onStagedPieceReprChange?.(key, f)}
+                                                                onRetirerBrouillon={() => onRetirerPieceBrouillonRepr?.(key)}
+                                                                isPreviewOpen={previewKey === previewId}
+                                                                onTogglePreview={() => setPreviewKey(k => k === previewId ? null : previewId)}
+                                                            />
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 )}
                             </ClientRoleSection>
@@ -474,9 +518,17 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                             // n'est plus recomposée ici : cette copie ne couvrait que 3 rôles sur 7,
                             // laissant cédants, cessionnaires, souscripteurs et gérants entrants
                             // sans aucune pièce à l'écran alors que le serveur les exige ensuite.
+                            // Le motif compte : une personne représentée doit aussi le titre de son
+                            // représentant (procuration…), exigé par le serveur pour sortir
+                            // d'Initialisation et jamais demandé ici avant le 2026-11-16 (R06).
                             const piecesRequisesSection = piecesRequisesPour(piecesRequises, {
                                 role: clientRole,
+                                // Même source que `buildPartiesPayload()` : le serveur exigera le
+                                // jeu de la nature transmise, pas celui d'une autre lecture.
                                 typePersonne: item.type_personne,
+                                motif: item.est_represente
+                                    ? MOTIF_REPRESENTATION_PAR_LIBELLE[item.representation_motif]
+                                    : undefined,
                             });
                             const piecesKeys = Object.keys(piecesRequisesSection);
                             
@@ -495,6 +547,14 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                                     piece={{ label: piecesRequisesSection[cat] }}
                                                     file={file}
                                                     fichierBrouillon={piecesBrouillon?.[key]}
+                                                    reprise={reprisePour?.({
+                                                        clientId: item.client?.id ?? item.client_id,
+                                                        role: clientRole,
+                                                        typePersonne: item.type_personne,
+                                                        motif: item.est_represente
+                                                            ? MOTIF_REPRESENTATION_PAR_LIBELLE[item.representation_motif]
+                                                            : undefined,
+                                                    }, cat)}
                                                     onFileSelected={(f) => onStagedPieceChange?.(key, f)}
                                                     onRetirerBrouillon={() => onRetirerPieceBrouillon?.(key)}
                                                     isPreviewOpen={previewKey === key}

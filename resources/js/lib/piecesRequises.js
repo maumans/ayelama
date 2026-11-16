@@ -41,16 +41,39 @@ export function typePersonneCanonique(valeur) {
  * dans `PiecesRequisesParRoleTest`, qui exige que tout rôle du schéma soit classé côté serveur,
  * dans un jeu ou dans « sans pièces ». Un module de lecture ne peut pas distinguer les deux.
  *
- * @param {{jeux?: object, parRole?: object, moraleParRole?: object}} regles  prop `piecesRequises`
- * @param {{role?: string, typePersonne?: string}} personne
+ * `motif` : la valeur du motif de représentation **du représenté** (`procuration`…), ou rien
+ * s'il comparaît lui-même. Ajouté le 2026-11-16 (retour R06) : sans lui, l'assistant ne
+ * demandait jamais la procuration d'une personne représentée, que le serveur exige pourtant
+ * (`Partie::piecesRequisesDefinition()`). Même composition que là-bas — jeu de base, moins ce
+ * que le motif retire, plus le jeu de son titre — et `PiecesRequisesParRoleTest` la rejoue.
+ *
+ * @param {{jeux?: object, parRole?: object, moraleParRole?: object, parMotif?: object}} regles  prop `piecesRequises`
+ * @param {{role?: string, typePersonne?: string, motif?: string}} personne
  * @returns {Record<string, string>} catégorie → libellé
  */
-export function piecesRequisesPour(regles, { role, typePersonne } = {}) {
+export function piecesRequisesPour(regles, { role, typePersonne, motif } = {}) {
     if (!regles || !role) return {};
 
     const jeu = (typePersonneCanonique(typePersonne) === 'morale'
         ? regles.moraleParRole?.[role]
         : null) ?? regles.parRole?.[role];
 
-    return jeu ? (regles.jeux?.[jeu] ?? {}) : {};
+    const pieces = { ...(jeu ? (regles.jeux?.[jeu] ?? {}) : {}) };
+
+    const regleMotif = motif ? regles.parMotif?.[motif] : null;
+    if (!regleMotif) return pieces;
+
+    for (const categorie of regleMotif.retire ?? []) delete pieces[categorie];
+
+    return { ...pieces, ...(regleMotif.ajoute ? (regles.jeux?.[regleMotif.ajoute] ?? {}) : {}) };
+}
+
+/**
+ * Les pièces du **représentant** d'une personne : celles de son rôle, servi par le serveur.
+ *
+ * @param {object} regles  prop `piecesRequises`
+ * @param {?string} typePersonne
+ */
+export function piecesDuRepresentant(regles, typePersonne) {
+    return piecesRequisesPour(regles, { role: regles?.roleRepresentant, typePersonne });
 }

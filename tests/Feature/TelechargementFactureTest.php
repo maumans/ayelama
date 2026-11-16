@@ -61,6 +61,8 @@ class TelechargementFactureTest extends TestCase
 
         $facture = Facture::create([
             'dossier_id'     => $dossier->id,
+            // Numérotée, donc émise : une proforma ne reçoit pas de paiement (R20, 2026-11-16).
+            'statut'         => \App\Enums\StatutFacture::Emise,
             'note_numero'    => '001/MAB/26',
             'note_date'      => now(),
             'objet'          => 'Modification de capital',
@@ -171,7 +173,8 @@ class TelechargementFactureTest extends TestCase
             'totalEnLettres' => '',
         ])->render();
 
-        $this->assertStringContainsString('300 000', $vue);
+        // « . » depuis le 2026-11-16 (retour R13) : séparateur de milliers de tous les documents.
+        $this->assertStringContainsString('300.000', $vue);
     }
 
     public function test_un_role_sans_acces_au_dossier_ne_telecharge_pas(): void

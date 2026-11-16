@@ -81,7 +81,7 @@ class ClotureInventaireTest extends TestCase
             'type' => 'transmission', 'statut' => 'brouillon',
         ]);
         // 6. Facturation
-        $facture  = Facture::create(['dossier_id' => $this->dossier->id, 'note_numero' => 'N-1', 'note_date' => now()]);
+        $facture  = Facture::create(['dossier_id' => $this->dossier->id, 'statut' => \App\Enums\StatutFacture::Emise, 'note_numero' => 'N-1', 'note_date' => now()]);
         $paiement = Paiement::create([
             'facture_id' => $facture->id, 'date_paiement' => now(), 'montant' => 1000,
             'moyen_paiement' => 'especes',

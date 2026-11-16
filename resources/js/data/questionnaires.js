@@ -239,6 +239,12 @@ const SOC_BASE = [
     { id: 'soc.objet_social', label: 'Objet social', type: 'textarea', placeholder: 'Commerce général, import-export…', required: true, publicIntake: true },
     { id: 'soc.duree', label: 'Durée (années)', type: 'number', placeholder: '99', required: false, publicIntake: true },
     { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: String(anneePremierExercice()), required: false, publicIntake: true },
+    // Retour R17 (2026-11-16) : le formulaire RCCM du greffe demande la date de début d'activité
+    // (`${soc.date_debut_activite_jma}`, dérivée d'office comme pour toute date). Elle n'est pas la
+    // date de constitution — une société peut être immatriculée avant de commencer. Facultative :
+    // l'absence est consignée au journal à la génération, sans bloquer. Questionnaire seul, pas de
+    // colonne sur la fiche société (question Q7 du suivi, ouverte).
+    { id: 'soc.date_debut_activite', label: "Date de début d'activité", type: 'date', placeholder: '01/01/2027', required: false, publicIntake: true },
     { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
     { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
     { id: 'soc.regime_fiscal_faveur', label: 'Bénéficie d\'un régime fiscal de faveur', type: 'checkbox', required: false, publicIntake: true },
@@ -761,6 +767,8 @@ export const QUESTIONNAIRES = {
         { id: 'soc.objet_social', label: 'Objet social', type: 'textarea', placeholder: 'Commerce général, import-export…', required: true, publicIntake: true },
         { id: 'soc.duree', label: 'Durée (années)', type: 'number', placeholder: '99', required: false, publicIntake: true },
         { id: 'soc.premier_exercice_annee', label: '1er exercice — année', type: 'year', placeholder: String(anneePremierExercice()), required: false, publicIntake: true },
+        // Retour R17 — voir SOC_BASE.
+        { id: 'soc.date_debut_activite', label: "Date de début d'activité", type: 'date', placeholder: '01/01/2027', required: false, publicIntake: true },
         { id: 'soc.email_societe', label: 'Email de la société', type: 'text', placeholder: 'contact@societe.com', required: false, publicIntake: true },
         { id: 'soc.telephone_societe', label: 'Téléphone de la société', type: 'tel', placeholder: '622 XX XX XX', required: false, publicIntake: true },
         {
@@ -1329,12 +1337,21 @@ export const QUESTIONNAIRES = {
         { id: 'ag.type', label: "Nature de la décision", type: 'select', required: true, section: 'Assemblée générale',
           options: ['Assemblée générale extraordinaire', 'Assemblée générale ordinaire', "Décision de l'associé unique"] },
         { id: 'ag.date', label: "Date de l'assemblée", type: 'date', placeholder: '01/08/2026', required: true },
-        { id: 'ag.heure', label: 'Heure', type: 'text', placeholder: '10h00', required: false },
+        // `time` et obligatoire depuis le 2026-11-16 (retour R02) : texte libre jusque-là, six PV en
+        // portaient six graphies (« 10H », « 10h00 »…). Balises dérivées `ag.heure_lettres`
+        // (« DIX HEURES TRENTE ») et `ag.heure_formate` (« 10 h 30 ») — App\Support\Heure.
+        { id: 'ag.heure', label: 'Heure', type: 'time', required: true },
         { id: 'ag.lieu', label: "Lieu de l'assemblée", type: 'text', placeholder: 'Siège social, Conakry', required: false },
         { id: 'ag.president_seance', label: 'Président de séance', type: 'text', placeholder: 'Ibrahima DIALLO', required: false },
         { id: 'ag.secretaire_seance', label: 'Secrétaire de séance', type: 'text', placeholder: 'Mariama SOW', required: false },
-        { id: 'ag.parts_representees', label: 'Parts présentes ou représentées', type: 'number', placeholder: '100', required: false, mono: true },
-        { id: 'ag.quorum_atteint', label: 'Quorum atteint', type: 'checkbox', required: false },
+        // Retour R03 (2026-11-16) : un nombre de **parts** (mesuré, jamais un pourcentage), affiché
+        // « sur N parts (x %) » (`surTotal`), plafonné par PLAFONDS, et prérempli à la création
+        // avec le total (`defautDepuis`) — l'assemblée d'une SARLU réunit toutes les parts.
+        { id: 'ag.parts_representees', label: 'Parts présentes ou représentées', type: 'number', placeholder: '100', required: false, mono: true,
+          surTotal: 'soc.nombre_parts', defautDepuis: 'soc.nombre_parts' },
+        // Coché d'office à la création (retour R04, 2026-11-16) : un PV ne se dresse que si
+        // l'assemblée a pu délibérer. `defaut` n'est lu qu'à la création (initRepeatableFields).
+        { id: 'ag.quorum_atteint', label: 'Quorum atteint', type: 'checkbox', required: false, defaut: true },
         // Souvent différente de la date d'assemblée (effet différé, ou rétroactif au
         // premier jour de l'exercice) : c'est elle qui figure aux statuts mis à jour.
         { id: 'ag.date_effet', label: "Date d'effet de la modification", type: 'date', placeholder: '01/09/2026', required: false,
@@ -1738,9 +1755,9 @@ export const PAIRES_DATES = [
  * Dates isolées dont on peut affirmer une borne, **et elles seules**.
  *
  * ⚠️ Ce qui n'y figure pas est délibéré, pas oublié : `bail.date_prise_effet` et
- * `modif.augmentation_date_versement` sont légitimement futures ; `dissolution.date_assemblee`,
- * `hypotheque.date_acte`, `modif.date_cession` et `gerant_sortant.date_cessation` restent libres
- * parce que je ne sais pas quelle borne leur donner — même doctrine que pour les régimes
+ * `modif.augmentation_date_versement` sont légitimement futures ; `hypotheque.date_acte`,
+ * `modif.date_cession` et `gerant_sortant.date_cessation` restent libres parce que je ne sais pas
+ * quelle borne leur donner (`dissolution.date_assemblee` a été arbitrée le 2026-11-16, ci-dessous) — même doctrine que pour les régimes
  * matrimoniaux : une contrainte inventée est pire qu'une contrainte absente. Une ligne suffira le
  * jour où l'étude les arbitrera.
  */
@@ -1755,6 +1772,44 @@ export const CONTRAINTES_DATES = [
         genre: 'ordre',
         apres: 'ag.date',
         message: "La date d'effet ne peut pas précéder l'assemblée qui l'a décidée.",
+    },
+    // Une assemblée ne se tient pas avant que la société existe (retour R02, arbitré par l'étude
+    // le 2026-11-16). Une date **future** reste permise : l'étude prépare des PV à l'avance —
+    // mesuré, SOC-2026-0027 porte une assemblée postérieure à sa création. Sans date de
+    // constitution connue, la contrainte se tait (comportement de `incoherenceOrdre`).
+    {
+        champ: 'ag.date',
+        genre: 'ordre',
+        apres: 'soc.date_constitution',
+        message: "L'assemblée ne peut pas précéder la constitution de la société.",
+    },
+    {
+        champ: 'dissolution.date_assemblee',
+        genre: 'ordre',
+        apres: 'soc.date_constitution',
+        message: "L'assemblée ne peut pas précéder la constitution de la société.",
+    },
+    {
+        champ: 'cloture.date_assemblee',
+        genre: 'ordre',
+        apres: 'soc.date_constitution',
+        message: "L'assemblée ne peut pas précéder la constitution de la société.",
+    },
+];
+
+/**
+ * Plafonds numériques : un champ ne peut pas dépasser un autre (retour R03, 2026-11-16).
+ *
+ * Les parts présentes ou représentées se comptent en **parts** — mesuré : « 100 » sur 100 parts
+ * dans chaque PV saisi, jamais un pourcentage — et ne peuvent excéder celles qui composent le
+ * capital au jour de l'assemblée (`soc.nombre_parts`, avant l'opération décidée). Miroir de
+ * `CoherenceDonneesService::PLAFONDS` ; `CoherenceDonneesTest` verrouille l'égalité.
+ */
+export const PLAFONDS = [
+    {
+        champ: 'ag.parts_representees',
+        plafond: 'soc.nombre_parts',
+        message: 'Les parts présentes ou représentées ne peuvent dépasser le nombre de parts de la société.',
     },
 ];
 

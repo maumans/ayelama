@@ -176,15 +176,61 @@ class PiecesRequisesParRoleTest extends TestCase
     {
         $regles = Partie::reglesPiecesRequises();
 
-        $this->assertSame(['jeux', 'parRole', 'moraleParRole'], array_keys($regles));
+        $this->assertSame(['jeux', 'parRole', 'moraleParRole', 'parMotif', 'roleRepresentant'], array_keys($regles));
 
-        foreach ([...array_values($regles['parRole']), ...array_values($regles['moraleParRole'])] as $jeu) {
+        $jeuxDesMotifs = array_filter(array_column($regles['parMotif'], 'ajoute'));
+
+        foreach ([...array_values($regles['parRole']), ...array_values($regles['moraleParRole']), ...$jeuxDesMotifs] as $jeu) {
             $this->assertArrayHasKey(
                 $jeu,
                 $regles['jeux'],
                 "Le jeu « {$jeu} » est désigné par une règle mais absent de PIECES_REQUISES : "
                 . 'le frontend résoudrait une liste vide sans le signaler.',
             );
+        }
+    }
+
+    /**
+     * La règle servie, rejouée comme `piecesRequisesPour()` (JS) la compose, doit donner
+     * exactement ce que le serveur exigera — pour chaque rôle, chaque nature, chaque motif.
+     *
+     * Né du retour R06 (2026-11-16) : le motif de représentation n'était pas servi, et
+     * l'assistant ne demandait jamais la procuration d'une personne représentée. Tant que la
+     * composition est rejouée ici sur tout le produit cartésien, une règle ajoutée d'un seul
+     * côté fait échouer ce test au lieu de bloquer un dossier.
+     */
+    public function test_la_composition_js_rejouee_egale_la_regle_serveur(): void
+    {
+        $regles = Partie::reglesPiecesRequises();
+
+        $rejouer = function (string $role, string $type, ?string $motif) use ($regles): array {
+            $jeu = ($type === 'morale' ? ($regles['moraleParRole'][$role] ?? null) : null)
+                ?? ($regles['parRole'][$role] ?? null);
+            $pieces = $jeu ? ($regles['jeux'][$jeu] ?? []) : [];
+
+            $regleMotif = $motif ? ($regles['parMotif'][$motif] ?? null) : null;
+            if (! $regleMotif) return $pieces;
+
+            foreach ($regleMotif['retire'] as $categorie) unset($pieces[$categorie]);
+
+            return [...$pieces, ...($regleMotif['ajoute'] ? ($regles['jeux'][$regleMotif['ajoute']] ?? []) : [])];
+        };
+
+        $motifs = [null, ...array_map(fn ($m) => $m->value, \App\Enums\MotifRepresentation::cases())];
+
+        foreach (array_keys(Partie::jeuParRole()) as $role) {
+            foreach (['physique', 'morale'] as $type) {
+                foreach ($motifs as $motif) {
+                    $partie = new Partie(['role' => $role, 'type_personne' => $type, 'representation_motif' => $motif]);
+
+                    $this->assertSame(
+                        $partie->piecesRequisesDefinition(),
+                        $rejouer($role, $type, $motif),
+                        "Rôle {$role}, {$type}, motif " . ($motif ?? 'aucun')
+                        . ' : l\'écran et le serveur ne demandent pas les mêmes pièces.',
+                    );
+                }
+            }
         }
     }
 

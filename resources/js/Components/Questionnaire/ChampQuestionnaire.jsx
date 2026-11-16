@@ -8,6 +8,7 @@ import { LieuSelect } from '@/Components/ui/lieu-select';
 import { ChampVerrouille } from '@/Components/ui/champ-verrouille';
 import { roleGeo, patchGeo } from '@/data/questionnaires';
 import { cn } from '@/lib/utils';
+import { normaliserHeure } from '@/lib/heures';
 
 /**
  * Le rendu d'un champ de questionnaire — **un seul détenteur**, pour les trois écrans qui en
@@ -114,6 +115,8 @@ export function ChampQuestionnaire({
                 optionsDynamiques={optionsDynamiques}
                 disabled={disabled}
             />
+
+            <PartDuTotal field={field} valeurs={valeurs} />
 
             <Motif motif={motif} />
         </div>
@@ -232,6 +235,29 @@ function Controle({
         );
     }
 
+    // Heure (2026-11-16, retour R02) : `HH:MM`, saisie par le sélecteur natif. Une ancienne valeur
+    // libre (« 10H ») est **lue** sous sa forme canonique : affichée vide, elle aurait été effacée
+    // au premier enregistrement. Illisible, elle reste visible en clair sous le champ plutôt que
+    // de disparaître.
+    if (field.type === 'time') {
+        const canonique = normaliserHeure(value);
+        return (
+            <div>
+                <Input
+                    id={domId}
+                    type="time"
+                    value={canonique ?? ''}
+                    onChange={(e) => changer(e.target.value)}
+                    disabled={disabled}
+                    className="w-36 font-ref"
+                />
+                {value && !canonique && (
+                    <p className="mt-1 text-xs text-amber-700">Valeur saisie auparavant : « {value} » — à ressaisir.</p>
+                )}
+            </div>
+        );
+    }
+
     if (field.type === 'number') {
         return (
             <NumberField
@@ -337,6 +363,35 @@ function ValeurActuelle({ field, valeurs }) {
         <p className="text-xs text-slate-500">
             <span className="text-slate-400">actuel : </span>
             <span className="font-medium text-slate-600">{String(actuelle)}</span>
+        </p>
+    );
+}
+
+/**
+ * « sur 100 parts (80 %) » sous un nombre qui est une part d'un total — déclaré par
+ * `surTotal: 'soc.nombre_parts'` (retour R03, 2026-11-16 : « Parts présentes ou représentées à
+ * revoir » — le chiffre seul ne disait pas s'il s'agissait de parts ou d'un pourcentage).
+ *
+ * Silencieux sans total connu. Le dépassement n'est pas signalé ici mais par `PLAFONDS`, qui le
+ * bloque des deux côtés.
+ */
+function PartDuTotal({ field, valeurs }) {
+    if (!field.surTotal) return null;
+
+    const lire = (v) => {
+        const n = Number(String(v ?? '').replace(/[\s  ]/g, '').replace(',', '.'));
+        return v === '' || v === null || v === undefined || !Number.isFinite(n) ? null : n;
+    };
+    const total = lire(valeurs?.[field.surTotal]);
+    if (!total) return null;
+
+    const valeur = lire(valeurs?.[field.id]);
+    const pourcentage = valeur === null ? null : Math.round((valeur / total) * 1000) / 10;
+
+    return (
+        <p className="text-xs text-slate-500">
+            sur <span className="font-medium text-slate-600">{total.toLocaleString('fr-FR')}</span> parts
+            {pourcentage !== null && <span className="text-slate-400"> ({pourcentage.toLocaleString('fr-FR')} %)</span>}
         </p>
     );
 }

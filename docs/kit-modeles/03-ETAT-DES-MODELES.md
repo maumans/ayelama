@@ -56,7 +56,7 @@ seule une ligne de l'historique du dossier le signale.
 |---|---|---|
 | `${date_acte_lettres_sans_annee}` | Statuts SARLU, Bail d'habitation, Bail à construction | **`${date_acte_lettres}`** — c'est exactement ce qu'elle fait : jour + mois sans l'année |
 | `${ger.nom}` et `${ger.prenom}` | RCCM SARLU, Cession de fonds de commerce, Copie de RCCM SARLU | **`${ger.prenom_nom}`** — le questionnaire ne sépare pas nom et prénom |
-| `${soc.date_debut_activite_jma}` | RCCM SARLU, Cession de fonds de commerce, Copie de RCCM SARLU | ⟦à arbitrer⟧ — aucun champ « date de début d'activité » n'existe. Soit l'ajouter au questionnaire, soit se rabattre sur `${date_acte_jma}` |
+| `${soc.date_debut_activite_jma}` | RCCM SARLU, Cession de fonds de commerce, Copie de RCCM SARLU | ✅ Résolu le 2026-11-16 (retour R17) : champ `soc.date_debut_activite` ajouté aux questionnaires de constitution |
 | `${loc.ne_a}` et `${loc.date_naissance}` | Bail d'habitation, Bail à construction | ⟦à arbitrer⟧ — le bloc locataire ne porte que 8 champs et n'a ni lieu ni date de naissance. Soit les ajouter au questionnaire de bail, soit retirer la mention de l'acte |
 
 Deux autres modèles **pas encore téléversés** portent quatre balises fausses de plus :

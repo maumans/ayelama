@@ -147,9 +147,13 @@ class RestrictionsEtapesTest extends TestCase
 
         $this->actingAs($this->notaire)
             ->patch("/dossiers/{$dossier->reference}/signatures", [
-                'date_signature_client' => '2026-08-01',
+                // Aujourd'hui, et non une date fixe : depuis le 2026-11-16 (R09), une signature ne
+                // peut précéder la création du dossier — qui naît ici, maintenant. Ce test porte sur
+                // l'étape ; les bornes de date ont le leur (SignatureDatesTest).
+                'date_signature_client' => now()->toDateString(),
             ])
-            ->assertRedirect();
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
 
         $this->assertNotNull($dossier->fresh()->date_signature_client);
         // Une date de signature est un fait daté : elle doit laisser une trace.

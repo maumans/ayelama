@@ -231,8 +231,12 @@ class EnregistrementRetourFormalite
      * n'existait pas encore.
      *
      * On **signale**, on ne régénère pas : `regenererDocument()` écrase un acte corrigé à la
-     * main et périme la certification. Un blocage énuméré plutôt qu'une action silencieuse —
-     * le bouton « Régénérer » existe déjà, c'est au rédacteur de décider.
+     * main et périme la certification.
+     *
+     * ⚠️ Corrigé le 2026-11-16 : ce commentaire renvoyait au bouton « Régénérer ». Il était déjà
+     * inopérant d'ici — ce signal naît à l'étape Formalités, où `genererDocuments` refuse toute
+     * régénération — et le bouton a été retiré (retour R10). Le message ne promet donc plus une
+     * action : il dit ce qui manque, et que les dossiers suivants de la société le porteront.
      *
      * @param array<int, string> $captees
      */
@@ -256,7 +260,7 @@ class EnregistrementRetourFormalite
             $formalite->dossier,
             sprintf(
                 'Les %d acte(s) déjà produits ne portent pas les informations reçues au retour de « %s » '
-                . '— régénérez-les si un modèle les cite.',
+                . '— elles figurent désormais sur la fiche et seront reprises par les prochains actes de la société.',
                 $anterieurs,
                 $formalite->labelAffiche(),
             ),

@@ -62,6 +62,14 @@ class FacturePdfService
      */
     public function nomFichier(Facture $facture): string
     {
+        // Une proforma n'a pas encore de numéro (R20) : on la nomme d'après son dossier, sinon le
+        // fichier s'appellerait « facture-.pdf ».
+        if ($facture->estProforma() || blank($facture->note_numero)) {
+            $facture->loadMissing('dossier');
+
+            return 'proforma-' . str_replace(['/', '\\'], '-', (string) $facture->dossier?->reference) . '.pdf';
+        }
+
         return 'facture-' . str_replace(['/', '\\'], '-', (string) $facture->note_numero) . '.pdf';
     }
 }

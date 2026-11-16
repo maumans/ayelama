@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\FormatNombre;
+
 use App\Models\Dossier;
 use App\Models\Setting;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -96,7 +98,7 @@ class FicheRecueilPdfService
 
         $capitalSocial = '';
         if ($capitalChiffres) {
-            $capitalFormate = number_format((float) $capitalChiffres, 0, ',', ' ');
+            $capitalFormate = FormatNombre::milliers(round((float) $capitalChiffres));
             $lettres = class_exists(NombreEnLettres::class)
                 ? mb_convert_case(mb_strtolower(NombreEnLettres::convertir((float) $capitalChiffres, ''), 'UTF-8'), MB_CASE_TITLE, 'UTF-8')
                 : '';
@@ -106,9 +108,9 @@ class FicheRecueilPdfService
                 $capitalSocial .= ' (' . $lettres . ' Francs Guinéens)';
             }
             if ($nbParts && $valNominale) {
-                $capitalSocial .= ', divisé en ' . number_format((float) $nbParts, 0, ',', ' ') . ' parts de ' . number_format((float) $valNominale, 0, ',', ' ') . ' GNF chacune';
+                $capitalSocial .= ', divisé en ' . FormatNombre::milliers(round((float) $nbParts)) . ' parts de ' . FormatNombre::milliers(round((float) $valNominale)) . ' GNF chacune';
             } elseif ($nbParts) {
-                $capitalSocial .= ', divisé en ' . number_format((float) $nbParts, 0, ',', ' ') . ' parts';
+                $capitalSocial .= ', divisé en ' . FormatNombre::milliers(round((float) $nbParts)) . ' parts';
             }
         }
 
@@ -128,10 +130,10 @@ class FicheRecueilPdfService
         if ($isSarlu && !empty($nomAssocieUnique)) {
             $detailsParts = [];
             if ($nbParts) {
-                $detailsParts[] = number_format((float) $nbParts, 0, ',', ' ') . ' parts';
+                $detailsParts[] = FormatNombre::milliers(round((float) $nbParts)) . ' parts';
             }
             if ($capitalChiffres) {
-                $detailsParts[] = number_format((float) $capitalChiffres, 0, ',', ' ') . ' GNF (100 %)';
+                $detailsParts[] = FormatNombre::milliers(round((float) $capitalChiffres)) . ' GNF (100 %)';
             }
             $repartitionAssocies[] = $nomAssocieUnique . (!empty($detailsParts) ? ' : ' . implode(' — ', $detailsParts) : '');
         } elseif (isset($donnees['associes']) && is_array($donnees['associes']) && count($donnees['associes']) > 0) {
@@ -139,14 +141,14 @@ class FicheRecueilPdfService
                 $nomAssoc = trim(($associe['civilite'] ?? '') . ' ' . ($associe['nom'] ?? ''));
                 if ($nomAssoc === '') continue;
                 $p = $associe['parts_chiffres'] ?? null;
-                $repartitionAssocies[] = $nomAssoc . ($p ? ' : ' . number_format((float) $p, 0, ',', ' ') . ' parts' : '');
+                $repartitionAssocies[] = $nomAssoc . ($p ? ' : ' . FormatNombre::milliers(round((float) $p)) . ' parts' : '');
             }
         } else {
             $partiesAssocies = $dossier->parties->whereIn('role', ['associe', 'associe_unique']);
             foreach ($partiesAssocies as $p) {
                 $nomAssoc = $p->nom;
                 $parts = $p->parts;
-                $repartitionAssocies[] = $nomAssoc . ($parts ? ' : ' . number_format((float) $parts, 0, ',', ' ') . ' parts' : '');
+                $repartitionAssocies[] = $nomAssoc . ($parts ? ' : ' . FormatNombre::milliers(round((float) $parts)) . ' parts' : '');
             }
         }
 

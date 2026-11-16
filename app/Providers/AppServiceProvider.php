@@ -31,6 +31,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Revision::class, RevisionPolicy::class);
         Gate::policy(Courrier::class, CourrierPolicy::class);
         Gate::policy(Demande::class, DemandePolicy::class);
+        Gate::policy(\App\Models\DocumentFichier::class, \App\Policies\DocumentFichierPolicy::class);
 
         Password::defaults(fn () => Password::min(12)->mixedCase()->numbers()->symbols());
 

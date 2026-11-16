@@ -113,7 +113,7 @@
 
     <div class="total-container">
         <div class="total-box">
-            <div class="chiffres">{{ number_format((float) $paiement->montant, 0, ',', ' ') }} GNF</div>
+            <div class="chiffres">{{ \App\Support\FormatNombre::milliers($paiement->montant) }} GNF</div>
             <div class="lettres">Arrêté en toutes lettres : <br> {{ mb_convert_case(mb_strtolower($montantEnLettres, 'UTF-8'), MB_CASE_TITLE, 'UTF-8') }} Francs Guinéens</div>
         </div>
     </div>

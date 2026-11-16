@@ -300,7 +300,8 @@ class PiecesConstitutivesSocieteTest extends TestCase
         $user = $this->utilisateur(RoleUtilisateur::Administrateur);
 
         $this->actingAs($user)->delete("/documents/{$piece->id}")->assertForbidden();
-        $this->actingAs($user)->post("/documents/{$piece->id}/regenerer")->assertForbidden();
+        // `regenerer` n'existe plus (2026-11-16) ; sa remplaçante, `corriger`, doit refuser de même.
+        $this->actingAs($user)->post("/documents/{$piece->id}/corriger")->assertForbidden();
 
         $this->assertDatabaseHas('document_fichiers', ['id' => $piece->id]);
     }

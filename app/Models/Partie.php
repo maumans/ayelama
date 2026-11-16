@@ -312,6 +312,16 @@ class Partie extends Model
             'jeux'          => self::piecesRequisesParCle(),
             'parRole'       => self::jeuParRole(),
             'moraleParRole' => self::jeuMoraleParRole(),
+            // Ce que la représentation change aux pièces du **représenté** : le jeu de son titre
+            // (procuration…) et ce qu'elle retire. Absent jusqu'au 2026-11-16 (retour R06) :
+            // l'assistant de création ne pouvait pas demander la procuration d'une personne
+            // représentée, que le serveur exigeait ensuite pour sortir d'Initialisation.
+            'parMotif'      => collect(MotifRepresentation::cases())->mapWithKeys(fn (MotifRepresentation $m) => [
+                $m->value => ['ajoute' => $m->jeuDePiecesDuTitre(), 'retire' => $m->piecesRetirees()],
+            ])->all(),
+            // Le rôle d'une personne qui en représente une autre. Servi plutôt que nommé en JS :
+            // le résolveur ne doit porter aucun nom de rôle (PiecesRequisesParRoleTest).
+            'roleRepresentant' => MotifRepresentation::ROLE,
         ];
     }
 
@@ -404,8 +414,8 @@ class Partie extends Model
             return $requis;
         }
 
-        if ($motif === MotifRepresentation::Organique) {
-            unset($requis['cni_representant']);
+        foreach ($motif->piecesRetirees() as $categorie) {
+            unset($requis[$categorie]);
         }
 
         $jeuDuTitre = $motif->jeuDePiecesDuTitre();
@@ -515,8 +525,11 @@ class Partie extends Model
             return [];
         }
 
+        // `when` et non un `where` nu : une partie **pas encore enregistrée** (l'assistant de
+        // création demande ce qui sera repris, retour R08) a un id nul, et `id != NULL` ne
+        // retient aucune ligne en SQL — elle se serait vu répondre « rien à reprendre ».
         $autresParties = self::where('client_id', $this->client_id)
-            ->where('id', '!=', $this->id)
+            ->when($this->exists, fn ($q) => $q->where('id', '!=', $this->id))
             ->with(['dossier:id,reference', 'pieces.versionActuelle'])
             ->get();
 
