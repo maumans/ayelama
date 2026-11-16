@@ -66,6 +66,7 @@ Ordre d'exécution : Lot 1 → 2 → 4 → 3 → 5 → 6 → 7 → 8 → 9 → 1
 | Q4 | R18 | Quels gabarits sont visés (RCCM ? déclaration ?), et un exemple papier « sur une page » est-il disponible ? | — (bloquant pour R18) |
 | Q5 | R20 | Faut-il interdire un paiement sur une proforma ? | Oui |
 | Q6 | R22 | Les mails peuvent-ils partir en file d'attente ? Cela exige un worker en production | Envoi synchrone, comme aujourd'hui |
+| Q8 | R04 | Un quorum non atteint doit-il **bloquer** ? Quels seuils, par forme (SARL, SA…) et par convocation (première, seconde), et une seconde convocation lève-t-elle le blocage ? | Avertissement non bloquant sous la case ; case masquée pour une décision de l'associé unique |
 | Q7 | R17 | La date de début d'activité appartient-elle à la fiche société, ou seulement au dossier de constitution ? | Questionnaire seul |
 
 ---
@@ -409,6 +410,7 @@ Ordre d'exécution : Lot 1 → 2 → 4 → 3 → 5 → 6 → 7 → 8 → 9 → 1
 |---|---|---|
 | 2026-11-16 | — | Création du suivi : 23 éléments, 10 lots, 4 arbitrages rendus, 7 questions ouvertes |
 | 2026-11-16 | R01 R04 R12 R14 | Lot 1 codé. Preuves : `vite build` OK (sortie en scratch, `public/build` intact), 43 tests verts (`PariteRenduQuestionnaireTest`, `CoherenceDonneesTest`, `ListesMatrimonialesTest`, `PiecesRequisesParRoleTest`), `verifier-sections-questionnaire.mjs` A-H OK. **Pages non chargées : MySQL arrêté** — passage à ✅ après chargement réel |
+| 2026-11-16 | R04 | Suite donnée à une question de l'utilisateur : « Quorum atteint » est **masqué** pour une décision de l'associé unique (pas d'assemblée, valeur purgée à la soumission). Décoché sur une vraie assemblée, il affiche un **avertissement non bloquant** sous la case (`avertir`, dans le moteur partagé). Le blocage attend la règle de droit (**Q8**). `NatureDecisionTest` vérifie que le libellé comparé reste celui que sert le serveur |
 | 2026-11-16 | R23 | Lot 10 fait, après arbitrage de l'étude. Preuves : `SignatureQuestionnaireTest` (8 tests), 828/839 avec **les mêmes 10 échecs préexistants**, écran vérifié sans rien enregistrer |
 | 2026-11-16 | R22 | Lot 9 fait. Preuves : `NotificationsParEtapeTest`, 820/831 avec **les mêmes 10 échecs préexistants**, mails rendus sans envoi (Mailtrap non sollicité) |
 | 2026-11-16 | R20 R11 | **Lot 8 vérifié à l'écran** → ✅. Dossier `TST-R20-0001` et sa facture, créés avec l'accord de l'utilisateur, puis supprimés définitivement (1 ligne, 1 facture, 2 entrées de journal). Le prochain numéro redevient 025/MAB/26 : **aucun trou** dans la numérotation de développement. Relevé à l'écran : l'en-tête de la carte facture passe désormais à la ligne (`flex-wrap`), filet de sécurité pour un écran étroit avec cinq boutons |

@@ -83,6 +83,7 @@ export function ChampQuestionnaire({
                     </label>
                 </div>
                 <Note field={field} className="ml-6 mt-1" />
+                <Avertissement field={field} value={value} className="ml-6 mt-1" />
                 <Motif motif={motif} className="ml-6" />
             </div>
         );
@@ -392,6 +393,26 @@ function PartDuTotal({ field, valeurs }) {
         <p className="text-xs text-slate-500">
             sur <span className="font-medium text-slate-600">{total.toLocaleString('fr-FR')}</span> parts
             {pourcentage !== null && <span className="text-slate-400"> ({pourcentage.toLocaleString('fr-FR')} %)</span>}
+        </p>
+    );
+}
+
+/**
+ * Mise en garde **non bloquante**, déclarée sur le champ : `avertir: { si, message }` (2026-11-16,
+ * quorum non atteint). Affichée quand la valeur vaut `si` — pour une case, « décochée » couvre
+ * aussi le champ jamais renseigné. Elle n'entre pas dans les blocages : elle informe, elle
+ * n'empêche pas d'avancer.
+ */
+function Avertissement({ field, value, className }) {
+    if (!field.avertir) return null;
+
+    const actuelle = field.type === 'checkbox' ? !!value : value;
+    if (actuelle !== field.avertir.si) return null;
+
+    return (
+        <p className={cn('flex items-start gap-1 text-xs text-amber-700', className)}>
+            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+            {field.avertir.message}
         </p>
     );
 }

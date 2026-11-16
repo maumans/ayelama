@@ -58,6 +58,21 @@ class NatureDecisionTest extends TestCase
         $this->assertSame($servis, $js);
     }
 
+    public function test_le_quorum_se_masque_sur_le_libelle_servi_de_lassocie_unique(): void
+    {
+        // `ag.quorum_atteint` est masqué pour une décision de l'associé unique en comparant un
+        // libellé écrit dans questionnaires.js : renommé côté serveur seulement, le quorum
+        // réapparaîtrait en silence sur toutes les SARLU.
+        $source = file_get_contents(resource_path('js/data/questionnaires.js'));
+        $this->assertSame(1, preg_match(
+            "/id: 'ag\.quorum_atteint'.*?showIf: \{ field: 'ag\.type', equals: \"(.*?)\", not: true \}/s",
+            $source,
+            $m,
+        ), 'Le quorum doit être masqué pour une décision de l\'associé unique.');
+
+        $this->assertSame(TypeAssemblee::LIBELLE_ASSOCIE_UNIQUE, $m[1]);
+    }
+
     public function test_le_resolveur_js_ne_porte_aucun_libelle_en_dur(): void
     {
         $code = file_get_contents(resource_path('js/lib/natureDecision.js'));

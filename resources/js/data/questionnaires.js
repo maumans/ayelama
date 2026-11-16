@@ -1351,7 +1351,17 @@ export const QUESTIONNAIRES = {
           surTotal: 'soc.nombre_parts', defautDepuis: 'soc.nombre_parts' },
         // Coché d'office à la création (retour R04, 2026-11-16) : un PV ne se dresse que si
         // l'assemblée a pu délibérer. `defaut` n'est lu qu'à la création (initRepeatableFields).
-        { id: 'ag.quorum_atteint', label: 'Quorum atteint', type: 'checkbox', required: false, defaut: true },
+        //
+        // Masqué pour une décision de l'associé unique (2026-11-16) : il n'y a pas d'assemblée, donc
+        // pas de quorum. Le libellé comparé est celui que sert TypeAssemblee::LIBELLE_ASSOCIE_UNIQUE
+        // — NatureDecisionTest vérifie qu'ils restent identiques.
+        //
+        // Décoché : un **avertissement**, pas un blocage. La règle de droit (seuils par forme et
+        // par convocation, effet d'une seconde convocation) n'est pas arbitrée — question Q8 du
+        // suivi. Une contrainte inventée serait pire qu'une contrainte absente.
+        { id: 'ag.quorum_atteint', label: 'Quorum atteint', type: 'checkbox', required: false, defaut: true,
+          showIf: { field: 'ag.type', equals: "Décision de l'associé unique", not: true },
+          avertir: { si: false, message: "Le quorum n'est pas atteint : l'assemblée ne peut en principe pas délibérer valablement. Vérifiez qu'il s'agit d'une seconde convocation." } },
         // Souvent différente de la date d'assemblée (effet différé, ou rétroactif au
         // premier jour de l'exercice) : c'est elle qui figure aux statuts mis à jour.
         { id: 'ag.date_effet', label: "Date d'effet de la modification", type: 'date', placeholder: '01/09/2026', required: false,
