@@ -21,17 +21,22 @@ use Illuminate\Support\Facades\Storage;
  */
 class FicheRecueilPdfService
 {
-    public function genererPdf(Dossier $dossier): string
+    /**
+     * @param array{image: string, signataire: string, date: string, empreinte: string}|null $signature
+     *        Signature recueillie à l'écran (R23) : remplit les lignes « Date » et « Signature »
+     *        de la fiche. Sans elle, la fiche sort vierge, à imprimer et faire signer.
+     */
+    public function genererPdf(Dossier $dossier, ?array $signature = null): string
     {
         $dossier->loadMissing(['typeActe', 'questionnaire', 'parties.client', 'societe']);
 
         if ($this->isSarl($dossier)) {
-            $pdf = $this->genererPdfSarl($dossier);
+            $pdf = $this->genererPdfSarl($dossier, $signature);
         } else {
-            $pdf = $this->genererPdfGenerique($dossier);
+            $pdf = $this->genererPdfGenerique($dossier, $signature);
         }
 
-        $chemin = 'fiches-recueil/' . $dossier->reference . '/fiche_' . time() . '.pdf';
+        $chemin = 'fiches-recueil/' . $dossier->reference . '/fiche_' . ($signature ? 'signee_' : '') . time() . '.pdf';
         Storage::disk('public')->put($chemin, $pdf->output());
 
         return $chemin;
@@ -66,7 +71,7 @@ class FicheRecueilPdfService
         return (string) ($forme ?? '');
     }
 
-    private function genererPdfSarl(Dossier $dossier)
+    private function genererPdfSarl(Dossier $dossier, ?array $signature = null)
     {
         $donnees = $dossier->questionnaire?->donnees ?? [];
 
@@ -229,10 +234,11 @@ class FicheRecueilPdfService
             'emailGerant'                  => $emailGerant,
             'commissaireComptes'           => $commissaireComptes,
             'regimeFiscalReference'        => $regimeFiscalReference,
+            'signature'                    => $signature,
         ]);
     }
 
-    private function genererPdfGenerique(Dossier $dossier)
+    private function genererPdfGenerique(Dossier $dossier, ?array $signature = null)
     {
         $groupes = [];
         foreach ($dossier->questionnaire?->donnees ?? [] as $cle => $valeur) {
@@ -251,8 +257,9 @@ class FicheRecueilPdfService
         }
 
         return Pdf::loadView('fiches_recueil.pdf', [
-            'dossier' => $dossier,
-            'groupes' => $groupes,
+            'dossier'   => $dossier,
+            'groupes'   => $groupes,
+            'signature' => $signature,
         ]);
     }
 }

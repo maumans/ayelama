@@ -52,7 +52,7 @@ Ordre d'exécution : Lot 1 → 2 → 4 → 3 → 5 → 6 → 7 → 8 → 9 → 1
 | R20 | Possibilité de faire une proforma | 8 | ✅ | `FactureProformaTest` (8 tests). Écran vérifié le 2026-11-16 sur un dossier de test temporaire : « Facture proforma », badge « Proforma · numéro attribué à l'émission », paiement désactivé avec sa raison, blocage d'Expédition « émettez-la » ; émise → « N° 025/MAB/26 », paiement activé ; PDF réel téléchargé : 1 page, `facture-025-MAB-26.pdf` |
 | R21 | Facture sur une page | 8 | ✅ | Mesuré avant : 21 factures réelles sur 24 sur deux pages. Après : **les 24 sur une page** (dompdf), et le test d'une facture de 10 lignes dont 3 remisées, avec expéditeur, compte 1 page |
 | R22 | Notification par mail pour chaque tâche à traiter | 9 | ✅ | `NotificationsParEtapeTest` (4 tests : toutes les étapes parcourues, passage réel Formalités → Expédition avec mail au formaliste, au notaire et au comptable) ; les 3 nouveaux mails rendus sur SOC-2026-0027 (sujet, texte, lien) sans envoi ; les 7 comptes actifs reçoivent le mail |
-| R23 | Intégrer la signature du questionnaire (non prioritaire) | 10 | ⬜ | |
+| R23 | Intégrer la signature du questionnaire (non prioritaire) | 10 | ✅ | `SignatureQuestionnaireTest` (8 tests) ; écran vérifié sur SOC-2026-0017 sans enregistrer : bouton, signataire prérempli, validation conditionnée au tracé et à l'approbation, toile à la bonne taille |
 
 ---
 
@@ -386,9 +386,20 @@ Ordre d'exécution : Lot 1 → 2 → 4 → 3 → 5 → 6 → 7 → 8 → 9 → 1
 
 ## Lot 10 — Signature du questionnaire (non prioritaire)
 
-### R23 · ⬜
+### R23 · ✅
 - **Existant** : l'accord du client est collecté **sur papier** : la fiche de recueil est imprimée, signée, puis téléversée (`AccordClientCard.jsx`). `Intake/Show.jsx` ne contient ni consentement ni signature.
-- **Esquisse** : case de consentement et pavé de signature dans le formulaire public. Le résultat est stocké en `accord_client`, verrouillé, et satisfait `AccordsInitialisation`. **À concevoir avec l'étude avant toute ligne de code.**
+- **Arbitré par l'étude (2026-11-16)** :
+  - la signature se fait **à l'écran, à l'étude**, et non dans le formulaire public, qui précède les corrections de l'étude et ne couvrirait pas le questionnaire final ;
+  - le **client principal seul** signe ;
+  - **une nouvelle signature est exigée** si le questionnaire change ;
+  - **le papier reste possible**.
+- **Fait (2026-11-16)** :
+  - bouton « Faire signer à l'écran » dans la carte d'accord, uniquement pour la fiche de recueil : une modification ou une dissolution attend la décision des associés. Modale `ModalSignatureQuestionnaire` : lien « Relire la fiche », signataire prérempli, tracé au doigt, au stylet ou à la souris (Pointer Events), case « a relu et approuve » ;
+  - `DossierController::signerAccordClient` vérifie la signature : une vraie image PNG, non vide. Il produit la fiche de recueil **avec** la signature, la date et l'heure, le signataire et l'empreinte, puis la range comme l'accord papier (verrouillée, version `signature_ecran`) et écrit au journal ;
+  - **caducité** : `EmpreinteQuestionnaire` calcule un SHA-256 canonique, insensible à l'ordre des clés, relevé à la signature **et** au dépôt papier. `Dossier::accordCaduc()` et `accordAcquis()` sont désormais le seul détenteur de la règle, pour le contrôle bloquant comme pour l'indicateur de la liste, qui la recopiaient chacun. Message et blocage énumérés : « faites-le signer de nouveau » ;
+  - un accord antérieur, sans empreinte, reste valable ;
+  - migration `ajouter_signature_aux_documents` (`mode_signature`, `signataire`, `empreinte_questionnaire`), appliquée en développement.
+- **Corrigé pendant la vérification** : la toile gardait sa taille par défaut (300 × 150) quand elle était préparée avant d'être affichée. Le trait aurait été déformé et coupé. Elle est désormais dimensionnée au premier contact.
 
 ---
 
@@ -398,6 +409,7 @@ Ordre d'exécution : Lot 1 → 2 → 4 → 3 → 5 → 6 → 7 → 8 → 9 → 1
 |---|---|---|
 | 2026-11-16 | — | Création du suivi : 23 éléments, 10 lots, 4 arbitrages rendus, 7 questions ouvertes |
 | 2026-11-16 | R01 R04 R12 R14 | Lot 1 codé. Preuves : `vite build` OK (sortie en scratch, `public/build` intact), 43 tests verts (`PariteRenduQuestionnaireTest`, `CoherenceDonneesTest`, `ListesMatrimonialesTest`, `PiecesRequisesParRoleTest`), `verifier-sections-questionnaire.mjs` A-H OK. **Pages non chargées : MySQL arrêté** — passage à ✅ après chargement réel |
+| 2026-11-16 | R23 | Lot 10 fait, après arbitrage de l'étude. Preuves : `SignatureQuestionnaireTest` (8 tests), 828/839 avec **les mêmes 10 échecs préexistants**, écran vérifié sans rien enregistrer |
 | 2026-11-16 | R22 | Lot 9 fait. Preuves : `NotificationsParEtapeTest`, 820/831 avec **les mêmes 10 échecs préexistants**, mails rendus sans envoi (Mailtrap non sollicité) |
 | 2026-11-16 | R20 R11 | **Lot 8 vérifié à l'écran** → ✅. Dossier `TST-R20-0001` et sa facture, créés avec l'accord de l'utilisateur, puis supprimés définitivement (1 ligne, 1 facture, 2 entrées de journal). Le prochain numéro redevient 025/MAB/26 : **aucun trou** dans la numérotation de développement. Relevé à l'écran : l'en-tête de la carte facture passe désormais à la ligne (`flex-wrap`), filet de sécurité pour un écran étroit avec cinq boutons |
 | 2026-11-16 | R20 R11 R21 | Lot 8 codé. Preuves : `FactureProformaTest` (8 tests), les 24 factures réelles sur une page, 817/827 avec **les mêmes 10 échecs préexistants**. Quatre tests créaient des factures numérotées sans statut : ils les déclarent désormais émises. Migration appliquée sur la base de développement (la seule en attente). Écran à voir : volet masqué |

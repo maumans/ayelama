@@ -41,7 +41,8 @@ final class AccordsInitialisation
             'categorie'    => 'accord_client',
             'nom'          => 'Accord client — questionnaire signé',
             'titre'        => 'Accord client sur le questionnaire',
-            'instructions' => 'Imprimez la fiche dossier, faites-la signer par le client, puis téléversez ici le document signé.',
+            // Deux voies depuis le 2026-11-16 (R23) : signature sur l'écran de l'étude, ou papier.
+            'instructions' => "Faites signer le questionnaire au client sur l'écran de l'étude, ou imprimez la fiche dossier, faites-la signer, puis téléversez ici le document signé.",
             'imprimable'   => true,
             'exigence'     => ExigenceAccord::Bloquante,
             'aVerifier'    => false,

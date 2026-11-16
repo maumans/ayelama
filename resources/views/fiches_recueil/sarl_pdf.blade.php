@@ -331,14 +331,27 @@
         <div class="zone-signatures">
             <table class="table-signatures">
                 <tr>
+                    {{-- Signée à l'écran (R23) : date et signature à la place des lignes vierges. --}}
                     <td style="width: 50%;">
-                        <strong>Date :</strong> <span class="ligne-signature"></span>
+                        <strong>Date :</strong>
+                        @if(!empty($signature)) {{ $signature['date'] }} @else <span class="ligne-signature"></span> @endif
                     </td>
                     <td style="width: 50%; text-align: right;">
-                        <strong>Signature :</strong> <span class="ligne-signature"></span>
+                        <strong>Signature :</strong>
+                        @if(!empty($signature))
+                            <img src="{{ $signature['image'] }}" alt="" style="max-height: 55px; max-width: 200px; vertical-align: bottom;">
+                        @else
+                            <span class="ligne-signature"></span>
+                        @endif
                     </td>
                 </tr>
             </table>
+            @if(!empty($signature))
+                <div style="margin-top: 8px; font-size: 7.5pt; color: #666;">
+                    Signé sur l'écran de l'étude le {{ $signature['date'] }} par {{ $signature['signataire'] }}.
+                    Empreinte du questionnaire approuvé (SHA-256) : {{ $signature['empreinte'] }}
+                </div>
+            @endif
         </div>
     </div>
 

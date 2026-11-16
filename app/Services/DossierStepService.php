@@ -379,10 +379,16 @@ class DossierStepService
         $accordAttendu = $dossier->pieceAccordAttendue();
 
         if ($accordAttendu['exigence']->bloque()) {
-            $accordClient = $dossier->documents->firstWhere('categorie', $accordAttendu['categorie']);
+            $accordClient = $dossier->pieceAccord();
 
             if (!$accordClient?->est_signe_cachete) {
-                $errors['accord_client'] = [sprintf('« %s » doit être téléversé.', $accordAttendu['nom'])];
+                $errors['accord_client'] = [sprintf('« %s » doit être téléversé ou signé.', $accordAttendu['nom'])];
+            } elseif ($dossier->accordCaduc()) {
+                // R23 : la signature porte sur un contenu précis ; le questionnaire a changé depuis.
+                $errors['accord_client'] = [sprintf(
+                    'Le questionnaire a été modifié depuis l\'accord du client (%s) : faites-le signer de nouveau.',
+                    $accordClient->signe_cachete_at?->format('d/m/Y à H:i') ?? 'date inconnue',
+                )];
             }
         }
 

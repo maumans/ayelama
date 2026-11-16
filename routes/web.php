@@ -59,6 +59,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/dossiers/{dossier:reference}/questionnaire', [DossierController::class, 'updateQuestionnaire'])->name('dossiers.questionnaire.update');
     Route::get('/dossiers/{dossier:reference}/fiche-recueil', [DossierController::class, 'telechargerFicheRecueil'])->name('dossiers.fiche_recueil');
     Route::post('/dossiers/{dossier:reference}/accord-client', [DossierController::class, 'televerserAccordClient'])->name('dossiers.accord_client.televerser');
+    // Signature du questionnaire sur l'écran de l'étude (R23) — l'accord papier ci-dessus reste possible.
+    Route::post('/dossiers/{dossier:reference}/accord-client/signer', [DossierController::class, 'signerAccordClient'])->name('dossiers.accord_client.signer');
 
     // Dates de signature : action à part, restreinte à l'étape Signature. Ces champs
     // étaient dans UpdateDossierRequest, donc modifiables et effaçables à toute étape.

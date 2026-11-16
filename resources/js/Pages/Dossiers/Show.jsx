@@ -4177,6 +4177,14 @@ function getStepBlockers(dossier) {
                             ? "Déposer la décision"
                             : "Déposer l'accord",
                 });
+            } else if (accordBloque && dossier.accordClient?.caduc) {
+                // R23 : miroir de DossierStepService — le questionnaire a changé depuis l'accord.
+                b.push({
+                    texte: `Le questionnaire a été modifié depuis l'accord du client (${dossier.accordClient.signe_cachete_at}) : faites-le signer de nouveau`,
+                    tab: "informations",
+                    ancre: ANCRE_ACCORD_CLIENT,
+                    action: "Faire signer",
+                });
             }
             // Les actes ne sont générés qu'à l'entrée en Édition : ne rien exiger avant.
             if (etape === "edition" && docs.length === 0) {

@@ -32,6 +32,8 @@ class DocumentFichier extends Model
         'est_requis', 'est_fourni', 'version_actuelle_id',
         'edite_par_id', 'edite_at', 'created_by_id',
         'est_signe_cachete', 'signe_cachete_at', 'signe_cachete_par_id',
+        // Accord client (R23) : papier ou écran, qui a signé, et sur quel contenu.
+        'mode_signature', 'signataire', 'empreinte_questionnaire',
     ];
 
     protected function casts(): array

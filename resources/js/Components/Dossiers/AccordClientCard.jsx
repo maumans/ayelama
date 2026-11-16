@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import { router } from '@inertiajs/react';
-import { AlertTriangle, CheckCircle2, Download, Eye, Printer, RefreshCw, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Eye, PenLine, Printer, RefreshCw, Upload } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import DocumentInlinePreview from '@/Components/documents/DocumentInlinePreview';
 import { notifyValidationError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
+import { ModalSignatureQuestionnaire } from '@/Components/Dossiers/ModalSignatureQuestionnaire';
 
 /** Ancre DOM partagée avec Dossiers/Show.jsx (panneau des conditions requises). */
 export const ANCRE_ACCORD_CLIENT = 'accord-client';
@@ -27,7 +28,11 @@ export const ANCRE_ACCORD_CLIENT = 'accord-client';
  */
 export function AccordClientCard({ dossier, can }) {
     const accordClient = dossier.accordClient;
-    const accordRecu   = !!accordClient?.est_signe_cachete;
+    // « Reçu » et « valable » se distinguent depuis le 2026-11-16 (R23) : un accord porte sur le
+    // questionnaire du jour où il a été signé, et devient caduc si celui-ci change ensuite.
+    const accordDepose = !!accordClient?.est_signe_cachete;
+    const caduc        = accordDepose && !!accordClient?.caduc;
+    const accordRecu   = accordDepose && !caduc;
 
     // Titre, consigne et bouton d'impression dépendent du type de dossier : une modification de
     // statuts attend la décision écrite des associés — ce qui engage réellement l'opération — et
@@ -35,7 +40,7 @@ export function AccordClientCard({ dossier, can }) {
     // prop manque (page ouverte avant le déploiement).
     const attendu = dossier.accordAttendu ?? {
         titre: 'Accord client sur le questionnaire',
-        instructions: "Imprimez la fiche dossier, faites-la signer par le client, puis téléversez ici le document signé. Le dossier ne pourra pas passer à l'étape suivante sans cette pièce.",
+        instructions: "Faites signer le questionnaire au client sur l'écran de l'étude, ou imprimez la fiche dossier, faites-la signer, puis téléversez ici le document signé. Le dossier ne pourra pas passer à l'étape suivante sans cette pièce.",
         imprimable: true,
         // Repli **conservateur** : une page ouverte avant le déploiement doit continuer de
         // montrer l'exigence la plus forte, jamais l'inverse.
@@ -51,6 +56,7 @@ export function AccordClientCard({ dossier, can }) {
 
     const [preview, setPreview] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [signature, setSignature] = useState(false);
     const inputRef = useRef(null);
     // ⚠️ Il y avait ici un défilement sur `?focus=accord`, « sur le même principe que
     // ?focus=pieces ». Retiré le 2026-10-05 avec son jumeau, pour deux raisons : **aucun
@@ -66,7 +72,7 @@ export function AccordClientCard({ dossier, can }) {
     // ⚠️ Placé **après** les hooks, et non au plus tôt : un retour anticipé avant `useState` /
     // `useEffect` rendrait leur appel conditionnel, ce que React interdit — la carte planterait
     // au premier basculement de type d'acte.
-    if (sansObjet && !accordRecu) {
+    if (sansObjet && !accordDepose) {
         return null;
     }
 
@@ -98,6 +104,24 @@ export function AccordClientCard({ dossier, can }) {
             onFinish: () => setUploading(false),
         });
     };
+
+    // Signature à l'écran (R23) : seulement pour la fiche de recueil — une décision d'assemblée
+    // ne se signe pas sur notre écran.
+    const peutSigner = can?.modifierQuestionnaire && attendu.imprimable;
+    const boutonSigner = peutSigner && (
+        <Button size="sm" variant="seal" className="h-8 gap-1.5" onClick={() => setSignature(true)}>
+            <PenLine className="h-3.5 w-3.5" />
+            {caduc ? 'Faire signer de nouveau' : "Faire signer à l'écran"}
+        </Button>
+    );
+    const modaleSignature = peutSigner && (
+        <ModalSignatureQuestionnaire
+            open={signature}
+            onClose={() => setSignature(false)}
+            dossier={dossier}
+            signataireParDefaut={accordClient?.signataire ?? dossier.clientPrincipalLabel ?? ''}
+        />
+    );
 
     const champFichier = can?.modifierQuestionnaire && (
         <input
@@ -144,12 +168,36 @@ export function AccordClientCard({ dossier, can }) {
                 )}
             </CardHeader>
             <CardContent className="space-y-3">
+                {modaleSignature}
+                {caduc && (
+                    <div className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-warning-bg p-3 sm:flex-row sm:items-center">
+                        <AlertTriangle className="hidden h-4 w-4 shrink-0 text-warning-text sm:block" />
+                        <div className="min-w-0 flex-1 text-sm text-warning-text">
+                            Le questionnaire a été modifié depuis l'accord du {accordClient.signe_cachete_at}
+                            {accordClient.signataire ? ` (${accordClient.signataire})` : ''} : la signature ne couvre plus
+                            son contenu. Faites-le signer de nouveau, ou déposez un nouvel accord papier.
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                            {boutonSigner}
+                            {can?.modifierQuestionnaire && (
+                                <>
+                                    {champFichier}
+                                    <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => inputRef.current?.click()} disabled={uploading}>
+                                        <Upload className="h-3.5 w-3.5" /> {uploading ? 'Envoi…' : 'Déposer un accord papier'}
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
                 {accordRecu ? (
                     <>
                         <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-success-bg p-3">
                             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
                             <div className="min-w-0 flex-1 text-sm text-success-text">
-                                Accord reçu le {accordClient.signe_cachete_at} par {accordClient.signe_cachete_par}
+                                {accordClient.mode_signature === 'ecran'
+                                    ? <>Signé à l'écran par {accordClient.signataire} le {accordClient.signe_cachete_at} (recueilli par {accordClient.signe_cachete_par})</>
+                                    : <>Accord reçu le {accordClient.signe_cachete_at} par {accordClient.signe_cachete_par}</>}
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
                                 <button
@@ -194,7 +242,7 @@ export function AccordClientCard({ dossier, can }) {
                             />
                         )}
                     </>
-                ) : (
+                ) : !caduc && (
                     <div className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-warning-bg p-3 sm:flex-row sm:items-start">
                         <AlertTriangle className="mt-0.5 hidden h-4 w-4 shrink-0 text-warning-text sm:block" />
                         {/* Pas de repère de position (« ci-dessus » / « ci-dessous ») : la
@@ -209,6 +257,7 @@ export function AccordClientCard({ dossier, can }) {
                                 jusqu'à la fiche pour l'imprimer. Rien à imprimer en revanche
                                 pour une modification : c'est le client qui apporte la décision
                                 de son assemblée. */}
+                            {boutonSigner}
                             {attendu.imprimable && (
                                 <Button size="sm" variant="outline" className="h-8 gap-1.5" asChild>
                                     <a

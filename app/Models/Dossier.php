@@ -229,6 +229,50 @@ class Dossier extends Model
     }
 
     /**
+     * La pièce d'accord déposée ou signée pour ce dossier, ou null.
+     */
+    public function pieceAccord(): ?DocumentFichier
+    {
+        $this->loadMissing('documents');
+
+        return $this->documents->firstWhere('categorie', $this->pieceAccordAttendue()['categorie']);
+    }
+
+    /**
+     * L'accord porte-t-il sur un questionnaire **qui a changé depuis** (retour R23, arbitré le
+     * 2026-11-16 : « nouvelle signature exigée ») ?
+     *
+     * Faux pour un accord sans empreinte — antérieur à cette règle : on ne sait pas sur quel
+     * contenu il portait, il reste valable plutôt que d'immobiliser des dossiers en cours.
+     */
+    public function accordCaduc(): bool
+    {
+        $accord = $this->pieceAccord();
+        if (! $accord?->est_signe_cachete || blank($accord->empreinte_questionnaire)) {
+            return false;
+        }
+
+        $this->loadMissing('questionnaire');
+
+        return ! hash_equals(
+            $accord->empreinte_questionnaire,
+            \App\Support\EmpreinteQuestionnaire::calculer($this->questionnaire?->donnees),
+        );
+    }
+
+    /**
+     * L'accord exigé est-il acquis : déposé ou signé, **et** toujours valable ?
+     *
+     * Seul détenteur de la règle : le contrôle bloquant (`DossierStepService`) et l'indicateur de
+     * la liste (`DossierController::constitutionComplete`) la recopiaient chacun — c'est ainsi
+     * que la caducité, ajoutée d'un seul côté, aurait divergé.
+     */
+    public function accordAcquis(): bool
+    {
+        return (bool) $this->pieceAccord()?->est_signe_cachete && ! $this->accordCaduc();
+    }
+
+    /**
      * Société dont ce dossier est l'acte de constitution — `null` pour un dossier de
      * modification ou de dissolution, qui porte sur une société préexistante.
      *

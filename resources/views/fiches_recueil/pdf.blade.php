@@ -96,13 +96,23 @@
         approuve pour la constitution du dossier référencé {{ $dossier->reference }}.
     </div>
 
+    {{-- Signée à l'écran (R23) : la date et la signature remplissent les lignes, et une mention
+         dit qui, quand, et sur quel contenu. Sinon, lignes vierges à signer à la main. --}}
     <div class="signature">
         <div class="bloc">
+            @if(!empty($signature))<div style="font-size: 12px; margin-bottom: 4px;">{{ $signature['date'] }}</div>@endif
             <div class="ligne">Date</div>
         </div>
         <div class="bloc">
-            <div class="ligne">Signature du client</div>
+            @if(!empty($signature))<img src="{{ $signature['image'] }}" alt="" style="max-height: 60px; max-width: 220px;">@endif
+            <div class="ligne">Signature du client{{ !empty($signature) ? ' — ' . $signature['signataire'] : '' }}</div>
         </div>
     </div>
+    @if(!empty($signature))
+        <div style="margin-top: 14px; font-size: 9px; color: #777;">
+            Signé sur l'écran de l'étude le {{ $signature['date'] }} par {{ $signature['signataire'] }}.
+            Empreinte du questionnaire approuvé (SHA-256) : {{ $signature['empreinte'] }}
+        </div>
+    @endif
 </body>
 </html>

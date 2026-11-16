@@ -127,8 +127,9 @@ class DossierController extends Controller
             return true;
         }
 
-        return (bool) $dossier->documents
-            ->firstWhere('categorie', $accordAttendu['categorie'])?->est_signe_cachete;
+        // Déposé **et** toujours valable : un questionnaire modifié depuis la signature rend
+        // l'accord caduc (R23). Même prédicat que le contrôle bloquant.
+        return $dossier->accordAcquis();
     }
 
     public function index(Request $request)
@@ -1218,11 +1219,96 @@ class DossierController extends Controller
             'est_signe_cachete'    => true,
             'signe_cachete_at'     => now(),
             'signe_cachete_par_id' => auth()->id(),
+            // L'accord papier porte lui aussi sur le questionnaire du jour (R23) : même règle de
+            // caducité que la signature à l'écran, pour que les deux voies disent la même chose.
+            'mode_signature'          => 'papier',
+            'signataire'              => null,
+            'empreinte_questionnaire' => \App\Support\EmpreinteQuestionnaire::calculer($dossier->questionnaire?->donnees),
         ]);
 
         JournalActivite::enregistrer($dossier, "« {$attendu['nom']} » téléversé", 'etape', []);
 
         return back()->with('success', "« {$attendu['nom']} » enregistré.");
+    }
+
+    /**
+     * Signature du questionnaire **sur l'écran de l'étude** (retour R23, arbitré le 2026-11-16 :
+     * à l'étude, par le client principal, l'accord papier restant possible).
+     *
+     * Le client relit la fiche de recueil et signe au doigt ou à la souris. Le serveur produit la
+     * fiche **avec** la signature, la date, le nom du signataire et l'empreinte du questionnaire
+     * approuvé, et la range comme l'accord papier : pièce verrouillée, même catégorie, même
+     * contrôle bloquant. Une modification ultérieure du questionnaire rend l'accord caduc.
+     *
+     * Réservée à la fiche de recueil (`imprimable`) : une modification de statuts attend la
+     * décision écrite des associés, qu'une signature sur notre écran ne remplace pas.
+     */
+    public function signerAccordClient(Request $request, Dossier $dossier, \App\Services\FicheRecueilPdfService $fiche)
+    {
+        $this->authorize('modifierQuestionnaire', $dossier);
+
+        $attendu = $dossier->pieceAccordAttendue();
+        if ($attendu['exigence'] === \App\Enums\ExigenceAccord::SansObjet || ! $attendu['imprimable']) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'signature' => ["« {$attendu['nom']} » ne se signe pas à l'écran : déposez le document signé."],
+            ]);
+        }
+
+        $data = $request->validate([
+            'signature'  => ['required', 'string', 'max:600000', 'starts_with:data:image/png;base64,'],
+            'signataire' => ['required', 'string', 'max:200'],
+            'approuve'   => ['accepted'],
+        ], [
+            'approuve.accepted' => 'Le client doit confirmer avoir relu et approuvé le questionnaire.',
+        ]);
+
+        // Une image PNG réelle, et pas vide : un tracé tient en quelques kilo-octets, une toile
+        // blanche en quelques centaines d'octets.
+        $png = base64_decode(substr($data['signature'], strlen('data:image/png;base64,')), true);
+        $taille = $png !== false ? @getimagesizefromstring($png) : false;
+        if (! $taille || $taille['mime'] !== 'image/png' || strlen($png) < 1500) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'signature' => ['La signature est vide ou illisible : faites signer le client dans le cadre.'],
+            ]);
+        }
+
+        $dossier->loadMissing('questionnaire');
+        $empreinte = \App\Support\EmpreinteQuestionnaire::calculer($dossier->questionnaire?->donnees);
+        $signeLe   = now();
+
+        $chemin = $fiche->genererPdf($dossier, [
+            'image'      => 'data:image/png;base64,' . base64_encode($png),
+            'signataire' => $data['signataire'],
+            'date'       => $signeLe->format('d/m/Y à H:i'),
+            'empreinte'  => $empreinte,
+        ]);
+
+        $document = $dossier->documents()->firstOrCreate(
+            ['categorie' => $attendu['categorie']],
+            ['nom' => $attendu['nom'], 'statut' => 'edite', 'created_by_id' => auth()->id()]
+        );
+        $document->nouvelleVersion($chemin, 'documents/' . $dossier->reference, [
+            'source'       => 'signature_ecran',
+            'nom_original' => 'Fiche-' . $dossier->reference . '-signee.pdf',
+            'mime_type'    => 'application/pdf',
+        ]);
+        $document->update([
+            'est_signe_cachete'       => true,
+            'signe_cachete_at'        => $signeLe,
+            'signe_cachete_par_id'    => auth()->id(),
+            'mode_signature'          => 'ecran',
+            'signataire'              => $data['signataire'],
+            'empreinte_questionnaire' => $empreinte,
+        ]);
+
+        JournalActivite::enregistrer(
+            $dossier,
+            "Questionnaire signé à l'écran par {$data['signataire']}",
+            'etape',
+            ['empreinte' => $empreinte, 'recueilli_par' => auth()->id()],
+        );
+
+        return back()->with('success', "Questionnaire signé par {$data['signataire']}.");
     }
 
     public function destroy(Dossier $dossier)
@@ -1376,8 +1462,17 @@ class DossierController extends Controller
             'documents'   => $d->documents->where('categorie', '!=', 'accord_client')
                 ->map(fn ($doc) => $this->documentFichierToArray($doc))->values(),
             'accordClient' => ($accordClient = $d->documents->firstWhere('categorie', 'accord_client'))
-                ? $this->documentFichierToArray($accordClient)
+                ? [
+                    ...$this->documentFichierToArray($accordClient),
+                    // R23 : comment l'accord a été recueilli, par qui, et s'il porte encore sur le
+                    // questionnaire actuel.
+                    'mode_signature' => $accordClient->mode_signature,
+                    'signataire'     => $accordClient->signataire,
+                    'caduc'          => $d->accordCaduc(),
+                ]
                 : null,
+            // Nom proposé pour signer à l'écran : le client principal (R23).
+            'clientPrincipalLabel' => $d->clientPrincipalLabel(),
             // Titre, consigne et bouton d'impression dépendent du type de dossier : une
             // modification de statuts attend la décision des associés, pas une fiche signée.
             'accordAttendu' => $d->pieceAccordAttendue(),
