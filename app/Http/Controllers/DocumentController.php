@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\DocumentFichier;
-use App\Models\DocumentVersion;
 use App\Models\Dossier;
 use App\Models\JournalActivite;
 use App\Models\RevisionPoint;
@@ -162,48 +161,10 @@ class DocumentController extends Controller
         ]);
     }
 
-    public function versions(DocumentFichier $document)
-    {
-        $this->authorize('view', $document->sujetAutorisation());
-
-        return response()->json([
-            'versions' => $document->versions()
-                ->with('creePar:id,name')
-                ->get()
-                ->reverse()
-                ->values()
-                ->map(fn (DocumentVersion $v) => [
-                    'id'            => $v->id,
-                    'numero'        => $v->numero,
-                    'est_actuelle'  => $v->id === $document->version_actuelle_id,
-                    'nom_original'  => $v->nom_original,
-                    'taille_octets' => $v->taille_octets,
-                    'source'        => $v->source,
-                    'cree_par'      => $v->creePar?->name,
-                    'created_at'    => $v->created_at?->format('d/m/Y H:i'),
-                    'url_download'  => route('documents.versions.telecharger', $v),
-                ]),
-        ]);
-    }
-
-    public function telechargerVersion(DocumentVersion $version)
-    {
-        $this->authorize('view', $version->documentFichier->sujetAutorisation());
-
-        if (!$version->chemin_fichier || !Storage::disk('public')->exists($version->chemin_fichier)) {
-            abort(404, 'Fichier introuvable.');
-        }
-
-        $ext      = pathinfo($version->chemin_fichier, PATHINFO_EXTENSION);
-        $filename = $version->documentFichier->nom . '_v' . $version->numero . ($ext ? '.' . $ext : '');
-
-        return Storage::disk('public')->download($version->chemin_fichier, $filename);
-    }
-
     /**
      * Dépôt de la version finale signée/cachetée (retour du circuit papier réel :
      * impression → envoi → signature/cachet → retour) — verrouille définitivement le
-     * document (voir abort_if(est_signe_cachete) dans update/corriger/destroy/restaurerVersion
+     * document (voir abort_if(est_signe_cachete) dans update/corriger/destroy
      * ci-dessus, qui empêchent toute modification ultérieure même via appel direct à l'API).
      */
     public function televerserSigne(Request $request, DocumentFichier $document)
@@ -234,26 +195,4 @@ class DocumentController extends Controller
         return back()->with('success', "« {$document->nom} » enregistré comme signé/cacheté — verrouillé.");
     }
 
-    public function restaurerVersion(DocumentVersion $version)
-    {
-        $document = $version->documentFichier;
-        $this->refuserSiPieceDeRegistre($document);
-        abort_if($document->est_signe_cachete, 403, 'Document verrouillé : déjà signé/cacheté, non modifiable.');
-        $this->authorize('restaurer', $document);
-
-        $document->restaurerVersion($version);
-        // Restaurer change le contenu tout autant qu'une correction.
-        if ($document->documentable instanceof Dossier) {
-            RevisionPoint::perimerPour($document, $document->documentable);
-        }
-
-        JournalActivite::enregistrer(
-            $document->dossierGouvernant(),
-            "Document « {$document->nom} » restauré à la version {$version->numero}",
-            'etape',
-            []
-        );
-
-        return back()->with('success', "Version {$version->numero} restaurée.");
-    }
 }

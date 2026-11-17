@@ -11,7 +11,7 @@ import DocumentInlinePreview from '@/Components/documents/DocumentInlinePreview'
  * qu'on sache plus à quelle ligne il correspondait. Sur une liste de vingt documents,
  * c'était intenable.
  *
- * Ce module fournit les deux pièces du motif, déjà appliqué à l'onglet Clôture et à la
+ * Ce module fournit les deux pièces du motif, déjà appliqué à l'onglet Archivage et à la
  * carte d'accord client :
  *   - `useApercuEnLigne()` — quelle ligne est ouverte, une seule à la fois ;
  *   - `<ApercuSousLigne>`  — le panneau animé, à placer juste après la ligne.

@@ -260,7 +260,7 @@ export default function Dashboard() {
                 >
                     <SecondaryKpi label="dossiers au total"    value={stats?.total ?? 0}              icon={LayoutGrid}   color="text-ink"       href="/dossiers" />
                     <SecondaryKpi label="créés ce mois"        value={stats?.ceMois ?? 0}             icon={CalendarDays} color="text-blue-600"  href="/dossiers" />
-                    <SecondaryKpi label="clôturés"             value={stats?.clos ?? 0}               icon={Archive}      color="text-green-600" href="/dossiers?etape=cloture" />
+                    <SecondaryKpi label="archivés"             value={stats?.clos ?? 0}               icon={Archive}      color="text-green-600" href="/dossiers?etape=cloture" />
                     <SecondaryKpi label="courriers en attente" value={stats?.courriersEnAttente ?? 0} icon={Mail}         color="text-slate-500" href="/courriers" />
                     {/* Une liquidation n'apparaît dans aucun compteur de dossiers : entre la
                         dissolution et la clôture, il n'y a pas de dossier ouvert. Le libellé

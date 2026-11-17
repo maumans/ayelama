@@ -11,7 +11,8 @@ use App\Models\Partie;
 use App\Models\User;
 
 /**
- * Ce qu'on peut faire d'**un** document : le supprimer, restaurer une version, le corriger.
+ * Ce qu'on peut faire d'**un** document : le supprimer, le corriger. (La restauration d'une
+ * version a été retirée le 2026-11-17 avec l'historique des versions.)
  *
  * Retour R07 du 2026-11-16 : « retirer les boutons de suppression pour ceux qui n'y ont pas
  * droit ». Le droit était déduit, côté écran, d'un `can.genererDocuments` **global au dossier**,
@@ -23,7 +24,7 @@ use App\Models\User;
  *  - « Restaurer une version » n'avait **aucun** contrôle côté écran.
  *
  * La règle vit désormais ici, par document, et l'écran reçoit le résultat (`peut_supprimer`,
- * `peut_restaurer`, `peut_corriger`) au lieu de le recalculer : il ne peut plus diverger.
+ * `peut_corriger`) au lieu de le recalculer : il ne peut plus diverger.
  *
  * Le `match` sur la famille du document n'a pas de branche « sinon » permissive : une nouvelle
  * famille de documents est refusée tant qu'on n'a pas décidé de ses droits.
@@ -50,12 +51,6 @@ class DocumentFichierPolicy
             $document->documentable instanceof Dossier   => $this->dossiers->genererDocuments($user, $dossier),
             default                                      => false,
         };
-    }
-
-    /** Restaurer une version, c'est remplacer le contenu : mêmes droits que la suppression. */
-    public function restaurer(User $user, DocumentFichier $document): bool
-    {
-        return $this->supprimer($user, $document);
     }
 
     /**

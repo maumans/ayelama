@@ -123,6 +123,22 @@ export function AccordClientCard({ dossier, can }) {
         />
     );
 
+    // Partagé par l'accord attendu **et** l'accord caduc : la branche caduque (R23) avait été écrite
+    // à part et l'avait oublié — or redéposer un accord papier suppose d'avoir réimprimé la fiche,
+    // modifiée justement. Rien à imprimer pour une modification : le client apporte sa décision.
+    const boutonImprimer = attendu.imprimable && (
+        <Button size="sm" variant="outline" className="h-8 gap-1.5" asChild>
+            <a
+                href={`/dossiers/${dossier.reference}/fiche-recueil`}
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                <Printer className="h-3.5 w-3.5" />
+                Imprimer la fiche
+            </a>
+        </Button>
+    );
+
     const champFichier = can?.modifierQuestionnaire && (
         <input
             ref={inputRef}
@@ -170,15 +186,20 @@ export function AccordClientCard({ dossier, can }) {
             <CardContent className="space-y-3">
                 {modaleSignature}
                 {caduc && (
-                    <div className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-warning-bg p-3 sm:flex-row sm:items-center">
-                        <AlertTriangle className="hidden h-4 w-4 shrink-0 text-warning-text sm:block" />
-                        <div className="min-w-0 flex-1 text-sm text-warning-text">
-                            Le questionnaire a été modifié depuis l'accord du {accordClient.signe_cachete_at}
-                            {accordClient.signataire ? ` (${accordClient.signataire})` : ''} : la signature ne couvre plus
-                            son contenu. Faites-le signer de nouveau, ou déposez un nouvel accord papier.
+                    // Message au-dessus, boutons en dessous : à trois boutons côte à côte, le texte
+                    // tombait en colonne d'un mot par ligne sur une fenêtre moyenne.
+                    <div className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-warning-bg p-3">
+                        <div className="flex items-start gap-3">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-text" />
+                            <div className="min-w-0 flex-1 text-sm text-warning-text">
+                                Le questionnaire a été modifié depuis l'accord du {accordClient.signe_cachete_at}
+                                {accordClient.signataire ? ` (${accordClient.signataire})` : ''} : la signature ne couvre plus
+                                son contenu. Faites-le signer de nouveau, ou réimprimez la fiche et déposez un nouvel accord papier.
+                            </div>
                         </div>
-                        <div className="flex shrink-0 items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 sm:pl-7">
                             {boutonSigner}
+                            {boutonImprimer}
                             {can?.modifierQuestionnaire && (
                                 <>
                                     {champFichier}
@@ -258,18 +279,7 @@ export function AccordClientCard({ dossier, can }) {
                                 pour une modification : c'est le client qui apporte la décision
                                 de son assemblée. */}
                             {boutonSigner}
-                            {attendu.imprimable && (
-                                <Button size="sm" variant="outline" className="h-8 gap-1.5" asChild>
-                                    <a
-                                        href={`/dossiers/${dossier.reference}/fiche-recueil`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        <Printer className="h-3.5 w-3.5" />
-                                        Imprimer la fiche
-                                    </a>
-                                </Button>
-                            )}
+                            {boutonImprimer}
                             {can?.modifierQuestionnaire && (
                                 <>
                                     {champFichier}

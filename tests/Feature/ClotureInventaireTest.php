@@ -117,7 +117,7 @@ class ClotureInventaireTest extends TestCase
     public function test_les_rubriques_vides_sont_conservees_dans_linventaire(): void
     {
         // Une rubrique vide est une information (« aucune pièce de formalité »), pas du
-        // bruit : l'onglet Clôture doit pouvoir le dire.
+        // bruit : l'onglet Archivage doit pouvoir le dire.
         $this->dossier->documents()->create(['nom' => 'Statuts', 'categorie' => 'acte_principal']);
 
         $rubriques = $this->inventaire()->pour($this->dossier->fresh());

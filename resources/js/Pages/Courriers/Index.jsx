@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import DocumentPreviewModal from '@/Components/documents/DocumentPreviewModal';
 import { telechargerFichier } from '@/lib/telechargement';
+import { ModalEnvoiCourrier } from '@/Components/Courriers/ModalEnvoiCourrier';
 
 /* ─── constants ─────────────────────────────────────────── */
 
@@ -181,10 +182,12 @@ function CourrierRow({ c, onEdit, onPreview, idx }) {
 
     const patch = (data) => router.patch(`/courriers/${c.id}`, data, { preserveScroll: true });
 
-    const marquerEnvoye = () => patch({ statut: 'envoye' });
+    // Plus d'envoi en un clic (2026-11-17) : date de transmission et transmetteur exigés.
+    const [envoi, setEnvoi] = useState(false);
+    const marquerEnvoye = () => setEnvoi(true);
     const revenirBrouillon = () => setConfirmState({
         title: 'Remettre en brouillon ?',
-        description: `Le courrier ${c.reference} sera remis en statut brouillon.`,
+        description: `Le courrier ${c.reference} sera remis en statut brouillon ; sa date de transmission et son transmetteur seront effacés.`,
         confirmLabel: 'Remettre en brouillon',
         variant: 'default',
         onConfirm: () => patch({ statut: 'brouillon' }),
@@ -199,6 +202,7 @@ function CourrierRow({ c, onEdit, onPreview, idx }) {
 
     return (
         <>
+        <ModalEnvoiCourrier courrier={envoi ? c : null} onClose={() => setEnvoi(false)} />
         <ConfirmDialog
             open={!!confirmState}
             onClose={() => setConfirmState(null)}
@@ -256,7 +260,7 @@ function CourrierRow({ c, onEdit, onPreview, idx }) {
                                     </button>
                                 )}
                                 {c.statut === 'envoye' && c.envoye_at
-                                    ? <span>Envoyé le {c.envoye_at}</span>
+                                    ? <span>Envoyé le {c.envoye_at}{c.transmis_par && ` — transmis par ${c.transmis_par}`}</span>
                                     : <span>Créé le {c.created_at}</span>}
                                 {c.redacteur && <span>Par {c.redacteur}</span>}
                             </div>

@@ -22,7 +22,7 @@ use Illuminate\Support\Collection;
  * Partie | Formalite), `Courrier` et `Recu`, ces deux dernières familles ayant leur
  * propre table et leur propre `chemin_fichier`, héritage antérieur au module GED unifié.
  *
- * C'est aussi la source unique de l'onglet Clôture ET de la GED, pour que les deux
+ * C'est aussi la source unique de l'onglet Archivage ET de la GED, pour que les deux
  * écrans ne puissent pas diverger sur le rangement.
  */
 class InventaireClotureService
@@ -76,7 +76,7 @@ class InventaireClotureService
     }
 
     /**
-     * Compteurs pour le bandeau de progression de l'onglet Clôture.
+     * Compteurs pour le bandeau de progression de l'onglet Archivage.
      *
      * @return array{total: int, verifiees: int}
      */

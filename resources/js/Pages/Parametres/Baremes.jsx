@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import { motion } from 'framer-motion';
 import {
     Scale, Plus, Trash2, ChevronDown, ChevronUp,
-    Percent, X, ClipboardCheck, Pencil, AlertTriangle,
+    Percent, X, ClipboardCheck, Pencil, AlertTriangle, Search,
 } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -28,7 +28,24 @@ const EMPTY_BAREME_FORM = {
     remise_autorisee: false,
     genere_formalite: false, depend_de_bareme_id: '',
     type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
+    donnees_au_retour: [],
 };
+
+const FILTRES_VIDES = {
+    recherche: '', categorie: '', organisme: '', statut: '', calcul: '',
+    formalite: false, aConfirmer: false, masquerVides: false,
+};
+
+/** Un barème passe-t-il les filtres portant sur le barème lui-même (pas sur son type d'acte) ? */
+function baremeCorrespond(b, f) {
+    if (f.organisme && b.organisme !== f.organisme) return false;
+    if (f.statut === 'actifs' && !b.actif) return false;
+    if (f.statut === 'inactifs' && b.actif) return false;
+    if (f.calcul && b.base_calcul !== f.calcul) return false;
+    if (f.formalite && !b.genere_formalite) return false;
+    if (f.aConfirmer && !b.a_confirmer) return false;
+    return true;
+}
 
 const ORGANISME_COLORS = {
     APIP:         'bg-blue-50 text-blue-700',
@@ -40,7 +57,7 @@ const ORGANISME_COLORS = {
     Autre:        'bg-slate-100 text-slate-600',
 };
 
-function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesActesAvecBaremes, organismes, donneesAuRetour = [] }) {
+function ModalAjouterBareme({ open, onClose, bareme = null, typeActePreselection = null, typesActes, typesActesAvecBaremes, organismes, donneesAuRetour = [] }) {
     const isEdit = Boolean(bareme);
     const [form, setForm] = useState(EMPTY_BAREME_FORM);
     const [nouvellePiece, setNouvellePiece] = useState('');
@@ -66,11 +83,16 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
                 delai_heures:     bareme.delai_heures ?? '',
                 pieces_requises:  bareme.pieces_requises ?? [],
                 donnees_au_retour: bareme.donnees_au_retour ?? [],
-            } : EMPTY_BAREME_FORM);
+            } : {
+                // Ouverte depuis la carte d'un type d'acte : ce type est pré-coché, les autres
+                // restent cochables (un même barème peut valoir pour plusieurs types).
+                ...EMPTY_BAREME_FORM,
+                type_acte_ids: typeActePreselection ? [String(typeActePreselection)] : [],
+            });
             setErrors({});
             setNouvellePiece('');
         }
-    }, [open, bareme?.id]);
+    }, [open, bareme?.id, typeActePreselection]);
 
     // Démarches candidates dont celle-ci peut dépendre — uniquement celles du même
     // type d'acte qui génèrent elles-mêmes une formalité (le blocage n'a de sens
@@ -412,9 +434,17 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typesActes, typesAct
     );
 }
 
-function TypeActeRow({ typeActe, onEdit }) {
-    const [open, setOpen] = useState((typeActe.baremes?.length ?? 0) > 0);
+function TypeActeRow({ typeActe, baremesVisibles, filtreActif = false, onEdit, onAdd }) {
+    const total = typeActe.baremes?.length ?? 0;
+    const visibles = baremesVisibles ?? typeActe.baremes ?? [];
+    const [open, setOpen] = useState(total > 0);
     const [confirmState, setConfirmState] = useState(null);
+
+    // Un filtre qui vient de faire apparaître des correspondances les montre : une carte
+    // repliée sur un résultat de recherche le cacherait.
+    useEffect(() => {
+        if (filtreActif && visibles.length > 0) setOpen(true);
+    }, [filtreActif, visibles.length]);
 
     const toggleActif = (bareme) => {
         router.patch(`/parametres/baremes/${bareme.id}`, { actif: !bareme.actif }, { preserveScroll: true });
@@ -440,26 +470,54 @@ function TypeActeRow({ typeActe, onEdit }) {
             onConfirm={confirmState?.onConfirm ?? (() => {})}
         />
         <Card className="overflow-hidden">
-            <button
-                onClick={() => setOpen(o => !o)}
-                className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
-            >
-                <div className="flex items-center gap-3">
-                    <span className="font-medium text-sm text-ink">{typeActe.label}</span>
-                    <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                        {typeActe.categorieLabel}
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                        {typeActe.baremes?.length ?? 0} barème{(typeActe.baremes?.length ?? 0) > 1 ? 's' : ''}
-                    </span>
-                </div>
-                {open ? <ChevronUp className="h-4 w-4 text-slate-300" /> : <ChevronDown className="h-4 w-4 text-slate-300" />}
-            </button>
+            {/* En-tête : la zone de repli et le bouton d'ajout sont deux contrôles frères —
+                un bouton dans un bouton est du HTML invalide, et le clic remonterait. */}
+            <div className="flex items-center gap-2 pr-3 hover:bg-slate-50 transition-colors">
+                <button
+                    type="button"
+                    onClick={() => setOpen(o => !o)}
+                    className="flex-1 min-w-0 flex items-center justify-between gap-3 pl-4 py-3 text-left"
+                >
+                    <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                        <span className="font-medium text-sm text-ink">{typeActe.label}</span>
+                        <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                            {typeActe.categorieLabel}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                            {filtreActif && visibles.length !== total
+                                ? `${visibles.length} / ${total} barème${total > 1 ? 's' : ''}`
+                                : `${total} barème${total > 1 ? 's' : ''}`}
+                        </span>
+                    </div>
+                    {open ? <ChevronUp className="h-4 w-4 shrink-0 text-slate-300" /> : <ChevronDown className="h-4 w-4 shrink-0 text-slate-300" />}
+                </button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 text-xs"
+                    onClick={() => onAdd?.(typeActe.id)}
+                    title={`Ajouter un barème à « ${typeActe.label} »`}
+                >
+                    <Plus className="h-3.5 w-3.5" />
+                    Ajouter
+                </Button>
+            </div>
 
             {open && (
                 <div className="border-t border-slate-100">
-                    {(typeActe.baremes?.length ?? 0) === 0 ? (
-                        <p className="text-sm text-slate-400 text-center py-6">Aucun barème configuré pour ce type d'acte.</p>
+                    {visibles.length === 0 ? (
+                        <div className="flex flex-col items-center gap-2 py-6">
+                            <p className="text-sm text-slate-400 text-center">
+                                {total === 0
+                                    ? "Aucun barème configuré pour ce type d'acte."
+                                    : 'Aucun barème ne correspond aux filtres.'}
+                            </p>
+                            {total === 0 && (
+                                <Button variant="ghost" size="sm" className="text-seal-hover" onClick={() => onAdd?.(typeActe.id)}>
+                                    <Plus className="h-3.5 w-3.5" /> Ajouter le premier barème
+                                </Button>
+                            )}
+                        </div>
                     ) : (
                         <table className="table-notarial w-full">
                             <thead>
@@ -474,7 +532,7 @@ function TypeActeRow({ typeActe, onEdit }) {
                                 </tr>
                             </thead>
                             <tbody>
-                                {typeActe.baremes?.map(b => (
+                                {visibles.map(b => (
                                     <tr key={b.id} className={!b.actif ? 'opacity-50' : ''}>
                                         <td>
                                             <span className={cn('inline-flex text-xs px-2 py-0.5 rounded-full font-medium', ORGANISME_COLORS[b.organisme] ?? 'bg-slate-100 text-slate-600')}>
@@ -563,13 +621,96 @@ function TypeActeRow({ typeActe, onEdit }) {
     );
 }
 
+const TOUS = '__tous__';
+
+/** Select de filtre : Radix refuse un `SelectItem` de valeur vide — d'où la sentinelle `TOUS`. */
+function FiltreSelect({ value, onChange, placeholder, options, className }) {
+    return (
+        <Select value={value || TOUS} onValueChange={v => onChange(v === TOUS ? '' : v)}>
+            <SelectTrigger className={cn('h-9 text-sm', value ? 'border-seal/50 bg-seal/5' : '', className)}>
+                <SelectValue placeholder={placeholder} />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value={TOUS}>{placeholder}</SelectItem>
+                {options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+        </Select>
+    );
+}
+
+function FiltreBascule({ actif, onChange, children }) {
+    return (
+        <button
+            type="button"
+            onClick={() => onChange(!actif)}
+            className={cn(
+                'inline-flex items-center gap-1.5 h-8 px-3 rounded-full border text-xs font-medium transition-colors',
+                actif ? 'border-seal bg-seal/10 text-seal-hover' : 'border-slate-200 text-slate-500 hover:bg-slate-50',
+            )}
+        >
+            {children}
+        </button>
+    );
+}
+
 export default function ParametresBaremes() {
     const { typesActes = [], categories = [], organismes = [], filters = {}, stats = {}, donneesAuRetour = [] } = usePage().props;
 
-    const [categorie, setCategorie] = useState(filters.categorie ?? '');
-    const [modal, setModal] = useState({ open: false, bareme: null });
+    // Filtrage entièrement côté écran : le serveur sert tous les types d'actes, si bien que la
+    // modale de création les propose toujours tous. Seule la catégorie reste lisible dans l'URL
+    // (`?categorie=`), pour les liens existants.
+    const [filtres, setFiltres] = useState({ ...FILTRES_VIDES, categorie: filters.categorie ?? '' });
+    const [modal, setModal] = useState({ open: false, bareme: null, typeActeId: null });
 
-    const allTypesActes = typesActes.map(t => ({ id: t.id, label: t.label }));
+    const majFiltre = (cle, valeur) => setFiltres(f => ({ ...f, [cle]: valeur }));
+    const nbFiltresActifs = Object.values(filtres).filter(v => v !== '' && v !== false).length;
+
+    // Filtres portant sur le barème lui-même (hors recherche) : quand l'un d'eux est posé, un
+    // type d'acte sans barème correspondant n'a plus rien à montrer et disparaît.
+    const filtreSurBaremes = Boolean(
+        filtres.organisme || filtres.statut || filtres.calcul || filtres.formalite || filtres.aConfirmer,
+    );
+    const filtreActif = filtreSurBaremes || filtres.recherche.trim() !== '';
+
+    const typesFiltres = useMemo(() => {
+        const q = filtres.recherche.trim().toLowerCase();
+        return typesActes
+            .filter(t => !filtres.categorie || t.categorie === filtres.categorie)
+            .map(t => {
+                const typeCorrespond = q !== '' && t.label.toLowerCase().includes(q);
+                const baremesVisibles = (t.baremes ?? []).filter(b =>
+                    baremeCorrespond(b, filtres)
+                    && (q === '' || typeCorrespond
+                        || b.libelle?.toLowerCase().includes(q)
+                        || b.organisme?.toLowerCase().includes(q)
+                        || b.description?.toLowerCase().includes(q)),
+                );
+                return { typeActe: t, baremesVisibles, typeCorrespond };
+            })
+            .filter(({ typeActe, baremesVisibles, typeCorrespond }) => {
+                if (filtres.masquerVides && (typeActe.baremes?.length ?? 0) === 0) return false;
+                if (!filtreActif) return true;
+                if (baremesVisibles.length > 0) return true;
+                // Une recherche qui nomme le type d'acte le garde même vide : c'est le chemin
+                // le plus direct vers son bouton « Ajouter ».
+                return typeCorrespond && !filtreSurBaremes;
+            });
+    }, [typesActes, filtres, filtreActif, filtreSurBaremes]);
+
+    const nbBaremesVisibles = typesFiltres.reduce((n, x) => n + x.baremesVisibles.length, 0);
+
+    // Les organismes proposés au filtre : la liste de référence, plus ceux réellement portés
+    // par un barème (un barème ancien peut citer un organisme retiré de la liste).
+    const optionsOrganismes = useMemo(() => {
+        const presents = typesActes.flatMap(t => (t.baremes ?? []).map(b => b.organisme)).filter(Boolean);
+        return [...new Set([...organismes, ...presents])].map(o => ({ value: o, label: o }));
+    }, [typesActes, organismes]);
+
+    // `categorieLabel` est transmis : la modale range ses cases à cocher par catégorie, et sans
+    // lui tout tombait sous « Autre ».
+    const allTypesActes = typesActes.map(t => ({ id: t.id, label: t.label, categorieLabel: t.categorieLabel }));
+
+    const ouvrirCreation = (typeActeId = null) => setModal({ open: true, bareme: null, typeActeId });
 
     return (
         <AppLayout breadcrumbs={[{ label: 'Paramètres', href: '/parametres' }, { label: 'Barèmes & Taux' }]}>
@@ -578,69 +719,111 @@ export default function ParametresBaremes() {
             <div className="p-6 max-w-[1000px] mx-auto space-y-5">
 
                 {/* En-tête */}
-                <div className="flex items-end justify-between gap-4">
-                    <div>
-                        <h1 className="font-serif text-display text-ink">Barèmes & Taux</h1>
-                        <p className="text-slate-500 text-sm mt-1">Taux fiscaux et honoraires notariaux par type d'acte</p>
-                    </div>
-                    <Button variant="seal" onClick={() => setModal({ open: true, bareme: null })}>
-                        <Plus className="h-4 w-4" />
-                        Nouveau barème
-                    </Button>
+                <div>
+                    <h1 className="font-serif text-display text-ink">Barèmes & Taux</h1>
+                    <p className="text-slate-500 text-sm mt-1">Taux fiscaux et honoraires notariaux par type d'acte</p>
                 </div>
 
                 {/* KPIs. Le troisième compte ce que l'étude doit relire : un tarif qu'aucune de
                     ses notes de frais ne donne part quand même sur une facture. Affiché même à
-                    zéro serait trompeur — une carte à zéro invite à cliquer pour rien. */}
+                    zéro serait trompeur — une carte à zéro invite à cliquer pour rien.
+                    « Actifs » et « À confirmer » sont cliquables : ils posent le filtre. */}
                 <div className={cn('grid gap-3', stats.aConfirmer > 0 ? 'grid-cols-3' : 'grid-cols-2')}>
                     <Card className="p-4 text-center">
                         <div className="text-2xl font-bold text-ink">{stats.total ?? 0}</div>
                         <div className="text-xs text-slate-500 mt-0.5">Barèmes configurés</div>
                     </Card>
-                    <Card className="p-4 text-center">
+                    <Card
+                        className={cn('p-4 text-center cursor-pointer transition-colors hover:border-success/40',
+                            filtres.statut === 'actifs' && 'border-success/60')}
+                        onClick={() => majFiltre('statut', filtres.statut === 'actifs' ? '' : 'actifs')}
+                    >
                         <div className="text-2xl font-bold text-success">{stats.actifs ?? 0}</div>
                         <div className="text-xs text-slate-500 mt-0.5">Actifs</div>
                     </Card>
                     {stats.aConfirmer > 0 && (
-                        <Card className="p-4 text-center border-amber-200 bg-amber-50/60">
+                        <Card
+                            className={cn('p-4 text-center border-amber-200 bg-amber-50/60 cursor-pointer transition-colors hover:border-amber-300',
+                                filtres.aConfirmer && 'border-amber-400')}
+                            onClick={() => majFiltre('aConfirmer', !filtres.aConfirmer)}
+                        >
                             <div className="text-2xl font-bold text-amber-700">{stats.aConfirmer}</div>
                             <div className="text-xs text-amber-700/80 mt-0.5">À confirmer par l'étude</div>
                         </Card>
                     )}
                 </div>
 
-                {/* Filtre catégorie */}
-                <div className="flex items-center gap-2">
-                    <Select
-                        value={categorie}
-                        onValueChange={v => {
-                            setCategorie(v);
-                            router.get('/parametres/baremes', { categorie: v }, { preserveState: true, replace: true });
-                        }}
-                    >
-                        <SelectTrigger className="h-8 text-sm w-52">
-                            <SelectValue placeholder="Toutes catégories" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="">Toutes catégories</SelectItem>
-                            {categories.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-
-                    {categorie && (
-                        <Button variant="ghost" size="sm" className="h-8 text-slate-400"
-                            onClick={() => { setCategorie(''); router.get('/parametres/baremes', {}, { preserveState: true, replace: true }); }}>
-                            <X className="h-3.5 w-3.5 mr-1" /> Tout voir
+                {/* Barre de filtres. Le bouton de création global y est rangé, juste au-dessus de
+                    la liste qu'il alimente ; chaque carte a en plus son propre « Ajouter », qui
+                    pré-coche son type d'acte. */}
+                <Card className="p-3 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative flex-1 min-w-[220px]">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                            <Input
+                                className="h-9 pl-8 text-sm"
+                                placeholder="Rechercher un libellé, un type d'acte, un organisme…"
+                                value={filtres.recherche}
+                                onChange={e => majFiltre('recherche', e.target.value)}
+                            />
+                        </div>
+                        <Button variant="seal" className="h-9" onClick={() => ouvrirCreation()}>
+                            <Plus className="h-4 w-4" />
+                            Nouveau barème
                         </Button>
-                    )}
+                    </div>
 
-                    <span className="ml-auto text-xs text-slate-400">{typesActes.length} type{typesActes.length > 1 ? 's' : ''} d'actes</span>
-                </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <FiltreSelect value={filtres.categorie} onChange={v => majFiltre('categorie', v)}
+                            placeholder="Toutes catégories" options={categories} />
+                        <FiltreSelect value={filtres.organisme} onChange={v => majFiltre('organisme', v)}
+                            placeholder="Tous organismes" options={optionsOrganismes} />
+                        <FiltreSelect value={filtres.statut} onChange={v => majFiltre('statut', v)}
+                            placeholder="Actifs et inactifs"
+                            options={[{ value: 'actifs', label: 'Actifs seulement' }, { value: 'inactifs', label: 'Inactifs seulement' }]} />
+                        <FiltreSelect value={filtres.calcul} onChange={v => majFiltre('calcul', v)}
+                            placeholder="Tout mode de calcul"
+                            options={[{ value: 'valeur_acte', label: '% de la valeur' }, { value: 'montant_fixe', label: 'Montant fixe' }]} />
+                    </div>
 
-                {/* Légende organismes */}
+                    <div className="flex flex-wrap items-center gap-2">
+                        <FiltreBascule actif={filtres.formalite} onChange={v => majFiltre('formalite', v)}>
+                            <ClipboardCheck className="h-3.5 w-3.5" /> Génère une formalité
+                        </FiltreBascule>
+                        <FiltreBascule actif={filtres.aConfirmer} onChange={v => majFiltre('aConfirmer', v)}>
+                            <AlertTriangle className="h-3.5 w-3.5" /> Montant à confirmer
+                        </FiltreBascule>
+                        <FiltreBascule actif={filtres.masquerVides} onChange={v => majFiltre('masquerVides', v)}>
+                            Masquer les types sans barème
+                        </FiltreBascule>
+
+                        {nbFiltresActifs > 0 && (
+                            <Button variant="ghost" size="sm" className="h-8 text-slate-400"
+                                onClick={() => setFiltres(FILTRES_VIDES)}>
+                                <X className="h-3.5 w-3.5 mr-1" /> Réinitialiser ({nbFiltresActifs})
+                            </Button>
+                        )}
+
+                        <span className="ml-auto text-xs text-slate-400">
+                            {typesFiltres.length} type{typesFiltres.length > 1 ? 's' : ''} d'actes
+                            {' · '}{nbBaremesVisibles} barème{nbBaremesVisibles > 1 ? 's' : ''}
+                        </span>
+                    </div>
+                </Card>
+
+                {/* Légende organismes — un clic filtre sur l'organisme, un second le retire. */}
                 <div className="flex flex-wrap gap-1.5">
                     {Object.entries(ORGANISME_COLORS).map(([org, cls]) => (
-                        <span key={org} className={cn('inline-flex text-[10px] font-medium px-2 py-0.5 rounded-full', cls)}>{org}</span>
+                        <button
+                            key={org}
+                            type="button"
+                            onClick={() => majFiltre('organisme', filtres.organisme === org ? '' : org)}
+                            className={cn('inline-flex text-[10px] font-medium px-2 py-0.5 rounded-full transition-opacity', cls,
+                                filtres.organisme && filtres.organisme !== org && 'opacity-40',
+                                filtres.organisme === org && 'ring-1 ring-current')}
+                        >
+                            {org}
+                        </button>
                     ))}
                 </div>
 
@@ -653,16 +836,33 @@ export default function ParametresBaremes() {
                             <p className="text-sm text-slate-400 mt-1">Configurez d'abord des types d'actes.</p>
                         </CardContent>
                     </Card>
+                ) : typesFiltres.length === 0 ? (
+                    <Card>
+                        <CardContent className="flex flex-col items-center justify-center py-14 text-center">
+                            <Search className="h-10 w-10 text-slate-200 mb-3" />
+                            <h3 className="font-serif text-heading text-slate-500">Aucun résultat</h3>
+                            <p className="text-sm text-slate-400 mt-1">Aucun barème ne correspond à ces filtres.</p>
+                            <Button variant="outline" size="sm" className="mt-4" onClick={() => setFiltres(FILTRES_VIDES)}>
+                                <X className="h-3.5 w-3.5 mr-1" /> Réinitialiser les filtres
+                            </Button>
+                        </CardContent>
+                    </Card>
                 ) : (
                     <div className="space-y-2">
-                        {typesActes.map((t, i) => (
+                        {typesFiltres.map(({ typeActe: t, baremesVisibles }, i) => (
                             <motion.div
                                 key={t.id}
                                 initial={{ opacity: 0, y: 5 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: i * 0.03 }}
+                                transition={{ delay: Math.min(i, 15) * 0.03 }}
                             >
-                                <TypeActeRow typeActe={t} onEdit={(b) => setModal({ open: true, bareme: { ...b, type_acte_id: t.id } })} />
+                                <TypeActeRow
+                                    typeActe={t}
+                                    baremesVisibles={baremesVisibles}
+                                    filtreActif={filtreActif}
+                                    onAdd={ouvrirCreation}
+                                    onEdit={(b) => setModal({ open: true, bareme: { ...b, type_acte_id: t.id }, typeActeId: null })}
+                                />
                             </motion.div>
                         ))}
                     </div>
@@ -671,8 +871,9 @@ export default function ParametresBaremes() {
 
             <ModalAjouterBareme
                 open={modal.open}
-                onClose={() => setModal({ open: false, bareme: null })}
+                onClose={() => setModal({ open: false, bareme: null, typeActeId: null })}
                 bareme={modal.bareme}
+                typeActePreselection={modal.typeActeId}
                 typesActes={allTypesActes}
                 typesActesAvecBaremes={typesActes}
                 organismes={organismes}

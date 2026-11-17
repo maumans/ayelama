@@ -754,8 +754,10 @@ class ParametresController extends Controller
 
     public function baremes(Request $request)
     {
+        // Tous les types d'actes sont servis, quel que soit le filtre : le filtrage se fait côté
+        // écran (catégorie, organisme, statut, recherche…). Filtrer ici privait la modale de
+        // création des types hors catégorie — on ne pouvait plus y cocher qu'une partie d'entre eux.
         $typesActes = TypeActe::with(['baremes' => fn ($q) => $q->orderBy('ordre')->orderBy('organisme')])
-            ->when($request->categorie, fn ($q, $cat) => $q->where('categorie', $cat))
             ->orderBy('categorie')
             ->orderBy('label')
             ->get()

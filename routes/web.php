@@ -93,10 +93,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/documents/{document}/preview',    [DocumentController::class, 'preview'])->name('documents.preview');
     // `regenerer` retiré le 2026-11-16 (retour R10) : régénérer écrasait une correction faite à la
     // main. Corriger un acte, c'est déposer sa version retravaillée (retour R19).
+    // Historique des versions (liste, téléchargement, restauration) retiré le 2026-11-17 : la
+    // restauration contredisait le retrait de la régénération. Les versions restent en base.
     Route::post('/documents/{document}/corriger', [DocumentController::class, 'corriger'])->name('documents.corriger');
-    Route::get('/documents/{document}/versions', [DocumentController::class, 'versions'])->name('documents.versions');
-    Route::get('/documents/versions/{version}/telecharger', [DocumentController::class, 'telechargerVersion'])->name('documents.versions.telecharger');
-    Route::post('/documents/versions/{version}/restaurer', [DocumentController::class, 'restaurerVersion'])->name('documents.versions.restaurer');
     Route::post('/documents/{document}/televerser-signe', [DocumentController::class, 'televerserSigne'])->name('documents.televerser_signe');
 
     // GED (vue transversale de tous les documents, tous dossiers confondus)
@@ -225,6 +224,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/courriers', [CourrierController::class, 'index'])->name('courriers.index');
     Route::post('/courriers', [CourrierController::class, 'store'])->name('courriers.store');
     Route::patch('/courriers/{courrier}', [CourrierController::class, 'update'])->name('courriers.update');
+    Route::post('/courriers/{courrier}/envoyer', [CourrierController::class, 'envoyer'])->name('courriers.envoyer');
     Route::delete('/courriers/{courrier}', [CourrierController::class, 'destroy'])->name('courriers.destroy');
     Route::get('/courriers/{courrier}/download', [CourrierController::class, 'download'])->name('courriers.download');
     Route::get('/courriers/{courrier}/preview',  [CourrierController::class, 'preview'])->name('courriers.preview');

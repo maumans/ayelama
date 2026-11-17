@@ -289,7 +289,6 @@ class PiecesConstitutivesSocieteTest extends TestCase
 
         $this->actingAs($user)->get("/documents/{$piece->id}/preview")->assertOk();
         $this->actingAs($user)->get("/documents/{$piece->id}/download")->assertOk();
-        $this->actingAs($user)->getJson("/documents/{$piece->id}/versions")->assertOk();
     }
 
     public function test_les_actions_de_dossier_refusent_une_piece_de_registre(): void

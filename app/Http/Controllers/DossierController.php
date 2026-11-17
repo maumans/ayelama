@@ -230,7 +230,7 @@ class DossierController extends Controller
                     EtapeDossier::Signature  => (bool) ($d->date_signature_client && $d->date_signature_notaire),
                     EtapeDossier::Formalites => $d->formalites_non_clos === 0,
                     // Toutes les pièces de l'inventaire doivent avoir été vérifiées
-                    // dans l'onglet Clôture — la configuration « documents obligatoires
+                    // dans l'onglet Archivage — la configuration « documents obligatoires
                     // par type d'acte » a été supprimée le 2026-08-04.
                     EtapeDossier::Expedition => $pretsACloturer[$d->id] ?? false,
                     // Étape terminale : le bouton n'est de toute façon pas rendu
@@ -1439,12 +1439,10 @@ class DossierController extends Controller
             'signe_cachete_par' => $doc->signeCachetePar?->name,
             'url_download'      => route('documents.download', $doc),
             'url_preview'       => route('documents.preview', $doc),
-            'url_versions'      => route('documents.versions', $doc),
             'url_televerser_signe' => route('documents.televerser_signe', $doc),
             // Décidés par DocumentFichierPolicy, par document : l'écran ne recalcule plus le droit
             // depuis un `can.*` global au dossier, qui affichait des boutons que le serveur refusait.
             'peut_supprimer' => auth()->user()?->can('supprimer', $doc) ?? false,
-            'peut_restaurer' => auth()->user()?->can('restaurer', $doc) ?? false,
             'peut_corriger'  => auth()->user()?->can('corriger', $doc) ?? false,
         ];
     }
@@ -1578,6 +1576,8 @@ class DossierController extends Controller
                 'type'           => $c->type,
                 'statut'         => $c->statut,
                 'envoye_at'      => $c->envoye_at?->format('d/m/Y'),
+                'transmis_par'   => $c->transmis_par,
+                'bornes_envoi'   => $c->bornesDateEnvoi(),
                 'redacteur'      => $c->redacteur?->name,
                 'chemin_fichier' => $c->chemin_fichier,
                 'has_file'       => (bool) $c->chemin_fichier,
@@ -1591,7 +1591,7 @@ class DossierController extends Controller
             ]),
             'courrierModelesApplicables' => $this->courrierModelesApplicables($d),
             // Inventaire de clôture : toutes les pièces produites par le workflow,
-            // rangées par rubrique. Alimente l'onglet Clôture — et sert de source unique
+            // rangées par rubrique. Alimente l'onglet Archivage — et sert de source unique
             // avec la GED pour que les deux rangements ne divergent pas.
             'inventaireCloture' => $this->inventaire->pour($d),
             'clotureProgression' => $this->inventaire->progression($d),

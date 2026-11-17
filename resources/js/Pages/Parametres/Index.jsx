@@ -1114,7 +1114,7 @@ export default function ParametresIndex({
                         </button>
                         {/* L'onglet « Clôture » a été retiré le 2026-08-04 : l'inventaire de
                             clôture est dérivé du workflow, il n'y a plus rien à configurer
-                            par type d'acte. Le contrôle se fait dans l'onglet Clôture du
+                            par type d'acte. Le contrôle se fait dans l'onglet Archivage du
                             dossier lui-même. */}
                     </div>
 

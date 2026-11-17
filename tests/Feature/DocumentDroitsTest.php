@@ -158,7 +158,6 @@ class DocumentDroitsTest extends TestCase
         $acte->update(['est_signe_cachete' => true]);
 
         $this->assertFalse($this->redacteur->can('supprimer', $acte));
-        $this->assertFalse($this->redacteur->can('restaurer', $acte));
         $this->assertFalse($this->redacteur->can('corriger', $acte));
     }
 
@@ -171,7 +170,6 @@ class DocumentDroitsTest extends TestCase
             ->get("/dossiers/{$dossier->reference}")
             ->assertInertia(fn ($page) => $page
                 ->where('dossier.documents.0.peut_supprimer', false)
-                ->where('dossier.documents.0.peut_restaurer', false)
                 ->where('dossier.documents.0.peut_corriger', false));
 
         $this->actingAs($this->redacteur)
@@ -179,6 +177,24 @@ class DocumentDroitsTest extends TestCase
             ->assertInertia(fn ($page) => $page
                 ->where('dossier.documents.0.peut_supprimer', true)
                 ->where('dossier.documents.0.peut_corriger', true));
+    }
+
+    public function test_lhistorique_des_versions_nest_plus_expose(): void
+    {
+        // Retiré le 2026-11-17 à la demande de l'étude : restaurer une version antérieure
+        // contredisait le retrait de la régénération (R10). Les versions restent en base.
+        foreach (['documents.versions', 'documents.versions.telecharger', 'documents.versions.restaurer'] as $route) {
+            $this->assertFalse(Route::has($route), "Route {$route} réapparue.");
+        }
+
+        $dossier = $this->dossier(EtapeDossier::Edition);
+        $this->acte($dossier);
+
+        $this->actingAs($this->redacteur)
+            ->get("/dossiers/{$dossier->reference}")
+            ->assertInertia(fn ($page) => $page
+                ->missing('dossier.documents.0.url_versions')
+                ->missing('dossier.documents.0.peut_restaurer'));
     }
 
     // ── R19 : corriger — rédacteur (créateur) et certificateur ────────────────

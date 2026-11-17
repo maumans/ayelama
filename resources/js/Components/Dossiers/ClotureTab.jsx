@@ -12,8 +12,8 @@ import { cn } from '@/lib/utils';
 import { notifyValidationError } from '@/lib/toast';
 
 /**
- * Onglet Clôture : l'inventaire complet des pièces du dossier, rangé par rubrique,
- * que le notaire ou le formaliste vérifie pièce par pièce avant de clôturer.
+ * Onglet Archivage (ex-« Clôture », renommé le 2026-11-17 pour suivre l'étape « Archivé ») : l'inventaire complet des pièces du dossier, rangé par rubrique,
+ * que le notaire ou le formaliste vérifie pièce par pièce avant d'archiver.
  *
  * Remplace l'écran « documents obligatoires configurés par type d'acte » : il n'y a
  * plus rien à déclarer à l'avance, l'inventaire est dérivé de ce que le workflow a
@@ -173,7 +173,7 @@ export function ClotureTab({ dossier, can }) {
                                 ? 'Aucune facture associée à ce dossier.' 
                                 : toutesFacturesSoldees 
                                     ? 'Toutes les factures sont soldées.' 
-                                    : `${fmtGNF(resteAPayer)} GNF restent à payer avant de clôturer.`}
+                                    : `${fmtGNF(resteAPayer)} GNF restent à payer avant d'archiver le dossier.`}
                         </span>
                     </div>
                 </div>
@@ -186,7 +186,7 @@ export function ClotureTab({ dossier, can }) {
                 <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                     <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                     <span>
-                        Dossier clôturé — l'inventaire est figé. Les pièces restent consultables
+                        Dossier archivé — l'inventaire est figé. Les pièces restent consultables
                         et téléchargeables, mais ne peuvent plus être modifiées.
                     </span>
                 </div>

@@ -170,6 +170,109 @@ class ActesModificationTest extends TestCase
         $this->assertStringContainsString($constitution->reference, $entree->action);
     }
 
+    // ── Une génération brute n'est pas un texte (2026-11-17) ─────────────────
+    //
+    // Les statuts mis à jour de SOC-2026-0027 recopiaient « 1970-02-05T00:00:00.000000Z » et
+    // « (15000000) » depuis des statuts de constitution générés en août, avant la correction des
+    // dates et le séparateur de milliers — alors que le générateur du jour écrivait juste.
+
+    /** Constitution dont l'acte a été produit par un générateur d'avant les correctifs. */
+    private function constitutionGenereeAvantCorrectifs(string $sourceVersion = 'genere'): array
+    {
+        Storage::fake('local');
+
+        $phpWord = new \PhpOffice\PhpWord\PhpWord();
+        $phpWord->addSection()->addText('Né le ${pp.date_naissance}, capital de ${soc.capital_chiffres} francs.');
+        $gabarit = tempnam(sys_get_temp_dir(), 'mod') . '.docx';
+        \PhpOffice\PhpWord\IOFactory::createWriter($phpWord, 'Word2007')->save($gabarit);
+        Storage::disk('local')->put('modeles/test/statuts-sarlu.docx', file_get_contents($gabarit));
+        @unlink($gabarit);
+
+        $modele = ModeleActe::create([
+            'nom' => 'Statuts SARLU', 'type_document' => 'acte_principal',
+            'chemin_fichier' => 'modeles/test/statuts-sarlu.docx', 'version' => '1.0', 'est_actif' => true,
+        ]);
+        $modele->typesActes()->sync([$this->typeActe('SOC-SARLU')->id]);
+
+        $constitution = $this->dossier('SOC-SARLU', [
+            'pp.date_naissance'   => '05/02/1970',
+            'soc.capital_chiffres' => '15000000',
+        ]);
+        $societe = Societe::create(['denomination' => 'SOC TEST', 'dossier_id' => $constitution->id]);
+
+        $acte = $constitution->documents()->create([
+            'nom' => 'Statuts SARLU', 'categorie' => 'acte_principal', 'statut' => 'a_editer',
+        ]);
+        $ancien = $this->docx('Né le 1970-02-05T00:00:00.000000Z, capital de 15000000 francs.');
+
+        if ($sourceVersion === 'genere') {
+            // Un chemin déjà stocké : c'est ainsi que le générateur enregistre ses actes.
+            Storage::disk('public')->put('documents/' . $constitution->reference . '/statuts.docx', file_get_contents($ancien->getPathname()));
+            $acte->nouvelleVersion('documents/' . $constitution->reference . '/statuts.docx', 'documents/' . $constitution->reference);
+        } else {
+            $acte->nouvelleVersion($ancien, 'documents/' . $constitution->reference);
+        }
+
+        return [$constitution, $societe];
+    }
+
+    private function statutsMisAJourDe(Dossier $modif): string
+    {
+        $doc = $modif->documents()->where('categorie', 'statuts_maj')->with('versionActuelle')->firstOrFail();
+
+        // Le générateur écrit sous `storage_path()`, non sur le disque simulé : lu là, puis effacé.
+        $absolu = storage_path('app/public/' . $doc->versionActuelle->chemin_fichier);
+        $zip = new \ZipArchive();
+        $this->assertTrue($zip->open($absolu) === true, "Statuts mis à jour illisibles : {$absolu}");
+        $texte = strip_tags($zip->getFromName('word/document.xml'));
+        $zip->close();
+        @unlink($absolu);
+        @rmdir(dirname($absolu));
+
+        return $texte;
+    }
+
+    public function test_des_statuts_de_constitution_bruts_sont_reproduits_et_non_recopies(): void
+    {
+        [, $societe] = $this->constitutionGenereeAvantCorrectifs('genere');
+
+        $modif = $this->dossier('SOC-MOD', $this->donneesModification(), $societe);
+        app(ActesGeneratorService::class)->genererActesDepuisModeles($modif);
+
+        $texte = $this->statutsMisAJourDe($modif);
+
+        $this->assertStringContainsString('Né le 05/02/1970', $texte);
+        $this->assertStringContainsString('15.000.000', $texte);
+        $this->assertStringNotContainsString('T00:00:00', $texte);
+    }
+
+    public function test_des_statuts_retouches_par_le_clerc_sont_recopies_tels_quels(): void
+    {
+        // Un fichier déposé est le texte du clerc : on ne le refait pas depuis le questionnaire.
+        [, $societe] = $this->constitutionGenereeAvantCorrectifs('upload');
+
+        $modif = $this->dossier('SOC-MOD', $this->donneesModification(), $societe);
+        app(ActesGeneratorService::class)->genererActesDepuisModeles($modif);
+
+        $this->assertStringContainsString('1970-02-05T00:00:00', $this->statutsMisAJourDe($modif));
+    }
+
+    public function test_des_statuts_maj_jamais_retouches_sont_sautes(): void
+    {
+        // Copie brute de sa propre source : on remonte à celle-ci, reproduite au besoin.
+        [$constitution, $societe] = $this->constitutionGenereeAvantCorrectifs('genere');
+
+        $effective = $this->dossier('SOC-MOD', $this->donneesModification(), $societe, EtapeDossier::Expedition);
+        $doc = $effective->documents()->create(['nom' => 'Statuts mis à jour', 'categorie' => 'statuts_maj', 'statut' => 'edite']);
+        Storage::disk('public')->put('documents/' . $effective->reference . '/maj.docx', file_get_contents($this->docx('Copie brute')->getPathname()));
+        $doc->nouvelleVersion('documents/' . $effective->reference . '/maj.docx', 'documents/' . $effective->reference);
+
+        $gabarit = $societe->fresh()->gabaritStatutsEnVigueur();
+
+        $this->assertStringContainsString($constitution->reference, $gabarit['origine']);
+        $this->assertArrayHasKey('reproduire', $gabarit);
+    }
+
     // ── Un modèle pour plusieurs types d'actes ───────────────────────────────
 
     private function modele(string $code, string $typeDocument, array $autresTypes = []): ModeleActe

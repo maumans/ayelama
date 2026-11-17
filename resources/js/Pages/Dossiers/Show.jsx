@@ -8,7 +8,6 @@ import {
     FileText,
     FilePen,
     FilePlus,
-    FileClock,
     Download,
     Eye,
     Building,
@@ -78,6 +77,7 @@ import {
 } from "@/lib/blocantsEtape";
 import { RepeatableGroup } from "@/Components/ui/RepeatableGroup";
 import { DateField } from "@/components/ui/date-field";
+import { ModalEnvoiCourrier } from "@/Components/Courriers/ModalEnvoiCourrier";
 import { NumberField } from "@/components/ui/number-field";
 import { ClientPicker } from "@/Components/ui/client-picker";
 import { ModalNouveauClient } from "@/Components/ModalNouveauClient";
@@ -2525,107 +2525,6 @@ function ModalSaisieDateSignature({ open, onClose, type, dossier }) {
     );
 }
 
-function DocumentHistoryDialog({ doc, onClose }) {
-    const [versions, setVersions] = useState(null);
-
-    useEffect(() => {
-        if (!doc) return;
-        setVersions(null);
-        fetch(doc.url_versions, { headers: { Accept: "application/json" } })
-            .then((r) => r.json())
-            .then((data) => setVersions(data.versions ?? []))
-            .catch(() => setVersions([]));
-    }, [doc?.id]);
-
-    const restaurer = (v) => {
-        router.post(
-            `/documents/versions/${v.id}/restaurer`,
-            {},
-            { preserveScroll: true, onSuccess: onClose },
-        );
-    };
-
-    return (
-        <Dialog open={!!doc} onOpenChange={(o) => !o && onClose()}>
-            <DialogContent className="max-w-lg">
-                <DialogHeader>
-                    <DialogTitle>Historique — {doc?.nom}</DialogTitle>
-                </DialogHeader>
-                {versions === null ? (
-                    <p className="text-sm text-slate-400 py-4">Chargement…</p>
-                ) : versions.length === 0 ? (
-                    <p className="text-sm text-slate-400 py-4">
-                        Aucune version enregistrée.
-                    </p>
-                ) : (
-                    <div className="space-y-1 max-h-80 overflow-y-auto">
-                        {versions.map((v) => (
-                            <div
-                                key={v.id}
-                                className={cn(
-                                    "flex items-center justify-between gap-2 px-3 py-2 rounded-md border",
-                                    v.est_actuelle
-                                        ? "border-seal/40 bg-seal-light/40"
-                                        : "border-slate-100",
-                                )}
-                            >
-                                <div className="min-w-0">
-                                    <div className="text-sm text-slate-800 flex items-center gap-1.5">
-                                        v{v.numero}
-                                        {v.est_actuelle && (
-                                            <Badge
-                                                variant="outline"
-                                                className="text-[10px]"
-                                            >
-                                                Actuelle
-                                            </Badge>
-                                        )}
-                                    </div>
-                                    <div className="text-xs text-slate-400 truncate">
-                                        {v.cree_par ?? "Système"} ·{" "}
-                                        {v.created_at}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Télécharger cette version"
-                                        onClick={() =>
-                                            telechargerFichier(v.url_download)
-                                        }
-                                    >
-                                        <Download className="h-3.5 w-3.5" />
-                                    </Button>
-                                    {/* Aucun contrôle côté écran jusqu'au 2026-11-16 (retour R07) :
-                                        le bouton s'affichait à tous, et le serveur refusait. */}
-                                    {!v.est_actuelle && doc?.peut_restaurer && (
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            title="Restaurer cette version"
-                                            onClick={() => restaurer(v)}
-                                        >
-                                            <RefreshCw className="h-3.5 w-3.5" />
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-/**
- * Dépôt d'une version corrigée d'un acte (retour R19, 2026-11-16) — rédacteur, certificateur ou
- * administrateur, aux étapes Édition et Certification (`DocumentFichierPolicy::corriger`).
- *
- * L'ancienne version reste dans l'historique ; le point de certification du document est périmé
- * côté serveur, le certificateur se prononce donc de nouveau.
- */
 function BoutonVersionCorrigee({ doc }) {
     const inputRef = useRef(null);
     const [envoi, setEnvoi] = useState(false);
@@ -2753,7 +2652,9 @@ function DocumentsTab({
     const [confirmState, setConfirmState] = useState(null);
     const [generating, setGenerating] = useState(false);
     const [depotActe, setDepotActe] = useState(false);
-    const [historyDoc, setHistoryDoc] = useState(null);
+    // Historique des versions retiré le 2026-11-17, à la demande de l'étude : sa restauration
+    // d'une version antérieure contredisait le retrait de la régénération (R10). Les versions
+    // restent en base — chaque correction en crée une —, elles ne se consultent plus ici.
 
     // Verdicts de certification par document — sert à signaler directement dans cette
     // liste quels actes ont été renvoyés en correction, sans devoir aller consulter
@@ -3062,7 +2963,7 @@ function DocumentsTab({
                                                                 </Badge>
                                                             )}
                                                             {doc.est_signe_cachete && (
-                                                                <span title="Verrouillé (signé/cacheté) — voir l'onglet Clôture">
+                                                                <span title="Verrouillé (signé/cacheté) — voir l'onglet Archivage">
                                                                     <Lock className="h-3 w-3 text-success" />
                                                                 </span>
                                                             )}
@@ -3102,25 +3003,6 @@ function DocumentsTab({
                                                             >
                                                                 <Download className="h-3.5 w-3.5" />
                                                             </Button>
-                                                            {/* Historique : seulement s'il y en a un — au
-                                                                moins deux versions (les numéros ne font que
-                                                                croître). Icône « document + horloge » et non
-                                                                plus la flèche circulaire, qu'on prenait pour
-                                                                la régénération retirée au lot 2 (2026-11-17). */}
-                                                            {doc.version > 1 && (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon-sm"
-                                                                    title={`Historique des versions (${doc.version})`}
-                                                                    onClick={() =>
-                                                                        setHistoryDoc(
-                                                                            doc,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <FileClock className="h-3.5 w-3.5" />
-                                                                </Button>
-                                                            )}
                                                         </>
                                                     )}
                                                     {/* « Régénérer » retiré (retour R10, 2026-11-16) : il
@@ -3203,10 +3085,6 @@ function DocumentsTab({
                 confirmLabel={confirmState?.confirmLabel}
                 variant={confirmState?.variant}
                 onConfirm={confirmState?.onConfirm ?? (() => {})}
-            />
-            <DocumentHistoryDialog
-                doc={historyDoc}
-                onClose={() => setHistoryDoc(null)}
             />
             <ModalDeposerActe
                 dossier={dossier}
@@ -3715,17 +3593,10 @@ function ExpeditionTab({ dossier, reference, can }) {
         );
     };
 
-    const marquerEnvoye = (courrier) => {
-        router.patch(
-            `/courriers/${courrier.id}`,
-            { statut: "envoye" },
-            {
-                preserveScroll: true,
-                preserveState: true,
-                onError: notifyValidationError,
-            },
-        );
-    };
+    // Plus d'envoi en un clic (2026-11-17) : la date de transmission et la personne qui
+    // transmet sont exigées — voir ModalEnvoiCourrier.
+    const [aEnvoyer, setAEnvoyer] = useState(null);
+    const marquerEnvoye = (courrier) => setAEnvoyer(courrier);
 
     // Rattache à chaque modèle applicable le dernier courrier déjà généré à
     // partir de lui (le cas échéant), pour proposer aperçu/téléchargement/envoi
@@ -3744,6 +3615,10 @@ function ExpeditionTab({ dossier, reference, can }) {
 
     return (
         <div className="space-y-4">
+            <ModalEnvoiCourrier
+                courrier={aEnvoyer}
+                onClose={() => setAEnvoyer(null)}
+            />
             {modeles.length > 0 && (
                 <Card>
                     <CardHeader className="pb-3">
@@ -3787,6 +3662,8 @@ function ExpeditionTab({ dossier, reference, can }) {
                                             {genere?.envoye_at && (
                                                 <p className="text-xs text-slate-400 mt-0.5">
                                                     envoyé le {genere.envoye_at}
+                                                    {genere.transmis_par &&
+                                                        ` par ${genere.transmis_par}`}
                                                 </p>
                                             )}
                                         </div>
@@ -3947,6 +3824,8 @@ function ExpeditionTab({ dossier, reference, can }) {
                                             "Destinataire non renseigné"}
                                         {c.envoye_at &&
                                             ` · envoyé le ${c.envoye_at}`}
+                                        {c.transmis_par &&
+                                            ` par ${c.transmis_par}`}
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-1 shrink-0">
@@ -5275,7 +5154,7 @@ export default function DossierShow() {
     // L'onglet actif est reporté dans l'URL (?tab=…), lue par l'initialiseur ci-dessus.
     // Deux bénéfices : un remontage du composant — quelle qu'en soit la cause — retrouve
     // l'onglet consulté au lieu de sauter sur celui de l'étape courante (c'est ce qui se
-    // produisait après « Tout vérifier » dans l'onglet Clôture), et un lien vers un
+    // produisait après « Tout vérifier » dans l'onglet Archivage), et un lien vers un
     // onglet précis devient partageable.
     // replaceState et non pushState : chaque changement d'onglet n'a pas à créer une
     // entrée d'historique que le bouton Retour devrait défaire une par une.
@@ -6141,7 +6020,7 @@ export default function DossierShow() {
                                     >
                                         <span className="flex items-center gap-1.5">
                                             <Lock className="h-3.5 w-3.5" />
-                                            Clôture
+                                            Archivage
                                             {(() => {
                                                 // Pièces restant à vérifier dans l'inventaire. Le compteur
                                                 // lisait `est_requis`, colonne vidée lors du passage à
@@ -6845,9 +6724,9 @@ export default function DossierShow() {
                                     />
                                 </TabsContent>
 
-                                {/* Onglet Clôture */}
+                                {/* Onglet Archivage (valeur technique `cloture`, conservée pour les liens ?tab=cloture) */}
                                 <TabsContent value="cloture">
-                                    {/* Pas de onPreview : l'onglet Clôture déplie l'aperçu
+                                    {/* Pas de onPreview : l'onglet Archivage déplie l'aperçu
                                         sous la pièce concernée plutôt que dans le panneau
                                         de pied de page, qui faisait perdre de vue quelle
                                         pièce on regardait sur un long inventaire. */}

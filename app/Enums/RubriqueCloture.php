@@ -17,7 +17,7 @@ use App\Models\Societe;
  * DÉDUIT de son origine dans le workflow, elle ne se déclare pas. Chaque étape produit
  * ses pièces, et chaque pièce sait donc où elle se range.
  *
- * Sert à deux endroits qui doivent rester identiques : l'onglet Clôture d'un dossier et
+ * Sert à deux endroits qui doivent rester identiques : l'onglet Archivage d'un dossier et
  * la GED transversale — tous deux alimentés par InventaireClotureService.
  */
 enum RubriqueCloture: string

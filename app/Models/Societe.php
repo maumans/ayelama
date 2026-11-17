@@ -560,7 +560,23 @@ class Societe extends Model
      * `origine` accompagne le chemin : le rédacteur doit savoir de quel texte il part (voir la
      * journalisation dans ActesGeneratorService).
      *
-     * @return array{absolu: string, origine: string}|null
+     * **Une génération brute n'est pas un texte** (2026-11-17). Copier le fichier produit par
+     * l'application, c'est recopier les défauts du générateur *du jour où il a tourné* : les statuts
+     * mis à jour de SOC-2026-0027, produits le 17 novembre, portaient « Né le
+     * 1970-02-05T00:00:00.000000Z » et « (15000000) », hérités des statuts de constitution générés
+     * le 6 août — avant la correction des dates et le séparateur de milliers (R13). Le générateur
+     * du 17 novembre, lui, écrivait correctement. D'où :
+     *
+     *   - au point 2, un `statuts_maj` jamais retouché est **sauté** : c'est la copie de sa propre
+     *     source, il n'apporte rien qu'on ne retrouve en remontant ;
+     *   - au point 3, un acte de constitution jamais retouché est signalé par `reproduire` :
+     *     l'appelant le **reproduit** depuis le modèle et le questionnaire de la constitution
+     *     (ActesGeneratorService::gabaritPour()). `absolu` reste fourni, en repli.
+     *
+     * Un fichier retouché (`upload`, `signe_cachete`…) est en revanche copié tel quel : c'est le
+     * texte du clerc, et lui seul.
+     *
+     * @return array{absolu: string, origine: string, reproduire?: DocumentFichier}|null
      */
     public function gabaritStatutsEnVigueur(): ?array
     {
@@ -582,7 +598,8 @@ class Societe extends Model
             ->with(['versionActuelle', 'documentable'])
             ->latest('id')
             ->get()
-            ->first(fn (DocumentFichier $d) => $this->estDocx($d) && $this->cheminExploitable($d));
+            ->first(fn (DocumentFichier $d) => $this->estDocx($d) && $this->cheminExploitable($d)
+                && ! self::estGenerationBrute($d));
 
         if ($modification) {
             return [
@@ -605,11 +622,18 @@ class Societe extends Model
                 return [
                     'absolu'  => $this->cheminExploitable($constitution),
                     'origine' => 'les statuts du dossier de constitution ' . $this->dossier?->reference,
+                    ...(self::estGenerationBrute($constitution) ? ['reproduire' => $constitution] : []),
                 ];
             }
         }
 
         return null;
+    }
+
+    /** Version courante produite par l'application et jamais remplacée par un fichier du clerc. */
+    private static function estGenerationBrute(DocumentFichier $piece): bool
+    {
+        return $piece->versionActuelle?->source === 'genere';
     }
 
     /** Chemin absolu de la version courante, si le fichier est bien présent sur le disque. */

@@ -26,7 +26,7 @@ class ExpeditionAFaireNotification extends Notification
             ->greeting("Bonjour {$notifiable->name},")
             ->line("Les formalités du dossier « {$this->dossier->objet} » ({$this->dossier->reference}) sont revenues : il passe à l'expédition.")
             ->action("Ouvrir l'expédition", url("/dossiers/{$this->dossier->reference}?tab=expedition"))
-            ->line("Merci d'envoyer les lettres de transmission et de vérifier l'inventaire de clôture.");
+            ->line("Merci d'envoyer les lettres de transmission et de vérifier l'inventaire des pièces (onglet Archivage).");
     }
 
     public function toArray(object $notifiable): array

@@ -335,6 +335,19 @@ class ActesGeneratorService
             // numérotation ne correspondraient à cette société.
             $enVigueur = $dossier->societe?->gabaritStatutsEnVigueur();
 
+            // Statuts de constitution jamais retouchés : on les reproduit plutôt que de recopier
+            // les défauts du générateur du jour où ils ont été produits (voir
+            // Societe::gabaritStatutsEnVigueur()). Le fichier est temporaire, supprimé par
+            // genererDepuisGabarit() une fois les statuts mis à jour écrits.
+            if (isset($enVigueur['reproduire']) && ($reproduit = $this->reproduireActe($enVigueur['reproduire'])) !== null) {
+                return [
+                    'absolu'     => $reproduit,
+                    'herite'     => true,
+                    'origine'    => $enVigueur['origine'] . ', reproduits depuis son questionnaire',
+                    'temporaire' => true,
+                ];
+            }
+
             if ($enVigueur) {
                 return [
                     'absolu'  => $enVigueur['absolu'],
@@ -855,6 +868,9 @@ class ActesGeneratorService
         try {
             $nbBalises = $this->genererDepuisModele($dossier, $templateAbsPath, $outputAbsolutePath, $outputName, $referenceActe);
         } catch (\Throwable $e) {
+            if (! empty($gabarit['temporaire'])) {
+                @unlink($templateAbsPath);
+            }
             // Un gabarit hérité vient de l'extérieur : fichier corrompu, .docx protégé, structure
             // OOXML inattendue. Il ne doit jamais interrompre l'entrée en Édition, qui produit
             // aussi tous les autres actes du dossier.
@@ -868,6 +884,10 @@ class ActesGeneratorService
             $this->creerDocumentPlaceholder($dossier, $outputAbsolutePath, $outputName);
 
             return $outputPath;
+        }
+
+        if (! empty($gabarit['temporaire'])) {
+            @unlink($templateAbsPath);
         }
 
         if ($gabarit['herite']) {
@@ -919,6 +939,21 @@ class ActesGeneratorService
 
     private function genererDepuisModele(Dossier $dossier, string $templateAbsPath, string $outputAbsPath, string $outputName, ?string $referenceActe = null): int
     {
+        $tp = $this->remplirGabarit($dossier, $templateAbsPath, $referenceActe);
+        $nbBalises = $this->consignerChampsManquants($tp, $dossier, $outputName);
+        $this->effacerMacrosResiduelles($tp);
+
+        $tp->saveAs($outputAbsPath);
+
+        return $nbBalises;
+    }
+
+    /**
+     * Le remplissage d'un modèle, sans écriture ni journal — partagé par la génération et par
+     * `reproduireActe()`, pour qu'un acte reproduit le soit exactement comme un acte produit.
+     */
+    private function remplirGabarit(Dossier $dossier, string $templateAbsPath, ?string $referenceActe, ?\Illuminate\Support\Carbon $dateActe = null): \App\Support\GabaritWord
+    {
         $tp = new \App\Support\GabaritWord($templateAbsPath);
 
         // Retour R15 (2026-11-16) : dans un acte de **constitution**, la dénomination, le sigle et
@@ -929,14 +964,62 @@ class ActesGeneratorService
         }
 
         $this->remplirConstantesOffice($tp);
-        $this->remplirInfosDossier($tp, $dossier, $referenceActe);
+        $this->remplirInfosDossier($tp, $dossier, $referenceActe, $dateActe);
         $this->remplirQuestionnaire($tp, $dossier);
-        $nbBalises = $this->consignerChampsManquants($tp, $dossier, $outputName);
-        $this->effacerMacrosResiduelles($tp);
 
-        $tp->saveAs($outputAbsPath);
+        return $tp;
+    }
 
-        return $nbBalises;
+    /**
+     * Reproduit un acte **généré et jamais retouché** avec le générateur d'aujourd'hui, dans un
+     * fichier temporaire — `null` si son modèle a disparu ou ne s'ouvre plus, l'appelant
+     * retombant alors sur la copie du fichier.
+     *
+     * Même modèle que l'original (correspondance par `nom`, convention de `regenererDocument()`),
+     * même questionnaire, même référence d'acte, et **même date d'acte** : celle de la version
+     * reproduite, non celle du jour — des statuts datés du jour de la modification seraient faux.
+     * Aucune trace n'est écrite dans le journal du dossier d'origine : il n'est pas modifié.
+     */
+    private function reproduireActe(DocumentFichier $acte): ?string
+    {
+        $dossier = $acte->documentable;
+
+        if (! $dossier instanceof Dossier) {
+            return null;
+        }
+
+        $modele = ModeleActe::pourTypeActe($dossier->type_acte_id)
+            ->where('nom', $acte->nom)
+            ->where('est_actif', true)
+            ->first();
+
+        if (! $modele) {
+            return null;
+        }
+
+        $relatif = str_starts_with($modele->chemin_fichier, 'modeles/') ? $modele->chemin_fichier : 'modeles/' . $modele->chemin_fichier;
+        $source  = Storage::disk('local')->path($relatif);
+
+        if (! file_exists($source)) {
+            return null;
+        }
+
+        // `tempnam()` crée le fichier sans extension ; PhpWord écrit à côté, avec la sienne.
+        $base   = tempnam(sys_get_temp_dir(), 'acte');
+        $sortie = $base . '.docx';
+        @unlink($base);
+
+        try {
+            $tp = $this->remplirGabarit($dossier, $source, $acte->reference_acte, $acte->versionActuelle?->created_at);
+            $this->effacerMacrosResiduelles($tp);
+            $tp->saveAs($sortie);
+        } catch (\Throwable) {
+            @unlink($sortie);
+
+            return null;
+        }
+
+        return $sortie;
     }
 
     /**
@@ -984,9 +1067,9 @@ class ActesGeneratorService
         $tp->setValue('office.email',      'ayelama.bah@notaire-guinee.com');
     }
 
-    private function remplirInfosDossier(TemplateProcessor $tp, Dossier $dossier, ?string $referenceActe = null): void
+    private function remplirInfosDossier(TemplateProcessor $tp, Dossier $dossier, ?string $referenceActe = null, ?\Illuminate\Support\Carbon $dateActe = null): void
     {
-        $now = now();
+        $now = $dateActe ?? now();
 
         $tp->setValue('dossier.reference',     $dossier->reference);
         $tp->setValue('acte.numero',           $referenceActe ?? '');

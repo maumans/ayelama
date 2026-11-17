@@ -579,7 +579,7 @@ class DossierStepService
                 ->where('total_chiffres', '>', 0)->exists();
 
             $erreurs['facturation'] = [sprintf(
-                'Facture non soldée : %s GNF restent à encaisser. Un dossier ne peut pas être clôturé avec un solde impayé.%s',
+                'Facture non soldée : %s GNF restent à encaisser. Un dossier ne peut pas être archivé avec un solde impayé.%s',
                 number_format($dossier->soldeRestant(), 0, ',', ' '),
                 $proforma ? ' La facture est encore une proforma : émettez-la pour pouvoir l\'encaisser.' : '',
             )];

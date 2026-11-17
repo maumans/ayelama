@@ -68,6 +68,8 @@ class CourrierController extends Controller
             'statut'       => $c->statut,
             'contenu'      => $c->contenu,
             'envoye_at'    => $c->envoye_at?->format('d/m/Y'),
+            'transmis_par' => $c->transmis_par,
+            'bornes_envoi' => $c->bornesDateEnvoi(),
             'redacteur'    => $c->redacteur?->name,
             'initiales'    => $c->redacteur?->initiales,
             'dossier_id'   => $c->dossier_id,
@@ -140,20 +142,64 @@ class CourrierController extends Controller
             'objet'        => ['sometimes', 'string', 'max:500'],
             'type'         => ['sometimes', 'in:transmission,convocation,relance,divers'],
             'contenu'      => ['sometimes', 'nullable', 'string'],
-            'statut'       => ['sometimes', 'in:brouillon,envoye'],
+            // `envoye` n'est plus accepté ici (2026-11-17) : un clic suffisait à marquer un courrier
+            // envoyé, daté du clic et sans personne nommée. L'envoi passe par `envoyer()`, qui exige
+            // la date de transmission et le transmetteur. Seul le retour en brouillon reste ici.
+            'statut'       => ['sometimes', 'in:brouillon'],
         ]);
 
-        if (isset($data['statut'])) {
-            if ($data['statut'] === 'envoye' && $courrier->statut !== 'envoye') {
-                $data['envoye_at'] = now();
-            } elseif ($data['statut'] === 'brouillon') {
-                $data['envoye_at'] = null;
-            }
+        if (($data['statut'] ?? null) === 'brouillon') {
+            $data['envoye_at']    = null;
+            $data['transmis_par'] = null;
         }
 
         $courrier->update($data);
 
         return back()->with('success', 'Courrier mis à jour.');
+    }
+
+    /**
+     * Enregistre la transmission d'un courrier : **date** et **personne qui transmet**, toutes deux
+     * exigées (demande de l'étude, 2026-11-17).
+     *
+     * La date est bornée par Courrier::bornesDateEnvoi(), les mêmes bornes que l'écran. Un courrier
+     * signé/cacheté peut être transmis : l'envoyer ne modifie pas son contenu — c'est même l'ordre
+     * normal, la lettre est signée avant de partir.
+     */
+    public function envoyer(Request $request, Courrier $courrier)
+    {
+        $this->authorize('update', $courrier);
+        abort_if($courrier->estEnvoye(), 422, 'Ce courrier est déjà marqué envoyé.');
+
+        $bornes = $courrier->bornesDateEnvoi();
+
+        $data = $request->validate([
+            'envoye_le'    => ['required', 'date', 'after_or_equal:' . $bornes['min'], 'before_or_equal:' . $bornes['max']],
+            'transmis_par' => ['required', 'string', 'max:150'],
+        ], [
+            'envoye_le.required'        => 'La date de transmission est obligatoire.',
+            'envoye_le.after_or_equal'  => 'Un courrier ne peut pas être transmis avant sa création ('
+                . \Carbon\Carbon::parse($bornes['min'])->format('d/m/Y') . ').',
+            'envoye_le.before_or_equal' => 'La date de transmission ne peut pas être dans le futur.',
+            'transmis_par.required'     => 'Indiquez la personne qui transmet le courrier.',
+        ]);
+
+        $courrier->update([
+            'statut'       => 'envoye',
+            'envoye_at'    => \Carbon\Carbon::parse($data['envoye_le'])->startOfDay(),
+            'transmis_par' => trim($data['transmis_par']),
+        ]);
+
+        if ($courrier->dossier) {
+            JournalActivite::enregistrer(
+                $courrier->dossier,
+                "Courrier « {$courrier->objet} » transmis le {$courrier->envoye_at->format('d/m/Y')} par {$courrier->transmis_par}",
+                'expedition',
+                ['courrier_id' => $courrier->id],
+            );
+        }
+
+        return back()->with('success', "« {$courrier->objet} » marqué envoyé.");
     }
 
     public function destroy(Courrier $courrier)
@@ -251,9 +297,10 @@ class CourrierController extends Controller
         );
 
         $courrier->update([
+            // Le dépôt de la version signée ne vaut plus envoi (2026-11-17) : il marquait le courrier
+            // « envoyé » à la date du dépôt, sans transmetteur — exactement ce que l'étude refuse.
+            // La lettre est signée *avant* de partir ; sa transmission s'enregistre par `envoyer()`.
             'chemin_fichier'       => $chemin,
-            'statut'               => 'envoye',
-            'envoye_at'            => $courrier->envoye_at ?? now(),
             'est_signe_cachete'    => true,
             'signe_cachete_at'     => now(),
             'signe_cachete_par_id' => Auth::id(),

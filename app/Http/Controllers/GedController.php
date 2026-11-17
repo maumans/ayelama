@@ -18,7 +18,7 @@ use Inertia\Inertia;
  *
  * Depuis le 2026-08-04, chaque dossier est en outre **rangé par rubrique** (actes,
  * accord client, pièces des parties, pièces des formalités, courriers, facturation),
- * exactement comme l'onglet Clôture — les deux écrans partagent
+ * exactement comme l'onglet Archivage — les deux écrans partagent
  * InventaireClotureService pour ne pas pouvoir diverger sur le rangement. Effet de
  * bord bénéfique : les courriers et les reçus entrent enfin dans la GED, alors qu'ils
  * en étaient absents bien qu'étant des pièces du dossier (ils vivent dans leurs

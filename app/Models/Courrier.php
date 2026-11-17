@@ -9,7 +9,7 @@ class Courrier extends Model
     protected $fillable = [
         'reference', 'dossier_id', 'redacteur_id',
         'destinataire', 'adresse', 'objet',
-        'type', 'statut', 'contenu', 'chemin_fichier', 'envoye_at',
+        'type', 'statut', 'contenu', 'chemin_fichier', 'envoye_at', 'transmis_par',
         'est_requis', 'est_signe_cachete', 'signe_cachete_at', 'signe_cachete_par_id',
     ];
 
@@ -36,6 +36,21 @@ class Courrier extends Model
     public function signeCachetePar()
     {
         return $this->belongsTo(User::class, 'signe_cachete_par_id');
+    }
+
+    /**
+     * Bornes de la date de transmission, servies à l'écran **et** appliquées par la validation :
+     * ni future, ni antérieure à la création du courrier — une lettre ne part pas avant d'exister.
+     * Même parti que Dossier::bornesDateSignature() (retour R09).
+     *
+     * @return array{min: string, max: string}
+     */
+    public function bornesDateEnvoi(): array
+    {
+        return [
+            'min' => ($this->created_at ?? now())->toDateString(),
+            'max' => now()->toDateString(),
+        ];
     }
 
     public function estEnvoye(): bool

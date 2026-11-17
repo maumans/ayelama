@@ -177,42 +177,6 @@ class DocumentFichier extends Model
     }
 
     /**
-     * Restaure une ancienne version en la recopiant comme nouvelle version courante —
-     * jamais de rollback destructif : l'historique reste strictement croissant et
-     * compréhensible (voir plan GED, §3).
-     */
-    public function restaurerVersion(DocumentVersion $ancienne): DocumentVersion
-    {
-        $numero          = ($this->versions()->max('numero') ?? 0) + 1;
-        $ext             = pathinfo($ancienne->chemin_fichier, PATHINFO_EXTENSION);
-        $dossierStockage = pathinfo($ancienne->chemin_fichier, PATHINFO_DIRNAME);
-        $nomFichier      = Str::slug(pathinfo($this->nom, PATHINFO_FILENAME)) . '_v' . $numero . ($ext ? '.' . $ext : '');
-        $nouveauChemin   = $dossierStockage . '/' . $nomFichier;
-
-        Storage::disk('public')->copy($ancienne->chemin_fichier, $nouveauChemin);
-
-        $version = $this->versions()->create([
-            'numero'         => $numero,
-            'chemin_fichier' => $nouveauChemin,
-            'nom_original'   => $ancienne->nom_original,
-            'mime_type'      => $ancienne->mime_type,
-            'taille_octets'  => $ancienne->taille_octets,
-            'hash_sha256'    => self::hasherFichier($nouveauChemin),
-            'source'         => 'restauration',
-            'cree_par_id'    => auth()->id(),
-        ]);
-
-        $this->update([
-            'version_actuelle_id' => $version->id,
-            'est_fourni'          => true,
-            'edite_par_id'        => auth()->id(),
-            'edite_at'            => now(),
-        ]);
-
-        return $version;
-    }
-
-    /**
      * Empreinte SHA-256 du fichier stocké — permet de vérifier après coup qu'un
      * téléchargement correspond bien à ce qui a été enregistré (valeur probatoire,
      * utile en particulier pour les versions signées/cachetées).
