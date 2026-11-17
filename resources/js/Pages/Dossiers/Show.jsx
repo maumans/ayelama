@@ -8,6 +8,7 @@ import {
     FileText,
     FilePen,
     FilePlus,
+    FileClock,
     Download,
     Eye,
     Building,
@@ -3101,18 +3102,25 @@ function DocumentsTab({
                                                             >
                                                                 <Download className="h-3.5 w-3.5" />
                                                             </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon-sm"
-                                                                title="Historique des versions"
-                                                                onClick={() =>
-                                                                    setHistoryDoc(
-                                                                        doc,
-                                                                    )
-                                                                }
-                                                            >
-                                                                <History className="h-3.5 w-3.5" />
-                                                            </Button>
+                                                            {/* Historique : seulement s'il y en a un — au
+                                                                moins deux versions (les numéros ne font que
+                                                                croître). Icône « document + horloge » et non
+                                                                plus la flèche circulaire, qu'on prenait pour
+                                                                la régénération retirée au lot 2 (2026-11-17). */}
+                                                            {doc.version > 1 && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon-sm"
+                                                                    title={`Historique des versions (${doc.version})`}
+                                                                    onClick={() =>
+                                                                        setHistoryDoc(
+                                                                            doc,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <FileClock className="h-3.5 w-3.5" />
+                                                                </Button>
+                                                            )}
                                                         </>
                                                     )}
                                                     {/* « Régénérer » retiré (retour R10, 2026-11-16) : il
