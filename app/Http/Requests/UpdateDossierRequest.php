@@ -31,9 +31,14 @@ class UpdateDossierRequest extends FormRequest
      */
     public function rules(): array
     {
+        // Objet et valeur figés après l'Édition (voir DossierPolicy::modifierObjet) : refusés
+        // **bruyamment** plutôt qu'écartés en silence, pour qu'un formulaire qui les enverrait
+        // encore se voie.
+        $objetOuvert = $this->user()?->can('modifierObjet', $this->route('dossier')) ?? false;
+
         return [
-            'objet'           => ['sometimes', 'string', 'min:10', 'max:500'],
-            'valeur'          => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'objet'           => $objetOuvert ? ['sometimes', 'string', 'min:10', 'max:500'] : ['prohibited'],
+            'valeur'          => $objetOuvert ? ['sometimes', 'nullable', 'numeric', 'min:0'] : ['prohibited'],
             'echeance'        => ['sometimes', 'nullable', 'date'],
             'urgent'          => ['sometimes', 'boolean'],
             'notes'           => ['sometimes', 'nullable', 'string', 'max:2000'],

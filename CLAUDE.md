@@ -101,6 +101,10 @@ Toute décision structurelle rejoint le tableau des décisions de [devbook.md](d
 
 - **Windows** : pas de `pcntl` (donc pas de `php artisan pail`) ; `@rolldown/binding-win32-x64-msvc`
   installé à la main.
+- **Casse des chemins** : le dossier est `resources/js/Components`, mais 245 imports écrivent `@/components/ui/…`.
+  Windows les confond, Vite non : après une modification de `Components/ui/`, la page peut continuer à
+  recevoir l'**ancienne** version depuis le chemin en minuscules. Redémarrer le serveur de développement
+  avant de conclure qu'une correction de `ui/` ne marche pas (constaté le 2026-11-18 sur `dialog.jsx`).
 - **Ne jamais supprimer `node_modules/.vite` pendant que le serveur de développement tourne** — il ne
   recrée son cache qu'au démarrage, et tout casse en 504 jusqu'au redémarrage.
 - **MySQL en développement, SQLite en test** : une migration doit satisfaire les deux, dont l'ordre

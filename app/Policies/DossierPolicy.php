@@ -78,6 +78,27 @@ class DossierPolicy
         };
     }
 
+    /**
+     * L'**objet** et la **valeur** du dossier — Initialisation et Édition seules.
+     *
+     * Demande de l'étude (2026-11-18), sur un dossier en Expédition : « Modifier » laissait
+     * réécrire l'objet après la signature. L'objet est l'intitulé que reprennent le
+     * **répertoire** (`RepertoireController`), la note de frais et les courriers : le changer
+     * après la certification faisait dire au registre autre chose que l'acte signé. Mesuré le
+     * 2026-11-18 : aucun des 55 gabarits n'imprime `${dossier.objet}` — le générateur le
+     * propose, un gabarit futur pourrait s'en servir. La valeur suit la même borne : c'est
+     * l'assiette déclarée de l'acte.
+     *
+     * Le reste de `update` — échéance, urgence, notes, assignations — demeure ouvert
+     * jusqu'à l'archivage : réassigner un formaliste en Formalités est un geste légitime.
+     * Même borne que `modifierQuestionnaire()`, et pour la même raison.
+     */
+    public function modifierObjet(User $user, Dossier $dossier): bool
+    {
+        return in_array($dossier->etape, [EtapeDossier::Initialisation, EtapeDossier::Edition], true)
+            && $this->update($user, $dossier);
+    }
+
     public function reassigner(User $user, Dossier $dossier): bool
     {
         if (!$user->actif) return false;

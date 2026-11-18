@@ -883,7 +883,8 @@ class DossierController extends Controller
             ],
             'can'        => [
                 'update'          => auth()->user()->can('update', $dossier),
-                'avancer'         => auth()->user()->can('avancer', $dossier),
+                'modifierObjet'   => auth()->user()->can('modifierObjet', $dossier),
+                'avancer'       => auth()->user()->can('avancer', $dossier),
                 'reviser'         => auth()->user()->can('reviser', $dossier),
                 'gererFormalites' => auth()->user()->can('gererFormalites', $dossier),
                 'gererFacturation' => auth()->user()->can('gererFacturation', $dossier),
@@ -1400,8 +1401,12 @@ class DossierController extends Controller
                 ? ['value' => $d->etape->suivante()->value, 'label' => $d->etape->suivante()->label()]
                 : null,
             'typeActe'   => $d->typeActe ? ['label' => $d->typeActe->label, 'categorie' => $d->typeActe->categorie?->value, 'code' => $d->typeActe->code] : null,
-            'redacteur'  => $d->redacteur ? ['name' => $d->redacteur->name, 'initiales' => $d->redacteur->initiales] : null,
-            'notaire'    => $d->notaire   ? ['name' => $d->notaire->name,   'initiales' => $d->notaire->initiales]   : null,
+            // `id` indispensable : la modale « Modifier » s'initialise sur `notaire.id`. Sans lui
+            // (constaté le 2026-11-18), la liste « Notaire » partait de « Aucun » alors que
+            // l'en-tête nommait le notaire, et **Enregistrer le désassignait** — `notaire_id`
+            // envoyé à null. `reviseur` et `formaliste` (dossierDetailToArray) le portaient déjà.
+            'redacteur'  => $d->redacteur ? ['id' => $d->redacteur->id, 'name' => $d->redacteur->name, 'initiales' => $d->redacteur->initiales] : null,
+            'notaire'    => $d->notaire   ? ['id' => $d->notaire->id,   'name' => $d->notaire->name,   'initiales' => $d->notaire->initiales]   : null,
             'valeur'     => $d->valeur,
             'echeance'   => $d->echeance?->toDateString(),
             'urgent'     => $d->urgent,

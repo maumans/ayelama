@@ -41,8 +41,40 @@ const CALQUES_FLOTTANTS = [
     '[data-radix-menu-content]',
 ].join(',');
 
+/**
+ * Les `pointerdown` survenus **pendant qu'un calque flottant était ouvert**.
+ *
+ * ⚠️ Second cas, relevé le 2026-11-18 en production avec un enregistreur d'événements — la
+ * garde ci-dessus ne le voyait pas. Geste de l'utilisateur : ouvrir une liste, puis cliquer
+ * **dans la fenêtre, à côté**, pour la refermer. Tant que la liste est ouverte, Radix retire
+ * les clics à tout ce qui est sous elle (`disableOutsidePointerEvents`), le contenu du
+ * dialogue compris : le clic traverse et tombe sur le **voile**. La liste se ferme ; le
+ * dialogue, qui diffère ce clic jusqu'au `click` (`deferPointerDownOutside`), le reçoit
+ * ensuite pour un clic sur le voile — et se ferme. Trois fois de suite dans l'enregistrement,
+ * jamais reproduit à la souris rapide en développement.
+ *
+ * La règle reste celle d'une liste native : **le clic qui referme un menu ne fait que le
+ * refermer**. Un second clic sur le voile ferme le dialogue comme avant.
+ *
+ * L'écoute est en phase de capture, donc avant que Radix ne démonte le calque.
+ */
+const pointerDownsSousCalque = new WeakSet();
+
+if (typeof document !== 'undefined') {
+    document.addEventListener(
+        'pointerdown',
+        (event) => {
+            if (document.querySelector(CALQUES_FLOTTANTS)) pointerDownsSousCalque.add(event);
+        },
+        true,
+    );
+}
+
 function vientDunCalqueFlottant(event) {
-    const cible = event.detail?.originalEvent?.target ?? event.target;
+    const origine = event.detail?.originalEvent;
+    if (origine && pointerDownsSousCalque.has(origine)) return true;
+
+    const cible = origine?.target ?? event.target;
 
     return cible instanceof Element && cible.closest(CALQUES_FLOTTANTS) !== null;
 }

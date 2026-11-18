@@ -175,6 +175,21 @@ const docStatutConfig = {
 
 // ── Modal : modifier les infos générales du dossier ─────────────────────────
 
+/**
+ * Options d'une liste d'assignation, **personne actuellement assignée comprise**.
+ *
+ * Constaté le 2026-11-18 en production : l'en-tête nommait le notaire du dossier, la liste
+ * « Notaire » affichait « Aucun ». La liste ne sert que les comptes actifs portant le rôle ;
+ * quand l'assigné n'y figure pas, un `<select>` contrôlé dont la valeur n'a pas d'option
+ * affiche la première — « Aucun » — tout en gardant l'identifiant. L'écran mentait, et
+ * toucher la liste puis enregistrer désassignait réellement.
+ */
+function optionsAssignation(liste, actuel) {
+    const options = liste ?? [];
+    if (!actuel?.id || options.some((u) => String(u.id) === String(actuel.id))) return options;
+    return [...options, { id: actuel.id, name: `${actuel.name} (hors liste)` }];
+}
+
 function ModalEditDossier({
     open,
     onClose,
@@ -183,6 +198,7 @@ function ModalEditDossier({
     formalistes,
     notaires,
     canReassigner,
+    canModifierObjet,
 }) {
     const [form, setForm] = useState({
         objet: dossier.objet ?? "",
@@ -216,8 +232,11 @@ function ModalEditDossier({
         router.patch(
             `/dossiers/${dossier.reference}`,
             {
-                objet: form.objet,
-                valeur: form.valeur || null,
+                // Objet et valeur figés après l'Édition (DossierPolicy::modifierObjet) : le
+                // serveur les refuse, on ne les envoie donc pas.
+                ...(canModifierObjet
+                    ? { objet: form.objet, valeur: form.valeur || null }
+                    : {}),
                 echeance: form.echeance || null,
                 urgent: form.urgent,
                 notes: form.notes || null,
@@ -233,33 +252,51 @@ function ModalEditDossier({
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
-                    <DialogTitle>Modifier le dossier</DialogTitle>
+                    <DialogTitle>
+                        {canModifierObjet
+                            ? "Modifier le dossier"
+                            : "Suivi du dossier"}
+                    </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={submit} className="space-y-4 pt-1">
-                    <div className="space-y-1.5">
-                        <Label>
-                            Objet du dossier{" "}
-                            <span className="text-danger">*</span>
-                        </Label>
-                        <textarea
-                            value={form.objet}
-                            onChange={f("objet")}
-                            required
-                            rows={2}
-                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    {canModifierObjet ? (
                         <div className="space-y-1.5">
-                            <Label>Valeur (GNF)</Label>
-                            <NumberField
-                                value={form.valeur}
-                                onValueChange={(val) =>
-                                    setForm((p) => ({ ...p, valeur: val }))
-                                }
-                                placeholder="0"
+                            <Label>
+                                Objet du dossier{" "}
+                                <span className="text-danger">*</span>
+                            </Label>
+                            <textarea
+                                value={form.objet}
+                                onChange={f("objet")}
+                                required
+                                rows={2}
+                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-seal resize-none"
                             />
                         </div>
+                    ) : (
+                        <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+                            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                            <span>
+                                L'objet et la valeur sont figés depuis la
+                                certification : le répertoire et la note de frais
+                                les reprennent. Restent modifiables le suivi et
+                                les assignations.
+                            </span>
+                        </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                        {canModifierObjet && (
+                            <div className="space-y-1.5">
+                                <Label>Valeur (GNF)</Label>
+                                <NumberField
+                                    value={form.valeur}
+                                    onValueChange={(val) =>
+                                        setForm((p) => ({ ...p, valeur: val }))
+                                    }
+                                    placeholder="0"
+                                />
+                            </div>
+                        )}
                         <div className="space-y-1.5">
                             <Label>Échéance</Label>
                             <DateField
@@ -295,7 +332,7 @@ function ModalEditDossier({
                                     className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
                                 >
                                     <option value="">Aucun</option>
-                                    {(notaires ?? []).map((u) => (
+                                    {optionsAssignation(notaires, dossier.notaire).map((u) => (
                                         <option key={u.id} value={u.id}>
                                             {u.name}
                                         </option>
@@ -310,7 +347,7 @@ function ModalEditDossier({
                                     className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
                                 >
                                     <option value="">Aucun</option>
-                                    {(reviseurs ?? []).map((u) => (
+                                    {optionsAssignation(reviseurs, dossier.reviseur).map((u) => (
                                         <option key={u.id} value={u.id}>
                                             {u.name}
                                         </option>
@@ -325,7 +362,7 @@ function ModalEditDossier({
                                     className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
                                 >
                                     <option value="">Aucun</option>
-                                    {(formalistes ?? []).map((u) => (
+                                    {optionsAssignation(formalistes, dossier.formaliste).map((u) => (
                                         <option key={u.id} value={u.id}>
                                             {u.name}
                                         </option>
@@ -5613,10 +5650,16 @@ export default function DossierShow() {
                                                     onClick={() =>
                                                         setEditDossierOpen(true)
                                                     }
-                                                    title="Modifier le dossier"
+                                                    title={
+                                                        can?.modifierObjet
+                                                            ? "Modifier le dossier"
+                                                            : "Échéance, urgence, notes et assignations — l'objet est figé depuis la certification"
+                                                    }
                                                 >
                                                     <Pencil className="h-3.5 w-3.5" />
-                                                    Modifier
+                                                    {can?.modifierObjet
+                                                        ? "Modifier"
+                                                        : "Suivi"}
                                                 </Button>
                                             )}
                                         </div>
@@ -6852,6 +6895,7 @@ export default function DossierShow() {
                         formalistes={formalistes}
                         notaires={notaires}
                         canReassigner={can?.reassigner}
+                        canModifierObjet={can?.modifierObjet}
                     />
                     <ModalEditQuestionnaire
                         open={editQuestOpen}
