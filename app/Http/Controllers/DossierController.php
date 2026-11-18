@@ -140,7 +140,7 @@ class DossierController extends Controller
         $today = now()->toDateString();
 
         $query = Dossier::visiblePar($user)
-            ->with(['typeActe', 'redacteur', 'notaire', 'revision:id,dossier_id,statut'])
+            ->with(['typeActe', 'redacteur', 'notaire', 'revision:id,dossier_id,statut', 'questionnaire'])
             ->withCount([
                 'documents',
                 // Passe par le scope plutôt qu'une comparaison en dur : l'état
@@ -160,8 +160,9 @@ class DossierController extends Controller
             ->when($request->retard === '1', fn ($q)  => $q->where('etape', '!=', 'cloture')->whereNotNull('echeance')->where('echeance', '<', $today))
             ->when($request->sort === 'echeance',  fn ($q) => $q->orderBy('echeance'))
             ->when($request->sort === 'reference', fn ($q) => $q->orderBy('reference'))
-            ->when($request->sort === 'valeur',    fn ($q) => $q->orderByDesc('valeur'))
-            ->when(!in_array($request->sort, ['echeance', 'reference', 'valeur']), fn ($q) => $q->orderByDesc('updated_at'));
+            // Plus de tri « par valeur » : la colonne n'est plus saisie (7 dossiers anciens), et
+            // l'assiette réelle se déduit du questionnaire — elle ne se trie pas en SQL.
+            ->when(!in_array($request->sort, ['echeance', 'reference']), fn ($q) => $q->orderByDesc('updated_at'));
 
         // Stats globales (indépendantes des filtres courants)
         $parEtapeRaw = Dossier::selectRaw('etape, count(*) as n')
@@ -181,7 +182,6 @@ class DossierController extends Controller
                                 ->whereMonth('updated_at', now()->month)
                                 ->whereYear('updated_at', now()->year)
                                 ->count(),
-            'montantTotal' => (int) Dossier::whereNotNull('valeur')->sum('valeur'),
             'parEtape'     => $etapesOrdered->map(fn ($e) => [
                 'value' => $e->value,
                 'label' => $e->label(),
@@ -1407,7 +1407,9 @@ class DossierController extends Controller
             // envoyé à null. `reviseur` et `formaliste` (dossierDetailToArray) le portaient déjà.
             'redacteur'  => $d->redacteur ? ['id' => $d->redacteur->id, 'name' => $d->redacteur->name, 'initiales' => $d->redacteur->initiales] : null,
             'notaire'    => $d->notaire   ? ['id' => $d->notaire->id,   'name' => $d->notaire->name,   'initiales' => $d->notaire->initiales]   : null,
-            'valeur'     => $d->valeur,
+            // L'assiette déduite du questionnaire (capital, prix, loyers…), celle de la facture —
+            // et non `valeur`, champ abandonné qui n'affichait plus rien sur les dossiers récents.
+            'assiette'   => app(\App\Services\FacturationService::class)->assiette($d),
             'echeance'   => $d->echeance?->toDateString(),
             'urgent'     => $d->urgent,
             'notes'      => $d->notes,

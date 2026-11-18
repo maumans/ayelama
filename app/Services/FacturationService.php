@@ -55,7 +55,7 @@ class FacturationService
 
         // Essayer de déduire l'assiette du questionnaire si non fournie
         if ($assiette === null) {
-            $assiette = $this->deduireAssiette($dossier);
+            $assiette = $this->assiette($dossier);
         }
 
         // Récupérer les barèmes actifs pour ce type d'acte, en écartant ceux qui ne
@@ -215,7 +215,13 @@ class FacturationService
     }
 
     /**
-     * Tente de déduire l'assiette (valeur de base) depuis le questionnaire du dossier.
+     * L'assiette (valeur de base) d'un dossier, déduite de son questionnaire — **seule source**.
+     *
+     * Publique depuis le 2026-11-18 : les formalités au pourcentage lisaient `dossier.valeur`,
+     * champ que le formulaire de création ne renseigne plus (7 dossiers sur 33 l'ont, tous
+     * antérieurs). Une vente créée aujourd'hui aurait reçu ses droits d'enregistrement à 7,5 %
+     * **sans montant**, pendant que la facture, elle, déduisait la bonne assiette.
+     * `FormaliteGenerationService`, la fiche et la liste des dossiers passent désormais ici.
      *
      * ⚠️ Les clés de `questionnaires.donnees` sont **préfixées** (`soc.capital_chiffres`,
      * `bien.prix_vente_chiffres`…) : les noms nus cherchés à l'origine ne correspondaient à
@@ -224,7 +230,7 @@ class FacturationService
      * formes sont interrogées, les préfixées d'abord — un import historique peut porter les
      * anciennes.
      */
-    private function deduireAssiette(Dossier $dossier): ?float
+    public function assiette(Dossier $dossier): ?float
     {
         $donnees = $dossier->questionnaire?->donnees ?? [];
 
@@ -268,7 +274,8 @@ class FacturationService
             }
         }
 
-        // Utiliser la valeur du dossier si disponible
+        // Repli historique : `dossier.valeur` n'est plus saisi nulle part (retiré de la création,
+        // puis de la modale le 2026-11-18). Il ne sert qu'aux 7 dossiers anciens qui le portent.
         if ($dossier->valeur) {
             return (float) $dossier->valeur;
         }

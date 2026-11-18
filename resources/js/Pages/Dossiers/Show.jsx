@@ -78,7 +78,6 @@ import {
 import { RepeatableGroup } from "@/Components/ui/RepeatableGroup";
 import { DateField } from "@/components/ui/date-field";
 import { ModalEnvoiCourrier } from "@/Components/Courriers/ModalEnvoiCourrier";
-import { NumberField } from "@/components/ui/number-field";
 import { ClientPicker } from "@/Components/ui/client-picker";
 import { ModalNouveauClient } from "@/Components/ModalNouveauClient";
 import { ClientRoleSection } from "@/Components/ui/client-role-section";
@@ -202,7 +201,6 @@ function ModalEditDossier({
 }) {
     const [form, setForm] = useState({
         objet: dossier.objet ?? "",
-        valeur: dossier.valeur ?? "",
         echeance: dossier.echeance ?? "",
         urgent: dossier.urgent ?? false,
         notes: dossier.notes ?? "",
@@ -215,7 +213,6 @@ function ModalEditDossier({
         if (open)
             setForm({
                 objet: dossier.objet ?? "",
-                valeur: dossier.valeur ?? "",
                 echeance: dossier.echeance ?? "",
                 urgent: dossier.urgent ?? false,
                 notes: dossier.notes ?? "",
@@ -232,11 +229,10 @@ function ModalEditDossier({
         router.patch(
             `/dossiers/${dossier.reference}`,
             {
-                // Objet et valeur figés après l'Édition (DossierPolicy::modifierObjet) : le
-                // serveur les refuse, on ne les envoie donc pas.
-                ...(canModifierObjet
-                    ? { objet: form.objet, valeur: form.valeur || null }
-                    : {}),
+                // Objet figé après l'Édition (DossierPolicy::modifierObjet) : le serveur le
+                // refuse, on ne l'envoie donc pas. La valeur n'est plus saisie du tout : elle se
+                // déduit du questionnaire (FacturationService::assiette).
+                ...(canModifierObjet ? { objet: form.objet } : {}),
                 echeance: form.echeance || null,
                 urgent: form.urgent,
                 notes: form.notes || null,
@@ -277,26 +273,17 @@ function ModalEditDossier({
                         <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
                             <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                             <span>
-                                L'objet et la valeur sont figés depuis la
-                                certification : le répertoire et la note de frais
-                                les reprennent. Restent modifiables le suivi et
-                                les assignations.
+                                L'objet est figé depuis la certification : le
+                                répertoire et la note de frais le reprennent.
+                                Restent modifiables le suivi et les assignations.
                             </span>
                         </div>
                     )}
+                    {/* « Valeur (GNF) » retiré le 2026-11-18 : la création ne la saisit plus, et
+                        l'assiette réelle (capital, prix, loyers) se déduit du questionnaire. Le
+                        champ affichait « 0 » sur tout dossier récent, et ce qu'on y tapait ne
+                        servait que de repli. */}
                     <div className="grid grid-cols-2 gap-3">
-                        {canModifierObjet && (
-                            <div className="space-y-1.5">
-                                <Label>Valeur (GNF)</Label>
-                                <NumberField
-                                    value={form.valeur}
-                                    onValueChange={(val) =>
-                                        setForm((p) => ({ ...p, valeur: val }))
-                                    }
-                                    placeholder="0"
-                                />
-                            </div>
-                        )}
                         <div className="space-y-1.5">
                             <Label>Échéance</Label>
                             <DateField
@@ -5617,12 +5604,13 @@ export default function DossierShow() {
                                                         {dossier.echeance}
                                                     </span>
                                                 )}
-                                                {dossier.valeur > 0 && (
-                                                    <span className="font-ref">
-                                                        {Number(
-                                                            dossier.valeur,
-                                                        ).toLocaleString(
-                                                            "fr-GN",
+                                                {dossier.assiette > 0 && (
+                                                    <span
+                                                        className="font-ref"
+                                                        title="Assiette déduite du questionnaire (capital, prix, loyers) — celle de la note de frais"
+                                                    >
+                                                        {fmtGNF(
+                                                            dossier.assiette,
                                                         )}{" "}
                                                         GNF
                                                     </span>

@@ -29,6 +29,10 @@ class FormaliteGenerationService
             ->filter(fn (Bareme $bareme) => $bareme->estApplicableA($dossier))
             ->values();
 
+        // Même assiette que la facture (FacturationService::assiette) — et non `dossier.valeur`,
+        // que plus rien ne renseigne : la formalité au pourcentage partait sans montant.
+        $assiette = app(FacturationService::class)->assiette($dossier);
+
         // Passe 1 : créer/mettre à jour chaque Formalite, indexée par bareme_id afin
         // de pouvoir résoudre les dépendances (bareme->depend_de_bareme_id) ensuite.
         $formaliteIdParBaremeId = [];
@@ -36,7 +40,7 @@ class FormaliteGenerationService
         foreach ($baremes as $bareme) {
             $montantBase = $bareme->base_calcul === 'montant_fixe'
                 ? ($bareme->montant_fixe !== null ? (float) $bareme->montant_fixe : null)
-                : ($dossier->valeur !== null ? (float) $dossier->valeur : null);
+                : $assiette;
 
             $formalite = Formalite::updateOrCreate(
                 ['dossier_id' => $dossier->id, 'bareme_id' => $bareme->id],

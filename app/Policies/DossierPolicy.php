@@ -46,7 +46,7 @@ class DossierPolicy
     }
 
     /**
-     * Modification des informations générales du dossier (objet, valeur, échéance,
+     * Modification des informations générales du dossier (objet, échéance, urgence, notes,
      * assignations…).
      *
      * Le raccourci administrateur reste **avant** le `match`, contrairement aux abilities
@@ -79,15 +79,16 @@ class DossierPolicy
     }
 
     /**
-     * L'**objet** et la **valeur** du dossier — Initialisation et Édition seules.
+     * L'**objet** du dossier — Initialisation et Édition seules.
      *
      * Demande de l'étude (2026-11-18), sur un dossier en Expédition : « Modifier » laissait
      * réécrire l'objet après la signature. L'objet est l'intitulé que reprennent le
      * **répertoire** (`RepertoireController`), la note de frais et les courriers : le changer
      * après la certification faisait dire au registre autre chose que l'acte signé. Mesuré le
      * 2026-11-18 : aucun des 55 gabarits n'imprime `${dossier.objet}` — le générateur le
-     * propose, un gabarit futur pourrait s'en servir. La valeur suit la même borne : c'est
-     * l'assiette déclarée de l'acte.
+     * propose, un gabarit futur pourrait s'en servir. La valeur, d'abord bornée ici aussi, ne se
+     * saisit plus du tout depuis le même jour : l'assiette se déduit du questionnaire
+     * (`FacturationService::assiette`).
      *
      * Le reste de `update` — échéance, urgence, notes, assignations — demeure ouvert
      * jusqu'à l'archivage : réassigner un formaliste en Formalités est un geste légitime.

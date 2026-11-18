@@ -201,7 +201,6 @@ export default function DossiersIndex() {
                             <SelectItem value="">Récents d'abord</SelectItem>
                             <SelectItem value="echeance">Par échéance</SelectItem>
                             <SelectItem value="reference">Par référence</SelectItem>
-                            <SelectItem value="valeur">Par valeur</SelectItem>
                         </SelectContent>
                     </Select>
 
@@ -379,9 +378,9 @@ export default function DossiersIndex() {
                                                                     {d.echeance}
                                                                 </span>
                                                             )}
-                                                            {(d.valeur ?? 0) > 0 && (
-                                                                <span className="font-ref">
-                                                                    {Number(d.valeur).toLocaleString('fr-GN')} GNF
+                                                            {(d.assiette ?? 0) > 0 && (
+                                                                <span className="font-ref" title="Assiette déduite du questionnaire — celle de la note de frais">
+                                                                    {Number(d.assiette).toLocaleString('fr-GN')} GNF
                                                                 </span>
                                                             )}
                                                         </div>

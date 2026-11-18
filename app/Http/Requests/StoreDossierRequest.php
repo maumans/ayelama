@@ -26,7 +26,8 @@ class StoreDossierRequest extends FormRequest
             // constitution (voir DossierController::creerDossier).
             'societe_id'    => ['nullable', 'integer', 'exists:societes,id'],
             'objet'         => ['required', 'string', 'min:10', 'max:500'],
-            'valeur'        => ['nullable', 'numeric', 'min:0'],
+            // Plus saisie : l'assiette se déduit du questionnaire (FacturationService::assiette).
+            'valeur'        => ['prohibited'],
             'echeance'      => ['nullable', 'date', 'after:today'],
             'urgent'        => ['boolean'],
             'notes'         => ['nullable', 'string', 'max:2000'],
