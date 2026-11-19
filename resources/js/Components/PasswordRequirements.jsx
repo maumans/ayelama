@@ -9,6 +9,15 @@ const RULES = [
     { key: 'symbol', label: 'Un caractère spécial', test: (v) => /[^A-Za-z0-9]/.test(v) },
 ];
 
+/**
+ * Miroir de `Password::defaults()` (AppServiceProvider : 12 caractères, casse mixte, chiffre,
+ * symbole). `ModalUtilisateur` s'en sert pour bloquer l'envoi plutôt que de laisser le serveur
+ * refuser — le refus passait inaperçu (2026-11-19). `CreationUtilisateurTest` vérifie l'accord.
+ */
+export function motDePasseConforme(password = '') {
+    return RULES.every((rule) => rule.test(password));
+}
+
 export default function PasswordRequirements({ password = '' }) {
     return (
         <ul className="mt-2 space-y-1">

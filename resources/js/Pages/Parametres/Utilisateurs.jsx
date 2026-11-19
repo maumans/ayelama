@@ -1,127 +1,14 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { usePage, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PhoneField } from '@/components/ui/phone-field';
-import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, XCircle, Plus, Pencil, Search, Users } from 'lucide-react';
 import { ROLE_META } from '@/data/roles';
 import { RoleBadgeList } from '@/components/ui/role-badge';
-import PasswordRequirements from '@/Components/PasswordRequirements';
-
-const EMPTY_FORM = { name: '', email: '', password: '', roles: [], initiales: '', telephone: '' };
-
-function ModalUtilisateur({ open, onClose, utilisateur, roles }) {
-    const isEdit = Boolean(utilisateur);
-    const [form, setForm] = useState(EMPTY_FORM);
-    const [rolesError, setRolesError] = useState(false);
-
-    useEffect(() => {
-        if (open) {
-            setRolesError(false);
-            setForm(isEdit ? {
-                name:      utilisateur.name      ?? '',
-                email:     utilisateur.email     ?? '',
-                password:  '',
-                roles:     utilisateur.roles     ?? [],
-                initiales: utilisateur.initiales ?? '',
-                telephone: utilisateur.telephone ?? '',
-            } : EMPTY_FORM);
-        }
-    }, [open, utilisateur?.id]);
-
-    const f = (k) => (e) => setForm(p => ({ ...p, [k]: typeof e === 'string' ? e : e.target.value }));
-
-    const toggleRole = (value, checked) => {
-        setForm(p => ({
-            ...p,
-            roles: checked ? [...p.roles, value] : p.roles.filter(v => v !== value),
-        }));
-    };
-
-    const submit = (e) => {
-        e.preventDefault();
-        if (form.roles.length === 0) { setRolesError(true); return; }
-        setRolesError(false);
-
-        const payload = { ...form };
-        if (isEdit && !payload.password) delete payload.password;
-
-        if (isEdit) {
-            router.patch(`/parametres/utilisateurs/${utilisateur.id}`, payload, {
-                onSuccess: onClose,
-                preserveState: true,
-            });
-        } else {
-            router.post('/parametres/utilisateurs', payload, { onSuccess: onClose });
-        }
-    };
-
-    return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>{isEdit ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={submit} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="col-span-2 space-y-1">
-                            <Label>Nom complet</Label>
-                            <Input value={form.name} onChange={f('name')} required />
-                        </div>
-                        <div className="col-span-2 space-y-1">
-                            <Label>Email</Label>
-                            <Input type="email" value={form.email} onChange={f('email')} required />
-                        </div>
-                        <div className="col-span-2 space-y-1">
-                            <Label>{isEdit ? 'Nouveau mot de passe' : 'Mot de passe'} {isEdit && <span className="text-slate-400 text-[11px]">(laisser vide pour conserver)</span>}</Label>
-                            <Input type="password" value={form.password} onChange={f('password')} required={!isEdit} autoComplete="new-password" />
-                            {(!isEdit || form.password) && <PasswordRequirements password={form.password} />}
-                        </div>
-                        <div className="col-span-2 space-y-1">
-                            <Label>Rôles</Label>
-                            <div className="flex flex-wrap gap-3">
-                                {roles?.map(r => (
-                                    <label key={r.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                                        <Checkbox
-                                            checked={form.roles.includes(r.value)}
-                                            onCheckedChange={(checked) => toggleRole(r.value, checked === true)}
-                                        />
-                                        {r.label}
-                                    </label>
-                                ))}
-                            </div>
-                            {rolesError && <p className="text-xs text-danger">Sélectionnez au moins un rôle.</p>}
-                        </div>
-                        <div className="space-y-1">
-                            <Label>Initiales</Label>
-                            <Input
-                                value={form.initiales}
-                                onChange={e => setForm(p => ({ ...p, initiales: e.target.value.toUpperCase().slice(0, 3) }))}
-                                maxLength={3}
-                                className="font-mono uppercase"
-                                placeholder="AB"
-                            />
-                        </div>
-                        <div className="col-span-2 space-y-1">
-                            <Label>Téléphone</Label>
-                            <PhoneField value={form.telephone} onValueChange={val => setForm(p => ({ ...p, telephone: val }))} placeholder="622 XX XX XX" />
-                        </div>
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2">
-                        <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-                        <Button type="submit">{isEdit ? 'Enregistrer' : 'Créer'}</Button>
-                    </div>
-                </form>
-            </DialogContent>
-        </Dialog>
-    );
-}
+import ModalUtilisateur from '@/Components/Parametres/ModalUtilisateur';
 
 export default function ParametresUtilisateurs() {
     const { utilisateurs = [], roles = [] } = usePage().props;
