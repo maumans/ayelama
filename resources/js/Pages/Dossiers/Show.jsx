@@ -57,6 +57,7 @@ import { ModalRetourFormalite } from "@/Components/Formalites/ModalRetourFormali
 import { PieceGedRow } from "@/Components/Formalites/PieceGedRow";
 import { PieceStagedRow } from "@/Components/ui/PieceStagedRow";
 import { ModalEnregistrerPaiement } from "@/Components/Facturation/ModalEnregistrerPaiement";
+import { SituationFinanciereCard, VersementsCard } from "@/Components/Facturation/ComptabiliteDossier";
 import { ModalLigneFacture } from "@/Components/Facturation/ModalLigneFacture";
 import {
     QUESTIONNAIRES,
@@ -4208,15 +4209,29 @@ const fmtGNF = (n) => Number(n || 0).toLocaleString("fr-FR");
  * facture n'en porte pas encore.
  */
 function ModalEnteteFacture({ open, onClose, facture }) {
-    const connecte = usePage().props.auth?.user?.name ?? "";
+    const { props } = usePage();
+    const connecte = props.auth?.user?.name ?? "";
+    // Banques de l'étude (2026-11-20) : on choisit la banque, le numéro de compte suit. Le compte
+    // déjà retenu reste proposé s'il a été désactivé depuis — sinon le `<select>` afficherait
+    // « Aucune » tout en gardant l'identifiant, et enregistrer le retirerait.
+    const comptes = useMemo(() => {
+        const actifs = props.comptesBancaires ?? [];
+        if (!facture.compte_bancaire_id || actifs.some((c) => c.id === facture.compte_bancaire_id)) return actifs;
+        return [...actifs, { id: facture.compte_bancaire_id, banque: facture.banque, numero: facture.compte_numero }];
+    }, [props.comptesBancaires, facture.compte_bancaire_id]);
     const [date, setDate] = useState(facture.note_date_iso ?? "");
     const [expediteur, setExpediteur] = useState(facture.expediteur ?? connecte);
+    const [compteId, setCompteId] = useState(facture.compte_bancaire_id ? String(facture.compte_bancaire_id) : "");
+    const [pages, setPages] = useState(facture.nb_pages ?? "");
     const [enregistrement, setEnregistrement] = useState(false);
+    const compteChoisi = comptes.find((c) => String(c.id) === compteId);
 
     useEffect(() => {
         if (open) {
             setDate(facture.note_date_iso ?? "");
             setExpediteur(facture.expediteur ?? connecte);
+            setCompteId(facture.compte_bancaire_id ? String(facture.compte_bancaire_id) : "");
+            setPages(facture.nb_pages ?? "");
         }
     }, [open, facture.id]);
 
@@ -4225,7 +4240,13 @@ function ModalEnteteFacture({ open, onClose, facture }) {
         setEnregistrement(true);
         router.patch(
             `/factures/${facture.id}/entete`,
-            { note_date: date, expediteur: expediteur || null },
+            {
+                note_date: date,
+                expediteur: expediteur || null,
+                compte_bancaire_id: compteId ? Number(compteId) : null,
+                // Envoyé seulement si la facture compte des pages : sinon le champ n'existe pas.
+                ...(facture.comptePages ? { nb_pages: pages === "" ? null : Number(pages) } : {}),
+            },
             {
                 preserveScroll: true,
                 onError: notifyValidationError,
@@ -4262,6 +4283,55 @@ function ModalEnteteFacture({ open, onClose, facture }) {
                             placeholder="Nom de la personne qui expédie"
                         />
                     </div>
+                    <div className="space-y-1.5">
+                        <Label htmlFor="facture-banque">Banque de règlement</Label>
+                        <select
+                            id="facture-banque"
+                            value={compteId}
+                            onChange={(e) => setCompteId(e.target.value)}
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                        >
+                            <option value="">Aucune</option>
+                            {comptes.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                    {c.banque}
+                                </option>
+                            ))}
+                        </select>
+                        {compteChoisi && (
+                            <p className="text-xs text-slate-500">
+                                N° de compte imprimé :{" "}
+                                <span className="font-ref text-slate-700">
+                                    {compteChoisi.numero} {compteChoisi.banque}
+                                </span>
+                                {compteChoisi.a_verifier && (
+                                    <span className="block text-amber-700 mt-1">
+                                        ⚠ Numéro à vérifier : lu sur une liste manuscrite, un chiffre reste
+                                        douteux. Corrigez-le dans Paramètres → Comptes bancaires.
+                                    </span>
+                                )}
+                            </p>
+                        )}
+                    </div>
+                    {facture.comptePages && (
+                        <div className="space-y-1.5">
+                            <Label htmlFor="facture-pages">Nombre de pages</Label>
+                            <Input
+                                id="facture-pages"
+                                type="number"
+                                min={0}
+                                max={9999}
+                                value={pages}
+                                onChange={(e) => setPages(e.target.value)}
+                                placeholder="ex. 11"
+                            />
+                            <p className="text-xs text-slate-500">
+                                Pour une constitution : pages des statuts et de la DNSV,{" "}
+                                <strong>sans les pages de garde</strong>. Elles donnent la quantité des
+                                timbres fiscaux (× 2 000 GNF) et des rôles (× 5 000 GNF).
+                            </p>
+                        </div>
+                    )}
                     <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                         <Button type="button" variant="ghost" onClick={onClose} disabled={enregistrement}>
                             Annuler
@@ -4276,7 +4346,50 @@ function ModalEnteteFacture({ open, onClose, facture }) {
     );
 }
 
+/**
+ * L'onglet Facturation : **toutes** les factures du dossier, la principale d'abord.
+ *
+ * Il n'affichait que la dernière (`dossier.factures[length - 1]`) — juste tant qu'un dossier n'en
+ * portait qu'une. Depuis la facture complémentaire des droits d'enregistrement (2026-11-23), la
+ * dernière est la complémentaire : la principale aurait disparu de l'écran, paiements compris.
+ */
 function FacturationTab({ dossier, can }) {
+    const factures = dossier.factures ?? [];
+
+    const ordonnees = [
+        ...factures.filter((f) => !f.estComplementaire),
+        ...factures.filter((f) => f.estComplementaire),
+    ];
+
+    return (
+        <div className="space-y-10">
+            {/* Comptabilité du dossier (2026-11-23) — en tête, même sans facture : l'étude peut
+                verser à un organisme avant d'avoir facturé, et c'est alors une avance à voir. */}
+            <div className="space-y-5">
+                <SituationFinanciereCard situation={dossier.situationFinanciere} />
+                <VersementsCard dossier={dossier} peutGerer={!!can?.gererFacturation} />
+            </div>
+
+            {!factures.length ? (
+                <Card>
+                    <CardContent className="p-6 text-center py-12">
+                        <FileText className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+                        <p className="text-slate-500 text-sm font-medium">
+                            Aucune facture générée
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">
+                            La facture sera calculée selon les barèmes configurés.
+                        </p>
+                    </CardContent>
+                </Card>
+            ) : ordonnees.map((facture) => (
+                <CarteFacture key={facture.id} dossier={dossier} can={can} facture={facture} />
+            ))}
+        </div>
+    );
+}
+
+function CarteFacture({ dossier, can, facture }) {
     // Aperçu du reçu déplié sous la ligne de paiement concernée.
     const apercu = useApercuEnLigne();
 
@@ -4298,23 +4411,6 @@ function FacturationTab({ dossier, can }) {
         );
     };
 
-    if (!dossier.factures?.length) {
-        return (
-            <Card>
-                <CardContent className="p-6 text-center py-12">
-                    <FileText className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-                    <p className="text-slate-500 text-sm font-medium">
-                        Aucune facture générée
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1">
-                        La facture sera calculée selon les barèmes configurés.
-                    </p>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    const facture = dossier.factures[dossier.factures.length - 1];
     const paiements = facture.paiements ?? [];
     const soldeRestant = facture.soldeRestant ?? 0;
     // Les lignes ne restent modifiables que tant qu'aucun paiement n'a été
@@ -4357,6 +4453,7 @@ function FacturationTab({ dossier, can }) {
                     setPaiementEnEdition(null);
                 }}
                 dossierReference={dossier.reference}
+                factureId={facture.id}
                 soldeRestant={soldeRestant}
                 totalFacture={facture.total_chiffres}
                 paiement={paiementEnEdition}
@@ -4384,7 +4481,10 @@ function FacturationTab({ dossier, can }) {
                 <Card>
                     <CardContent className="p-4">
                         <div className="text-[10px] text-slate-400 uppercase tracking-wide">
-                            Honoraires facturés
+                            {/* « Honoraires facturés » jusqu'au 2026-11-23, alors que le chiffre est le
+                                total de la facture, débours compris : faux à côté de la situation
+                                financière, qui sépare les deux. */}
+                            {facture.estComplementaire ? "Droits facturés" : "Total de la facture"}
                         </div>
                         <div className="text-lg font-semibold text-ink font-ref mt-0.5">
                             {fmtGNF(facture.total_chiffres)} GNF
@@ -4394,7 +4494,7 @@ function FacturationTab({ dossier, can }) {
                 <Card>
                     <CardContent className="p-4">
                         <div className="text-[10px] text-slate-400 uppercase tracking-wide">
-                            Provisions reçues
+                            Encaissé sur cette facture
                         </div>
                         <div className="text-lg font-semibold text-success font-ref mt-0.5">
                             {fmtGNF(facture.totalPaye)} GNF
@@ -4455,12 +4555,18 @@ function FacturationTab({ dossier, can }) {
                 <CardHeader className="pb-3 border-b border-slate-100 flex flex-row flex-wrap justify-between items-center gap-3">
                     <div>
                         <CardTitle>
-                            {facture.estProforma
-                                ? "Facture proforma"
-                                : "Note de frais / Facture"}
+                            {facture.estComplementaire
+                                ? facture.estProforma
+                                    ? "Facture complémentaire — proforma"
+                                    : "Facture complémentaire"
+                                : facture.estProforma
+                                  ? "Facture proforma"
+                                  : "Note de frais / Facture"}
                         </CardTitle>
                         <p className="text-xs text-slate-500 mt-1">
-                            Générée automatiquement d'après les barèmes
+                            {facture.estComplementaire
+                                ? `Droits liquidés au retour des Impôts${facture.origineNumero ? ` — complète la facture N° ${facture.origineNumero}` : ""}`
+                                : "Générée automatiquement d'après les barèmes"}
                         </p>
                     </div>
                     {/* `flex-wrap` : avec « Émettre » et « En-tête » (2026-11-16), cinq boutons ne tiennent plus
@@ -4513,7 +4619,7 @@ function FacturationTab({ dossier, can }) {
                                 size="sm"
                                 className="h-8 gap-1"
                                 onClick={() => setEnteteOpen(true)}
-                                title="Date et personne qui expédie"
+                                title="Date, personne qui expédie, banque de règlement et nombre de pages"
                             >
                                 <Pencil className="h-3.5 w-3.5" /> En-tête
                             </Button>
@@ -4566,10 +4672,12 @@ function FacturationTab({ dossier, can }) {
                             <div className="font-medium text-slate-800 text-sm">
                                 {facture.objet}
                             </div>
-                            <div className="text-xs text-slate-500 mt-0.5">
-                                Assiette de calcul :{" "}
-                                {fmtGNF(facture.assiette_chiffres)} GNF
-                            </div>
+                            {!facture.estComplementaire && (
+                                <div className="text-xs text-slate-500 mt-0.5">
+                                    Assiette de calcul :{" "}
+                                    {fmtGNF(facture.assiette_chiffres)} GNF
+                                </div>
+                            )}
                         </div>
                         <div className="text-right">
                             {facture.estProforma ? (
@@ -4590,6 +4698,24 @@ function FacturationTab({ dossier, can }) {
                             {facture.expediteur && (
                                 <div className="text-xs text-slate-400 mt-0.5">
                                     Expédiée par {facture.expediteur}
+                                </div>
+                            )}
+                            <div className="text-xs mt-0.5">
+                                {facture.banque ? (
+                                    <span className="text-slate-500">
+                                        Compte : <span className="font-ref">{facture.compte_numero}</span> {facture.banque}
+                                    </span>
+                                ) : (
+                                    <span className="text-amber-700">Aucune banque choisie — voir « En-tête »</span>
+                                )}
+                            </div>
+                            {facture.comptePages && (
+                                <div className={cn("text-xs mt-0.5", facture.nb_pages > 0 ? "text-slate-500" : "text-amber-700")}>
+                                    {facture.nb_pages > 0
+                                        ? `${facture.nb_pages} page(s) pour les timbres et les rôles`
+                                        : facture.estProforma
+                                          ? "Nombre de pages à indiquer — requis pour émettre"
+                                          : "Nombre de pages non renseigné"}
                                 </div>
                             )}
                         </div>
@@ -4795,7 +4921,7 @@ function FacturationTab({ dossier, can }) {
                                             <td className="py-2.5 text-slate-700">
                                                 Paiement
                                                 {p.moyen_paiement &&
-                                                    ` (${p.moyen_paiement})`}
+                                                    ` (${p.moyenLabel ?? p.moyen_paiement})`}
                                             </td>
                                             <td className="py-2.5 text-right font-ref text-success font-medium">
                                                 +{fmtGNF(p.montant)}

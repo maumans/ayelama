@@ -162,7 +162,7 @@ class BaremeSeeder extends Seeder
             $baremes = $this->creerBaremes($typeActeId, [
                 [
                     'organisme'    => 'Notaire',
-                    'libelle'      => 'Honoraires forfaitaires',
+                    'libelle'      => 'Honoraires Forfaitaires',
                     'montant_fixe' => 4500000.00,
                     'base_calcul'  => 'montant_fixe',
                     'description'  => 'Forfait honoraires notaire (variable selon capital, à ajuster)',
@@ -171,7 +171,7 @@ class BaremeSeeder extends Seeder
                 [
                     'organisme'    => 'Impots',
                     'libelle'      => 'Droits d\'enregistrement des Statuts et de la DNSV',
-                    'donnees_au_retour' => ['quittance_numero'],
+                    'donnees_au_retour' => ['quittance_numero', 'montant_droits'], // montant : facture complémentaire (2026-11-23)
                     'montant_fixe' => 0,
                     'base_calcul'  => 'montant_fixe',
                     'description'  => "Droits d'enregistrement des statuts et de la DNSV",
@@ -199,7 +199,7 @@ class BaremeSeeder extends Seeder
                 ],
                 [
                     'organisme'    => 'Autre',
-                    'libelle'      => 'Insertion JAL (Journal Annonces Légales)',
+                    'libelle'      => "Insertion dans un Journal d'Annonces Légales",
                     'montant_fixe' => 250000.00,
                     'base_calcul'  => 'montant_fixe',
                     'description'  => 'Publication de l\'avis de constitution dans le JAL',
@@ -333,13 +333,13 @@ class BaremeSeeder extends Seeder
      * désactivation aveugle éteindrait aussitôt semés.
      */
     private const GRILLE_CONSTITUTION = [
-        'Honoraires forfaitaires',
+        'Honoraires Forfaitaires',
         'Enregistrement fiscal acte',
         "Droits d'enregistrement des Statuts et de la DNSV",
         'Frais APIP et RCCM',
         'Immatriculation RCCM',
         'Obtention NIF',
-        'Insertion JAL (Journal Annonces Légales)',
+        "Insertion dans un Journal d'Annonces Légales",
         'Timbres & rôles',
         'Dépôt statuts au greffe',
     ];

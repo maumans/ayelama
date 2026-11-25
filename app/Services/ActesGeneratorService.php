@@ -753,6 +753,12 @@ class ActesGeneratorService
                 continue;
             }
 
+            // Un montant (droits d'enregistrement, 2026-11-23) s'écrit avec le point de milliers
+            // des documents (R13), comme tout montant d'acte.
+            if ($donnee->type() === 'montant') {
+                $valeur = \App\Support\FormatNombre::milliers($valeur);
+            }
+
             $tp->setValue($cle, htmlspecialchars((string) $valeur, ENT_XML1 | ENT_COMPAT, 'UTF-8'));
         }
     }
@@ -1079,6 +1085,8 @@ class ActesGeneratorService
         $tp->setValue('annee_lettres',               NombreEnLettres::convertir((float) $now->year, ''));
         $tp->setValue('date_acte_lettres',           $this->dateJourMoisEnLettres($now));
         $tp->setValue('date_acte_lettres_complete',  $this->dateJourMoisEnLettres($now) . ' ' . NombreEnLettres::convertir((float) $now->year, ''));
+        // « Conakry, le 19 Novembre 2026 » — attestation de dépôt, déclaration sur l'honneur.
+        $tp->setValue('date_acte_court',             \App\Support\VariantesRedaction::dateCourte($now));
         // Le nombre de pages ne peut être déterminé qu'après génération : laisser vide
         $tp->setValue('acte.nb_pages',         '');
         $tp->setValue('acte.nb_pages_lettres', '');
@@ -1101,6 +1109,16 @@ class ActesGeneratorService
         $donnees = $dossier->questionnaire?->donnees ?? [];
 
         $this->deriverPersonnesParDefaut($donnees, $dossier->typeActe?->code);
+
+        // Ce que l'acte écrit sans que personne le saisisse — civilité longue, accords, objet
+        // social en liste, numérotation des parts (modèles finaux du 2026-11-20). **Après** la
+        // dérivation des personnes : le gérant d'une SARLU hérite ainsi aussi de ses accords.
+        $donnees = array_merge($donnees, \App\Support\VariantesRedaction::racine($donnees));
+        foreach ($donnees as $cle => $valeur) {
+            if (is_array($valeur) && array_is_list($valeur) && $valeur !== [] && is_array($valeur[0])) {
+                $donnees[$cle] = \App\Support\VariantesRedaction::bloc($valeur, $donnees);
+            }
+        }
 
         foreach ($donnees as $cle => $valeur) {
             if (is_array($valeur) && array_is_list($valeur)) {
@@ -1150,6 +1168,16 @@ class ActesGeneratorService
                         // de faire échouer la génération de tout l'acte pour une saisie douteuse.
                     }
                 }
+
+                // « le quinze Février mille neuf cent quatre-vingt » : la forme des comparutions
+                // dans les actes finaux de l'étude, là où `_lettres` écrit en capitales.
+                if (!isset($donnees["{$cle}_texte"]) && ($texte = \App\Support\VariantesRedaction::dateRedigee($valeur)) !== null) {
+                    $tp->setValue("{$cle}_texte", $texte);
+                }
+                // « 06 Mars 1993 » : formulaire RCCM, en-têtes de lettre.
+                if (!isset($donnees["{$cle}_court"]) && ($court = \App\Support\VariantesRedaction::dateCourte($valeur)) !== null) {
+                    $tp->setValue("{$cle}_court", $court);
+                }
             }
 
             // Une heure (`ag.heure`, champ `time` depuis le 2026-11-16 — retour R02) : « A DIX
@@ -1190,7 +1218,12 @@ class ActesGeneratorService
             // Retour R15 : la dénomination d'une société **constituée** s'écrit en majuscules dans
             // ses actes, quelle que soit la casse saisie. La fiche et le questionnaire gardent la
             // saisie (un instantané ne se réécrit pas) ; seul l'acte la met en capitales.
-            if ($cle === 'soc.denomination' && is_string($valeur) && $this->estConstitution($dossier)) {
+            // Même règle pour le **siège** depuis les modèles finaux du 2026-11-20 : les deux dossiers
+            // de l'étude l'écrivent en capitales partout — en-tête, article 4, DNSV, insertion,
+            // RCCM (« NONGO CONTEYAH, COMMUNE DE LAMBANYI »). Saisi « Dixinn », il sortait
+            // « SIÈGE SOCIAL : Dixinn, COMMUNE DE Dixinn » au milieu d'une ligne en capitales.
+            if (in_array($cle, ['soc.denomination', 'soc.siege_quartier', 'soc.siege_commune', 'soc.siege_ville'], true)
+                && is_string($valeur) && $this->estConstitution($dossier)) {
                 $valeur = mb_strtoupper($valeur, 'UTF-8');
             }
 
@@ -1310,11 +1343,41 @@ class ActesGeneratorService
             return;
         }
 
-        try {
-            $tp->cloneBlock($bloc, count($items), true, true);
-        } catch (\Exception) {
-            // Le bloc n'existe pas dans ce template — on ignore silencieusement.
-            return;
+        // Deux façons de répéter, selon ce que le gabarit porte :
+        //  - des marqueurs `${bloc}` … `${/bloc}`, chacun dans son paragraphe → `cloneBlock` ;
+        //  - aucun marqueur, mais des `${bloc.champ}` dans une **ligne de tableau** → `cloneRow`,
+        //    qui duplique la ligne. C'est la forme du formulaire RCCM du greffe, où chaque
+        //    dirigeant occupe une ligne (modèles finaux du 2026-11-20) : un marqueur de bloc ne
+        //    peut pas y tenir seul dans un paragraphe sans casser le tableau.
+        // Les deux numérotent les variables `#1`, `#2`… : la suite est commune.
+        $variables = $tp->getVariables();
+
+        if (in_array($bloc, $variables, true)) {
+            // ⚠️ `cloneBlock()` ne traite qu'**une** occurrence du bloc — la dernière, son motif
+            // commençant par un `.*` gourmand. Les statuts de SARL énumèrent pourtant les associés
+            // trois fois (comparution, apports, répartition des parts) : sans cette boucle, les
+            // deux premières listes sortaient vides, sans erreur. Chaque passe numérote ses
+            // variables `#1…#n` comme la précédente, si bien qu'un seul `setValue` les remplit
+            // toutes. La borne protège d'un motif que PhpWord ne saurait pas reconnaître.
+            for ($passe = 0; $passe < 20 && in_array($bloc, $tp->getVariables(), true); $passe++) {
+                $tp->cloneBlock($bloc, count($items), true, true);
+            }
+        } else {
+            $ancres = array_filter($variables, fn ($v) => str_starts_with($v, "{$bloc}."));
+            $ligneClonee = false;
+            foreach ($ancres as $ancre) {
+                try {
+                    $tp->cloneRow($ancre, count($items));
+                    $ligneClonee = true;
+                    break;
+                } catch (\Exception) {
+                    // Cette balise n'est pas dans un tableau : essayer la suivante.
+                }
+            }
+            if (! $ligneClonee) {
+                // Ni bloc ni ligne : le gabarit n'emploie pas cette liste.
+                return;
+            }
         }
 
         foreach ($items as $i => $item) {
@@ -1353,6 +1416,32 @@ class ActesGeneratorService
                 }
 
                 $valeur = (string) ($valeur ?? '');
+
+                // Les dates d'un bloc ont les mêmes variantes qu'à la racine. Elles ne les avaient
+                // pas : `balises-resolvables.txt` annonçait `${associes.date_naissance_lettres}`,
+                // le vérificateur le validait, et l'acte sortait un blanc (constaté le 2026-11-20
+                // sur les statuts SARL, qui datent la naissance de chaque associé).
+                if (preg_match('#^\d{2}/\d{2}/\d{4}$#', $valeur)) {
+                    $variantes = ["{$champ}_jma" => $valeur];
+                    try {
+                        $date = \Illuminate\Support\Carbon::createFromFormat('d/m/Y', $valeur);
+                        $variantes["{$champ}_lettres"] = $this->dateJourMoisEnLettres($date)
+                            . ' ' . NombreEnLettres::convertir((float) $date->year, '');
+                    } catch (\Exception) {
+                        // Même tolérance qu'à la racine : variante vide, acte produit.
+                    }
+                    if (($texte = \App\Support\VariantesRedaction::dateRedigee($valeur)) !== null) {
+                        $variantes["{$champ}_texte"] = $texte;
+                    }
+                    if (($court = \App\Support\VariantesRedaction::dateCourte($valeur)) !== null) {
+                        $variantes["{$champ}_court"] = $court;
+                    }
+                    foreach ($variantes as $alias => $v) {
+                        if (!isset($item[$alias])) {
+                            $tp->setValue("{$bloc}.{$alias}#{$index}", htmlspecialchars($v, ENT_XML1 | ENT_COMPAT, 'UTF-8'));
+                        }
+                    }
+                }
 
                 // Auto-conversion montants en lettres
                 if (str_ends_with($champ, '_chiffres') && is_numeric($valeur)) {

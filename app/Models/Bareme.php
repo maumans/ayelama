@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 class Bareme extends Model
 {
     protected $fillable = [
-        'type_acte_id', 'organisme', 'libelle',
-        'taux', 'montant_fixe', 'quantite_defaut', 'base_calcul',
+        'type_acte_id', 'organisme', 'nature', 'libelle',
+        'taux', 'montant_fixe', 'tranches', 'quantite_defaut', 'par_page', 'base_calcul',
         'condition_modification',
         'description', 'source', 'a_confirmer', 'actif', 'ordre',
         'genere_formalite', 'depend_de_bareme_id', 'type_impot',
@@ -22,7 +22,11 @@ class Bareme extends Model
         return [
             'taux'             => 'decimal:4',
             'montant_fixe'     => 'decimal:2',
+            // Montant par tranche de l'assiette (le capital, pour une société) : [{a_partir_de, montant}].
+            'tranches'         => 'array',
             'quantite_defaut'  => 'integer',
+            'par_page'         => 'boolean',
+            'nature'           => \App\Enums\NatureLigne::class,
             'actif'            => 'boolean',
             'a_confirmer'      => 'boolean',
             'genere_formalite' => 'boolean',
@@ -34,6 +38,28 @@ class Bareme extends Model
             // nomme le **papier**. Voir App\Enums\DonneeAuRetour.
             'donnees_au_retour' => 'array',
         ];
+    }
+
+    /**
+     * Un barème créé sans nature la reçoit de son organisme : « Notaire » est l'étude elle-même,
+     * tout autre organisme reçoit un débours. Ainsi les seeders et l'écran Barèmes n'ont rien à
+     * savoir pour qu'aucun tarif ne naisse sans nature (2026-11-23).
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $bareme) {
+            // ⚠️ La migration `2026_11_23_100000` (débours) enregistre des barèmes **avant** celle
+            // qui crée la colonne `nature` : en rejouant les migrations dans l'ordre, poser
+            // l'attribut ferait échouer l'INSERT. On ne la pose que si la colonne existe.
+            // Seul le « oui » est mémorisé : un « non » lu pendant les migrations deviendrait faux
+            // dès la suivante, dans le même processus (`migrate --seed`).
+            static $colonne = false;
+            $colonne = $colonne || \Illuminate\Support\Facades\Schema::hasColumn('baremes', 'nature');
+
+            if ($colonne && $bareme->nature === null) {
+                $bareme->nature = \App\Enums\NatureLigne::pourOrganisme($bareme->organisme);
+            }
+        });
     }
 
     public function typeActe()
@@ -108,11 +134,30 @@ class Bareme extends Model
 
     public function calculerMontant(float $valeurActe): float
     {
+        // Le débours des constitutions (2026-11-20) dépend du capital, par tranche : 10 M → 500 000,
+        // 100 M → 1 000 000. La grille est portée par la ligne, pas par le code : c'est l'étude qui
+        // la fixe, et elle n'en a donné que deux points.
+        if (! empty($this->tranches)) {
+            return $this->montantParTranche($valeurActe);
+        }
+
         if ($this->base_calcul === 'montant_fixe') {
             return (float) ($this->montant_fixe ?? 0);
         }
 
         return round($valeurActe * ((float) $this->taux / 100), 2);
+    }
+
+    /**
+     * Le montant de la tranche la plus haute que l'assiette atteint. Sous la première tranche (une
+     * assiette inconnue, donc à 0), c'est la première qui s'applique : un débours n'est jamais nul.
+     */
+    public function montantParTranche(float $assiette): float
+    {
+        $tranches = collect($this->tranches)->sortBy('a_partir_de')->values();
+        $retenue = $tranches->last(fn ($t) => $assiette >= (float) $t['a_partir_de']) ?? $tranches->first();
+
+        return (float) ($retenue['montant'] ?? 0);
     }
 
     public function organismeLabel(): string

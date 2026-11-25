@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Dossier;
+use App\Enums\MoyenPaiement;
 use App\Enums\TypeRemise;
+use App\Models\CompteBancaire;
 use App\Models\Facture;
 use App\Models\JournalActivite;
 use App\Models\LigneFacture;
@@ -146,15 +148,20 @@ class FactureController extends Controller
     {
         $this->authorize('gererFacturation', $dossier);
 
-        $factureId = $dossier->factures()->latest('id')->value('id');
-        abort_if(!$factureId, 422, "Aucune facture n'existe encore pour ce dossier.");
-
         $data = $request->validate([
+            // Depuis les factures complémentaires (2026-11-23), un dossier peut en porter plusieurs :
+            // le paiement dit laquelle il règle. Sans précision, la principale — et non « la
+            // dernière », qui serait la complémentaire et encaisserait au mauvais endroit.
+            'facture_id'     => ['nullable', 'integer', Rule::exists('factures', 'id')->where('dossier_id', $dossier->id)],
             'date_paiement'  => ['required', 'date'],
             'montant'        => ['required', 'numeric', 'min:0.01'],
-            'moyen_paiement' => ['nullable', 'string', 'max:30'],
+            'moyen_paiement' => ['nullable', Rule::enum(MoyenPaiement::class)], // liste fermée (2026-11-23)
             'notes'          => ['nullable', 'string', 'max:500'],
         ]);
+
+        $factureId = $data['facture_id'] ?? $dossier->factures()->principales()->latest('id')->value('id');
+        unset($data['facture_id']);
+        abort_if(!$factureId, 422, "Aucune facture n'existe encore pour ce dossier.");
 
         $paiement = DB::transaction(function () use ($factureId, $data) {
             // Le verrou sérialise les encaissements concurrents sur cette facture.
@@ -192,7 +199,7 @@ class FactureController extends Controller
         $data = $request->validate([
             'date_paiement'  => ['required', 'date'],
             'montant'        => ['required', 'numeric', 'min:0.01'],
-            'moyen_paiement' => ['nullable', 'string', 'max:30'],
+            'moyen_paiement' => ['nullable', Rule::enum(MoyenPaiement::class)], // liste fermée (2026-11-23)
             'notes'          => ['nullable', 'string', 'max:500'],
         ]);
 
@@ -302,14 +309,40 @@ class FactureController extends Controller
         $data = $request->validate([
             'note_date'  => ['required', 'date'],
             'expediteur' => ['nullable', 'string', 'max:150'],
+            // La banque choisie par l'étude (2026-11-20) : un compte actif, ou celui déjà retenu
+            // s'il a été désactivé depuis — le retirer d'office changerait une facture remise.
+            'compte_bancaire_id' => ['nullable', 'integer', Rule::exists('comptes_bancaires', 'id')->where(
+                fn ($q) => $q->where('actif', true)->orWhere('id', $facture->compte_bancaire_id ?? 0),
+            )],
+            // Pages des statuts et de la DNSV, sans pages de garde.
+            'nb_pages'   => ['nullable', 'integer', 'min:0', 'max:9999'],
         ]);
 
-        $facture->update($data);
+        // Les pages changent la quantité de deux lignes, donc le total : même verrou que la
+        // modification d'une ligne — rien ne bouge sous un paiement déjà reçu.
+        $pagesChangent = array_key_exists('nb_pages', $data) && (int) ($data['nb_pages'] ?? 0) !== (int) ($facture->nb_pages ?? 0);
+        if ($pagesChangent) {
+            $this->assertLignesModifiables($facture);
+        }
+
+        DB::transaction(function () use ($facture, $data, $pagesChangent) {
+            $facture->fill(['note_date' => $data['note_date'], 'expediteur' => $data['expediteur'] ?? null]);
+            if (array_key_exists('compte_bancaire_id', $data)) {
+                $facture->choisirCompte($data['compte_bancaire_id'] ? CompteBancaire::find($data['compte_bancaire_id']) : null);
+            }
+            $facture->save();
+
+            if ($pagesChangent) {
+                $facture->definirPages($data['nb_pages'] !== null ? (int) $data['nb_pages'] : null);
+            }
+        });
 
         JournalActivite::enregistrer(
             $facture->dossier,
             'En-tête de la facture modifié — date ' . \Carbon\Carbon::parse($data['note_date'])->format('d/m/Y')
-                . (filled($data['expediteur'] ?? null) ? ", expédiée par {$data['expediteur']}" : ''),
+                . (filled($data['expediteur'] ?? null) ? ", expédiée par {$data['expediteur']}" : '')
+                . ($facture->banque ? ", règlement sur {$facture->compteImprime()}" : '')
+                . ($pagesChangent ? ", {$facture->nb_pages} page(s) pour les timbres et les rôles" : ''),
             'facturation',
             ['facture_id' => $facture->id],
         );
@@ -352,15 +385,20 @@ class FactureController extends Controller
             'designation' => ['required', 'string', 'max:255'],
             'quantite'    => ['required', 'integer', 'min:1'],
             'montant'     => ['required', 'numeric', 'min:0'],
+            // Obligatoire : sans barème, rien d'autre ne dit si la ligne rémunère l'étude ou
+            // passe aux organismes — et la comptabilité du dossier en dépend.
+            'nature'      => ['required', Rule::enum(\App\Enums\NatureLigne::class)],
         ]);
+
+        $nature = \App\Enums\NatureLigne::from($data['nature']);
 
         LigneFacture::create([
             ...$data,
             'facture_id' => $facture->id,
-            // Une ligne ajoutée à la main est remisable : l'étude l'a créée délibérément, et
-            // aucun barème ne dit qu'elle serait un débours. Les lignes générées, elles,
-            // héritent du drapeau de leur barème.
-            'remise_autorisee' => true,
+            // Remisable si c'est un honoraire. Jusqu'au 2026-11-23, toute ligne manuelle l'était,
+            // « faute de barème disant qu'elle serait un débours » — or les 26 lignes manuelles
+            // en base étaient **toutes** des débours (JAL, RCCM, DNSV).
+            'remise_autorisee' => $nature->remisableParDefaut(),
         ]);
         $facture->recalculerTotal();
 

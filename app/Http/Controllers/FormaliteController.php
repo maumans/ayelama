@@ -204,20 +204,46 @@ class FormaliteController extends Controller
         $data = $request->validate([
             'date_depot'       => ['nullable', 'date'],
             'montant_paye'     => ['nullable', 'numeric', 'min:0'],
+            // Comment l'étude a payé l'organisme (2026-11-23) — la comptabilité du dossier le demande.
+            'moyen'            => ['nullable', Rule::enum(\App\Enums\MoyenPaiement::class)],
             'numero_recepisse' => ['nullable', 'string', 'max:100'],
         ]);
 
         $dateDepot = $data['date_depot'] ?? now()->toDateString();
 
-        $formalite->update([
-            'statut'           => 'depose',
-            'depose_at'        => $dateDepot,
-            'montant_paye'     => $data['montant_paye'] ?? null,
-            'numero_recepisse' => $data['numero_recepisse'] ?? null,
-            'echeance_at'      => $formalite->delai_heures
-                ? \Carbon\Carbon::parse($dateDepot)->addHours($formalite->delai_heures)
-                : $formalite->echeance_at,
-        ]);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($formalite, $data, $dateDepot, $request) {
+            $formalite->update([
+                'statut'           => 'depose',
+                'depose_at'        => $dateDepot,
+                'numero_recepisse' => $data['numero_recepisse'] ?? null,
+                'echeance_at'      => $formalite->delai_heures
+                    ? \Carbon\Carbon::parse($dateDepot)->addHours($formalite->delai_heures)
+                    : $formalite->echeance_at,
+            ]);
+
+            // Le montant payé au dépôt devient un **versement** du dossier (comptabilité des
+            // dossiers, 2026-11-23) : daté, avec son moyen et son récépissé. `montant_paye` en est
+            // désormais la somme, tenue par `Decaissement`. Un dépôt réenregistré (redépôt après
+            // rejet) **met à jour** ce versement plutôt que d'en créer un second : un redépôt ne
+            // se paie pas deux fois en règle générale ; un paiement en plus se saisit à part,
+            // dans l'onglet Facturation.
+            if (! empty($data['montant_paye']) && (float) $data['montant_paye'] > 0) {
+                \App\Models\Decaissement::updateOrCreate(
+                    ['formalite_id' => $formalite->id, 'via_depot' => true],
+                    [
+                        'dossier_id'        => $formalite->dossier_id,
+                        'libelle'           => $formalite->labelAffiche(),
+                        'organisme'         => $formalite->organisme,
+                        'date_decaissement' => $dateDepot,
+                        'montant'           => $data['montant_paye'],
+                        'moyen'             => $data['moyen'] ?? null,
+                        'reference'         => $data['numero_recepisse'] ?? null,
+                        'reprise'           => false,
+                        'enregistre_par_id' => $request->user()?->id,
+                    ],
+                );
+            }
+        });
 
         $msgRecepisse = !empty($data['numero_recepisse']) ? " (récépissé {$data['numero_recepisse']})" : "";
         JournalActivite::enregistrer(
@@ -311,7 +337,43 @@ class FormaliteController extends Controller
             $request->user(),
         );
 
-        return back()->with('success', $this->messageDeRetour($bilan));
+        // Droits d'enregistrement liquidés par les Impôts (2026-11-23) : connus ici seulement, ils
+        // font l'objet d'une facture complémentaire — la principale est déjà émise, donc figée.
+        $complement = $this->factureComplementaire($formalite, $saisies, $request->user());
+
+        return back()->with('success', trim($this->messageDeRetour($bilan) . ' ' . $complement));
+    }
+
+    /**
+     * Établit la facture complémentaire si le retour porte un montant de droits, et dit ce qui
+     * s'est passé — y compris quand rien ne s'est fait parce que la complémentaire est déjà émise.
+     */
+    private function factureComplementaire(Formalite $formalite, array $saisies, ?\App\Models\User $user): string
+    {
+        $montant = $saisies[\App\Enums\DonneeAuRetour::MontantDroits->value] ?? null;
+
+        if (! is_numeric($montant) || (float) $montant <= 0) {
+            return '';
+        }
+
+        ['facture' => $facture, 'etat' => $etat] = app(\App\Services\FacturationService::class)
+            ->etablirComplementaire($formalite->fresh(['dossier', 'bareme']), (float) $montant);
+
+        $fmt = \App\Support\FormatNombre::milliers($montant);
+
+        $message = match ($etat) {
+            'creee'            => "Facture complémentaire de {$fmt} GNF établie (proforma) : à émettre dans l'onglet Facturation.",
+            'mise_a_jour'      => "Facture complémentaire mise à jour : {$fmt} GNF.",
+            'inchangee'        => '',
+            'emise_differente' => "⚠ La facture complémentaire est déjà émise ({$facture->note_numero}) pour un autre montant : "
+                . 'elle n\'a pas été modifiée — une facture émise ne se réécrit pas. Signalez l\'écart au comptable.',
+        };
+
+        if ($message !== '') {
+            JournalActivite::enregistrer($formalite->dossier, $message, 'facturation', ['facture_id' => $facture->id, 'formalite_id' => $formalite->id], $user);
+        }
+
+        return $message;
     }
 
     /**

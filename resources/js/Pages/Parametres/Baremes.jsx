@@ -26,6 +26,7 @@ const EMPTY_BAREME_FORM = {
     applicable_tous: false, type_acte_ids: [], organisme: 'Impots', libelle: '',
     taux: '', montant_fixe: '', quantite_defaut: '1', base_calcul: 'valeur_acte', description: '',
     remise_autorisee: false,
+    nature: '',
     genere_formalite: false, depend_de_bareme_id: '',
     type_impot: '', retour_attendu: '', delai_heures: '', pieces_requises: [],
     donnees_au_retour: [],
@@ -47,6 +48,23 @@ function baremeCorrespond(b, f) {
     return true;
 }
 
+/**
+ * « moins de 100 M : 500 000 · dès 100 M : 1 000 000 » — la grille d'un barème par tranche de
+ * capital (débours des constitutions, 2026-11-23). Déclarée hors de tout composant : une `const`
+ * placée sous son premier usage rendrait la page blanche (CLAUDE.md, règle 2).
+ */
+function grilleTranches(tranches = []) {
+    const millions = (n) => `${Number(n) / 1_000_000} M`;
+    const tri = [...tranches].sort((a, b) => a.a_partir_de - b.a_partir_de);
+    return tri.map((t, i) => {
+        const suivante = tri[i + 1];
+        const borne = i === 0 && suivante
+            ? `moins de ${millions(suivante.a_partir_de)}`
+            : `dès ${millions(t.a_partir_de)}`;
+        return `${borne} : ${Number(t.montant).toLocaleString('fr-GN')}`;
+    }).join(' · ');
+}
+
 const ORGANISME_COLORS = {
     APIP:         'bg-blue-50 text-blue-700',
     Impots:       'bg-amber-50 text-amber-800',
@@ -59,6 +77,7 @@ const ORGANISME_COLORS = {
 
 function ModalAjouterBareme({ open, onClose, bareme = null, typeActePreselection = null, typesActes, typesActesAvecBaremes, organismes, donneesAuRetour = [] }) {
     const isEdit = Boolean(bareme);
+    const naturesLigne = usePage().props.referentiels?.naturesLigne ?? [];
     const [form, setForm] = useState(EMPTY_BAREME_FORM);
     const [nouvellePiece, setNouvellePiece] = useState('');
     const [errors, setErrors] = useState({});
@@ -74,6 +93,7 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typeActePreselection
                 montant_fixe:     bareme.montant_fixe ?? '',
                 quantite_defaut:  String(bareme.quantite_defaut ?? 1),
                 remise_autorisee: !!bareme.remise_autorisee,
+                nature:           bareme.nature ?? '',
                 base_calcul:      bareme.base_calcul ?? 'valeur_acte',
                 description:      bareme.description ?? '',
                 genere_formalite: !!bareme.genere_formalite,
@@ -121,9 +141,11 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typeActePreselection
     };
 
     const submit = () => {
-        const { applicable_tous, type_acte_ids, ...rest } = form;
+        const { applicable_tous, type_acte_ids, nature, ...rest } = form;
         const payload = {
             ...rest,
+            // Vide = déduite de l'organisme par le serveur (Bareme::booted) ; jamais envoyée vide.
+            ...(nature ? { nature } : {}),
             taux:         form.taux         !== '' ? parseFloat(form.taux)         : null,
             montant_fixe: form.montant_fixe !== '' ? parseFloat(form.montant_fixe) : null,
             quantite_defaut: parseInt(form.quantite_defaut, 10) || 1,
@@ -221,7 +243,18 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typeActePreselection
                         </Select>
                     </div>
 
-                    {form.base_calcul === 'valeur_acte' ? (
+                    {bareme?.tranches?.length ? (
+                        <div className="space-y-1.5">
+                            <Label>Montant par tranche de capital (GNF)</Label>
+                            <p className="text-sm text-slate-700 bg-slate-50 rounded-lg px-3 py-2 font-ref">
+                                {grilleTranches(bareme.tranches)}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                                Grille fixée par l'étude, non modifiable ici : elle se corrige dans
+                                ReglesGestionHonorairesSeeder::GRILLE_DEBOURS.
+                            </p>
+                        </div>
+                    ) : form.base_calcul === 'valeur_acte' ? (
                         <div className="space-y-1.5">
                             <Label>Taux (%)</Label>
                             <div className="relative">
@@ -264,6 +297,21 @@ function ModalAjouterBareme({ open, onClose, bareme = null, typeActePreselection
                             générée — ajustable ensuite au cas par cas sur chaque dossier.
                         </p>
                         {errors.quantite_defaut && <p className="text-xs text-danger-text">{errors.quantite_defaut}</p>}
+                    </div>
+
+                    {/* Nature (2026-11-23) : ce qui fonde la comptabilité des dossiers — l'étude
+                        garde un honoraire, elle reverse un débours. Liste servie par le serveur. */}
+                    <div className="space-y-1.5">
+                        <Label>Nature</Label>
+                        <select
+                            value={form.nature}
+                            onChange={e => setForm(f => ({ ...f, nature: e.target.value }))}
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                        >
+                            <option value="">Selon l'organisme (Notaire → honoraire, sinon débours)</option>
+                            {naturesLigne.map(n => <option key={n.valeur} value={n.valeur}>{n.label}</option>)}
+                        </select>
+                        {errors.nature && <p className="text-xs text-danger-text">{errors.nature}</p>}
                     </div>
 
                     {/* Remise — distinct de la formalité, et volontairement au-dessus : c'est la
@@ -572,10 +620,12 @@ function TypeActeRow({ typeActe, baremesVisibles, filtreActif = false, onEdit, o
                                             ) : null}
                                         </td>
                                         <td className="text-xs text-slate-500">
-                                            {b.base_calcul === 'valeur_acte' ? '% valeur acte' : 'Montant fixe'}
+                                            {b.tranches?.length ? 'Par tranche de capital' : b.base_calcul === 'valeur_acte' ? '% valeur acte' : 'Montant fixe'}
                                         </td>
                                         <td className="font-ref text-seal font-semibold text-sm">
-                                            {b.base_calcul === 'valeur_acte'
+                                            {b.tranches?.length
+                                                ? <span className="text-xs">{grilleTranches(b.tranches)}</span>
+                                                : b.base_calcul === 'valeur_acte'
                                                 ? `${parseFloat(b.taux ?? 0).toFixed(4).replace(/\.?0+$/, '')} %`
                                                 : `${Number(b.montant_fixe ?? 0).toLocaleString('fr-GN')} GNF`
                                             }

@@ -55,36 +55,64 @@ class ReglesGestionHonorairesSeeder extends Seeder
     private const ROLE_PAR_PAGE   = 5_000;
 
     /**
+     * Les sept constitutions de société — celles dont les notes de frais portent le débours.
+     */
+    public const TYPES_CONSTITUTION = ['SOC-SARLU', 'SOC-SARL', 'SOC-SA', 'SOC-SAS', 'SOC-SASU', 'SOC-SNC', 'SOC-GIE'];
+
+    /**
+     * Le **débours** d'une constitution, par tranche de capital — déclaré ici seulement, et repris
+     * par la migration `2026_11_23_100000` qui l'installe sur une base existante.
+     *
+     * Notes réelles du 2026-11-20 : KOUMI (capital 10 000 000) → 500 000 ; NEXIUM (100 000 000) →
+     * 1 000 000. L'étude a confirmé la règle « selon le capital » et son application à toutes les
+     * formes, mais **n'a donné que ces deux points**. La coupure à 100 000 000 est donc une
+     * lecture, pas une grille communiquée : la ligne porte `a_confirmer`, visible à l'écran
+     * Barèmes et sur la facture. Corriger la grille = corriger ce tableau, ou les tranches de la
+     * ligne en base.
+     *
+     * @var list<array{a_partir_de: int, montant: int}>
+     */
+    public const GRILLE_DEBOURS = [
+        ['a_partir_de' => 0,           'montant' => 500_000],
+        ['a_partir_de' => 100_000_000, 'montant' => 1_000_000],
+    ];
+
+    public const SOURCE_DEBOURS = "Notes de frais de l'étude KOUMI (325/MAB/2026) et NEXIUM (324/MAB/26) : "
+        . '10 M de capital → 500 000, 100 M → 1 000 000. Tranches intermédiaires non communiquées : '
+        . 'coupure à 100 000 000 à confirmer.';
+
+    /**
      * La grille relevée, par type d'acte.
      *
-     * `cle` identifie la ligne existante par son libellé en base — les libellés de la note de
-     * frais ne sont pas tout à fait ceux du seeder d'origine, et renommer en masse casserait le
-     * lien avec les factures déjà émises.
+     * `cle` identifie la ligne existante par son libellé en base. Les libellés suivent ceux des
+     * notes de l'étude depuis le 2026-11-23 (migration `2026_11_23_100000`). Renommer un barème
+     * ne touche aucune facture : la ligne de facture garde sa désignation, et son lien au barème
+     * passe par `bareme_id`.
      */
     private const GRILLE = [
         // ── Constitutions : une note de frais par forme ──────────────────────
         'SOC-SARLU' => [
-            ['cle' => 'Honoraires forfaitaires',  'montant_fixe' => 4_500_000],
+            ['cle' => 'Honoraires Forfaitaires',  'montant_fixe' => 4_500_000],
             ['cle' => 'Frais APIP et RCCM',       'montant_fixe' => 390_000],
-            ['cle' => 'Insertion JAL (Journal Annonces Légales)', 'montant_fixe' => 250_000],
+            ['cle' => "Insertion dans un Journal d'Annonces Légales", 'montant_fixe' => 250_000],
             ['cle' => "Droits d'enregistrement des Statuts et de la DNSV", 'montant_fixe' => 0],
         ],
         'SOC-SARL' => [
-            ['cle' => 'Honoraires forfaitaires',  'montant_fixe' => 4_500_000],
+            ['cle' => 'Honoraires Forfaitaires',  'montant_fixe' => 4_500_000],
             ['cle' => 'Frais APIP et RCCM',       'montant_fixe' => 390_000],
-            ['cle' => 'Insertion JAL (Journal Annonces Légales)', 'montant_fixe' => 250_000],
+            ['cle' => "Insertion dans un Journal d'Annonces Légales", 'montant_fixe' => 250_000],
             ['cle' => "Droits d'enregistrement des Statuts et de la DNSV", 'montant_fixe' => 0],
         ],
         'SOC-SAS' => [
-            ['cle' => 'Honoraires forfaitaires',  'montant_fixe' => 8_500_000],
+            ['cle' => 'Honoraires Forfaitaires',  'montant_fixe' => 8_500_000],
             ['cle' => 'Frais APIP et RCCM',       'montant_fixe' => 490_000],
-            ['cle' => 'Insertion JAL (Journal Annonces Légales)', 'montant_fixe' => 250_000],
+            ['cle' => "Insertion dans un Journal d'Annonces Légales", 'montant_fixe' => 250_000],
             ['cle' => "Droits d'enregistrement des Statuts et de la DNSV", 'montant_fixe' => 0],
         ],
         'SOC-SASU' => [
-            ['cle' => 'Honoraires forfaitaires',  'montant_fixe' => 8_500_000],
+            ['cle' => 'Honoraires Forfaitaires',  'montant_fixe' => 8_500_000],
             ['cle' => 'Frais APIP et RCCM',       'montant_fixe' => 490_000],
-            ['cle' => 'Insertion JAL (Journal Annonces Légales)', 'montant_fixe' => 250_000],
+            ['cle' => "Insertion dans un Journal d'Annonces Légales", 'montant_fixe' => 250_000],
             ['cle' => "Droits d'enregistrement des Statuts et de la DNSV", 'montant_fixe' => 0],
         ],
 
@@ -152,6 +180,31 @@ class ReglesGestionHonorairesSeeder extends Seeder
             'motif'   => "Désactivé le 2026-10-30 : même motif que pour les constitutions — les "
                 . "notes de l'étude portent deux lignes distinctes, comptées à la page.",
         ],
+        // Les trois suivants : notes réelles KOUMI (325/MAB/2026) et NEXIUM (324/MAB/26) du
+        // 2026-11-20, retrait confirmé par l'étude le même jour. Ils étaient `a_confirmer` et
+        // ajoutaient 250 000 GNF qu'aucune note ne porte.
+        [
+            'types'   => ['SOC-SARLU', 'SOC-SARL', 'SOC-SA', 'SOC-SAS', 'SOC-SASU', 'SOC-SNC', 'SOC-GIE'],
+            'libelle' => 'Enregistrement fiscal acte',
+            'motif'   => "Désactivé le 2026-11-20 à la demande de l'étude : absent de ses notes de "
+                . 'constitution (KOUMI 325, NEXIUM 324). Sa formalité doublait celle des « Droits '
+                . "d'enregistrement des Statuts et de la DNSV » (mêmes pièces, même impôt).",
+        ],
+        [
+            'types'   => ['SOC-SARLU', 'SOC-SARL', 'SOC-SA', 'SOC-SAS', 'SOC-SASU', 'SOC-SNC', 'SOC-GIE'],
+            'libelle' => 'Enregistrement au Tribunal de Commerce (RCCM)',
+            'motif'   => "Désactivé le 2026-11-20 à la demande de l'étude : absent de ses notes de "
+                . 'constitution (KOUMI 325, NEXIUM 324), qui ne facturent que « Frais APIP et RCCM ».',
+        ],
+        // ⚠️ En modification, ce tarif **générait la démarche de greffe** (« Extrait RCCM
+        // modifié »). L'étude a confirmé le retrait le 2026-11-23 en le sachant : une modification
+        // ne porte plus de formalité de greffe générée d'office.
+        [
+            'types'   => ['SOC-MOD'],
+            'libelle' => 'Enregistrement au Tribunal de Commerce (RCCM)',
+            'motif'   => "Désactivé le 2026-11-23 à la demande de l'étude, comme pour les constitutions. "
+                . 'Il générait aussi la démarche de greffe de la modification : elle ne s\'ouvre plus d\'office.',
+        ],
     ];
 
     /**
@@ -164,18 +217,20 @@ class ReglesGestionHonorairesSeeder extends Seeder
     private const LIGNES_A_LA_PAGE = [
         [
             'organisme'       => 'Impots',
-            'libelle'         => 'Timbres fiscaux (à la page)',
+            'libelle'         => 'Timbres fiscaux',
             'montant_fixe'    => self::TIMBRE_PAR_PAGE,
             'quantite_defaut' => 0,
+            'par_page'        => true, // quantité = pages de la facture (2026-11-20)
             'base_calcul'     => 'montant_fixe',
             'description'     => 'Timbre fiscal : 2 000 GNF par page. Saisir le nombre de pages.',
             'ordre'           => 20,
         ],
         [
             'organisme'       => 'Impots',
-            'libelle'         => 'Rôles (à la page)',
+            'libelle'         => 'Rôles',
             'montant_fixe'    => self::ROLE_PAR_PAGE,
             'quantite_defaut' => 0,
+            'par_page'        => true,
             'base_calcul'     => 'montant_fixe',
             'description'     => 'Rôle : 5 000 GNF par page. Saisir le nombre de pages.',
             'ordre'           => 21,
@@ -240,8 +295,42 @@ class ReglesGestionHonorairesSeeder extends Seeder
                 ->update(['actif' => false, 'source' => $contredit['motif'], 'a_confirmer' => false]);
         }
 
-        // 4. Tout tarif actif que ce seeder n'a pas sourcé reste facturable, mais le dit.
+        // 4. Le débours des constitutions, par tranche de capital.
+        foreach (self::TYPES_CONSTITUTION as $code) {
+            if (isset($types[$code])) {
+                self::poserDebours($types[$code]);
+            }
+        }
+
+        // 5. Tout tarif actif que ce seeder n'a pas sourcé reste facturable, mais le dit.
         $this->marquerLeReste();
+    }
+
+    /**
+     * Pose la ligne « Débours » d'une constitution. Partagée avec la migration qui l'installe sur
+     * une base existante — une seule définition de la ligne.
+     *
+     * Un débours : jamais remisable (l'étude reverse ce qu'elle facture), aucune formalité.
+     */
+    public static function poserDebours(int $typeActeId): Bareme
+    {
+        return Bareme::updateOrCreate(
+            ['type_acte_id' => $typeActeId, 'libelle' => 'Débours'],
+            [
+                'organisme'        => 'Autre',
+                'base_calcul'      => 'montant_fixe',
+                'montant_fixe'     => null,
+                'tranches'         => self::GRILLE_DEBOURS,
+                'quantite_defaut'  => 1,
+                'remise_autorisee' => false,
+                'genere_formalite' => false,
+                'description'      => 'Débours selon le capital social (tranches).',
+                'source'           => self::SOURCE_DEBOURS,
+                'a_confirmer'      => true,
+                'actif'            => true,
+                'ordre'            => 22,
+            ],
+        );
     }
 
     /**

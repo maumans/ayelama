@@ -98,6 +98,25 @@ cas précis** :
 - La variante `_lettres` d'un montant est rendue **sans devise** : le modèle doit écrire lui-même
   « FRANCS GUINÉENS » après la balise.
 
+### Les variantes de rédaction (depuis le 2026-11-20)
+
+Ce que les actes finaux de l'étude écrivent sans que personne le saisisse. Toutes sont
+**dérivées** (`App\Support\VariantesRedaction`) — à la racine comme dans un bloc répétable.
+
+| Vous avez… | Vous gagnez | Exemple |
+|---|---|---|
+| une **civilité** (`pp.civilite`, `associes.civilite`…) | `civilite_longue` · `ne` · `accord` · `lequel` · `il` | `${pp.civilite_longue}` → Madame · `${pp.ne}` → Née · `soussigné${pp.accord}` → soussignée · `${pp.lequel}` → Laquelle · `${ger.il}` → Elle |
+| une **date** | `_texte` · `_court` | `${pp.date_naissance_texte}` → quinze Février mille neuf cent quatre-vingt · `${ger.date_naissance_court}` → 15 Février 1980 |
+| `soc.nombre_parts`, `soc.premier_exercice_annee` | `_lettres` | CENT · DEUX MILLE VINGT-SEPT |
+| `soc.objet_social` | bloc `${soc.activites}` … `${soc.activites.libelle}` … `${/soc.activites}` · `${soc.objet_social_ligne}` | une puce par ligne saisie · « L'import et l'export, l'industrie » |
+| les associés ou l'associé unique | `${soc.souscripteurs}` | deux (02) personnes physiques |
+| un bloc | `${bloc.numero}` · et, s'il porte `parts_chiffres` : `parts_debut` · `parts_fin` · `apport_chiffres` (+ `_lettres`) | « 1°) » · numérotées de 61 à 100 |
+| la date de l'acte | `${date_acte_court}` | 19 Novembre 2026 |
+
+⚠️ **Une civilité vide ne donne rien** — ni « Né » ni « Née ». La balise reste vide et
+l'historique du dossier le signale. Et le **nom de famille** (`${ger.nom_famille}`,
+`${ger.prenoms}`) ne vient que d'une fiche client liée : il n'est jamais découpé du nom complet.
+
 ### Deux commodités supplémentaires
 
 - **Adresse recomposée** : pour les préfixes `pp.`, `ger.`, `acq.`, `loc.` et `liquidateur.`, la
@@ -151,7 +170,12 @@ PhpWord duplique le bloc autant de fois qu'il y a d'éléments.
 - à l'intérieur, les champs s'écrivent `${bloc.champ}` — jamais `${champ}` seul ;
 - un bloc peut encadrer une **ligne de tableau** (le marqueur d'ouverture dans la ligne
   précédente, la fermeture dans la ligne suivante) ;
-- un bloc **vide** (aucun associé saisi) disparaît proprement.
+- un bloc **vide** (aucun associé saisi) disparaît proprement ;
+- un même bloc peut apparaître **plusieurs fois** dans le document (comparution, apports,
+  répartition des parts) : chaque occurrence est répétée (corrigé le 2026-11-20 — seule la
+  dernière l'était) ;
+- dans un **tableau** (formulaire RCCM), pas de marqueur : des `${gerants.prenom_nom}` dans une
+  ligne suffisent, la ligne est dupliquée par élément.
 
 ⚠️ **Ce que le moteur ne sait pas encore faire** : dupliquer les lignes d'un tableau par
 `cloneRowAndSetValues`. Les tableaux à nombre de lignes variable qui ne passent pas par un bloc

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { Zap, Banknote, AlertTriangle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -27,12 +27,19 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
     const [dateDepot, setDateDepot] = useState(todayISO());
     const [montantPaye, setMontantPaye] = useState('');
     const [numeroRecepisse, setNumeroRecepisse] = useState('');
+    // Comment l'étude a payé l'organisme : le montant devient un versement du dossier (2026-11-23).
+    const [moyen, setMoyen] = useState('');
+    const moyensPaiement = usePage().props.referentiels?.moyensPaiement ?? [];
 
     useEffect(() => {
         if (open) {
             setDateDepot(todayISO());
-            setMontantPaye(formalite?.montant_calcule ? String(formalite.montant_calcule) : '');
-            setNumeroRecepisse('');
+            // Un redépôt reprend ce qui a déjà été payé, et non le montant calculé : le versement
+            // du premier dépôt est mis à jour, pas doublé.
+            const dejaPaye = formalite?.montant_paye;
+            setMontantPaye(dejaPaye ? String(dejaPaye) : formalite?.montant_calcule ? String(formalite.montant_calcule) : '');
+            setNumeroRecepisse(formalite?.numero_recepisse ?? '');
+            setMoyen('');
         }
     }, [open, formalite?.id]);
 
@@ -50,6 +57,7 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
         router.post(`/formalites/${formalite.id}/deposer`, {
             date_depot: dateDepot,
             montant_paye: montantPaye || null,
+            moyen: moyen || null,
             numero_recepisse: numeroRecepisse,
         }, {
             preserveScroll: true,
@@ -92,6 +100,21 @@ export function ModalDepotFormalite({ open, onClose, formalite }) {
                             <Label>Montant réellement payé (GNF)</Label>
                             <NumberField value={montantPaye} onValueChange={setMontantPaye} placeholder="0" />
                         </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <Label>Moyen de paiement</Label>
+                        <select
+                            value={moyen}
+                            onChange={e => setMoyen(e.target.value)}
+                            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                        >
+                            <option value="">Non précisé</option>
+                            {moyensPaiement.map(m => <option key={m.valeur} value={m.valeur}>{m.label}</option>)}
+                        </select>
+                        <p className="text-xs text-slate-500">
+                            Le montant payé est enregistré comme versement du dossier (onglet Facturation).
+                        </p>
                     </div>
 
                     <div className="space-y-1.5">

@@ -146,7 +146,7 @@ export function ModalRetourFormalite({ open, onClose, formalite }) {
                     {resultat === 'recu' && attendues.length > 0 && (
                         <div className="space-y-3 rounded-lg border border-seal/30 bg-seal/5 p-3">
                             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                                Informations délivrées — reportées à la fiche société
+                                Informations délivrées par l'organisme
                             </div>
 
                             {attendues.map(({ valeur, label, type, exemple }) => (
@@ -157,6 +157,23 @@ export function ModalRetourFormalite({ open, onClose, formalite }) {
                                             value={isoDateToFR(donnees[valeur] ?? '')}
                                             onValueChange={val => setDonnees(d => ({ ...d, [valeur]: frDateToISO(val) }))}
                                         />
+                                    ) : type === 'montant' ? (
+                                        // Droits d'enregistrement (2026-11-23) : ils établissent la
+                                        // facture complémentaire — un nombre, pas un texte libre.
+                                        <div className="space-y-1">
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                inputMode="numeric"
+                                                value={donnees[valeur] ?? ''}
+                                                onChange={e => setDonnees(d => ({ ...d, [valeur]: e.target.value }))}
+                                                placeholder={exemple}
+                                                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono"
+                                            />
+                                            <p className="text-xs text-slate-500">
+                                                Saisi, ce montant établit une facture complémentaire (proforma) à émettre dans l'onglet Facturation.
+                                            </p>
+                                        </div>
                                     ) : (
                                         <input
                                             type="text"

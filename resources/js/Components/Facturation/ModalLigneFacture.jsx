@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,10 @@ export function ModalLigneFacture({ open, onClose, factureId, ligne = null }) {
     const [designation, setDesignation] = useState('');
     const [quantite, setQuantite] = useState('1');
     const [montant, setMontant] = useState('');
+    // Honoraire ou débours (2026-11-23) — obligatoire pour une ligne ajoutée à la main : sans
+    // barème, rien d'autre ne le dit, et la comptabilité du dossier en dépend.
+    const [nature, setNature] = useState('');
+    const naturesLigne = usePage().props.referentiels?.naturesLigne ?? [];
 
     // La remise se saisit sous **deux formes liées** : on tape l'une, l'autre se calcule.
     // `remiseType` retient laquelle a été saisie — c'est elle qui est envoyée au serveur, parce
@@ -36,6 +40,7 @@ export function ModalLigneFacture({ open, onClose, factureId, ligne = null }) {
         setDesignation(ligne?.designation ?? '');
         setQuantite(ligne ? String(ligne.quantite) : '1');
         setMontant(ligne ? String(ligne.montant) : '');
+        setNature(ligne?.nature ?? '');
 
         // On repart de ce qui a été saisi, et on affiche l'autre forme telle que le serveur
         // l'a calculée — les deux vues d'une même remise.
@@ -82,6 +87,8 @@ export function ModalLigneFacture({ open, onClose, factureId, ligne = null }) {
             designation,
             quantite: parseInt(quantite, 10) || 1,
             montant,
+            // La nature se choisit à la création ; elle ne change plus ensuite (elle décide de la remise).
+            ...(estModification ? {} : { nature }),
             // Envoyé seulement en modification : une ligne nouvelle se crée d'abord, sa remise
             // se pose ensuite — la route de création ne la connaît pas.
             ...(estModification ? {
@@ -111,6 +118,29 @@ export function ModalLigneFacture({ open, onClose, factureId, ligne = null }) {
                         <Label>Désignation <span className="text-danger">*</span></Label>
                         <Input value={designation} onChange={e => setDesignation(e.target.value)} placeholder="ex : Timbres fiscaux & rôles" required />
                     </div>
+
+                    {estModification ? (
+                        ligne?.natureLabel && (
+                            <p className="text-xs text-slate-500">Nature : <strong>{ligne.natureLabel}</strong></p>
+                        )
+                    ) : (
+                        <div className="space-y-1.5">
+                            <Label>Nature <span className="text-danger">*</span></Label>
+                            <select
+                                value={nature}
+                                onChange={e => setNature(e.target.value)}
+                                required
+                                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-seal"
+                            >
+                                <option value="">Choisir…</option>
+                                {naturesLigne.map(n => <option key={n.valeur} value={n.valeur}>{n.label}</option>)}
+                            </select>
+                            <p className="text-xs text-slate-500">
+                                Un honoraire revient à l'étude et peut être remisé ; un débours (impôts, greffe,
+                                journal…) est reversé à l'organisme.
+                            </p>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">

@@ -62,7 +62,7 @@ class FactureGeneratorService
 
         $tp->setValue('fac.numero', $facture->note_numero);
         $tp->setValue('fac.date', 'Le ' . $facture->note_date?->translatedFormat('d F Y'));
-        $tp->setValue('fac.compte_numero', $facture->compte_numero ?: '—');
+        $tp->setValue('fac.compte_numero', $this->echapper($facture->compteImprime() ?? '—'));
         $tp->setValue('fac.objet', $this->echapper($facture->objet));
         $tp->setValue('fac.detail', $this->detailPrestations($lignes));
         $tp->setValue('fac.num_timbres', (string) ($lignes->count() + 1));

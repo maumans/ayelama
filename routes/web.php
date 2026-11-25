@@ -122,6 +122,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Facturation
     Route::get('/facturation', [FactureController::class, 'index'])->name('facturation.index');
+    // Comptabilité des dossiers (2026-11-23) : versements aux organismes, et vue d'ensemble.
+    Route::post('/dossiers/{dossier:reference}/decaissements', [\App\Http\Controllers\DecaissementController::class, 'store'])->name('dossiers.decaissements.store');
+    Route::patch('/decaissements/{decaissement}', [\App\Http\Controllers\DecaissementController::class, 'update'])->name('decaissements.update');
+    Route::delete('/decaissements/{decaissement}', [\App\Http\Controllers\DecaissementController::class, 'destroy'])->name('decaissements.destroy');
+    Route::get('/comptabilite', [\App\Http\Controllers\ComptabiliteController::class, 'index'])->name('comptabilite.index');
+    Route::get('/comptabilite/export.csv', [\App\Http\Controllers\ComptabiliteController::class, 'export'])->name('comptabilite.export');
     Route::post('/dossiers/{dossier:reference}/paiements', [FactureController::class, 'enregistrerPaiement'])->name('dossiers.paiements.store');
     Route::patch('/paiements/{paiement}', [FactureController::class, 'updatePaiement'])->name('paiements.update');
     Route::delete('/paiements/{paiement}', [FactureController::class, 'destroyPaiement'])->name('paiements.destroy');
@@ -275,6 +281,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/securite', [ParametresController::class, 'securite'])->name('securite');
         Route::post('/securite', [ParametresController::class, 'updateSecurite'])->name('securite.update');
         Route::post('/defauts', [ParametresController::class, 'updateDefauts'])->name('defauts.update');
+        // Comptes bancaires de l'étude, imprimés sur la facture selon la banque choisie (2026-11-20).
+        // Pas de suppression : une facture remise cite le compte — on le désactive.
+        Route::post('/comptes-bancaires', [ParametresController::class, 'storeCompteBancaire'])->name('comptes_bancaires.store');
+        Route::patch('/comptes-bancaires/{compteBancaire}', [ParametresController::class, 'updateCompteBancaire'])->name('comptes_bancaires.update');
     });
 
     // Profil

@@ -197,6 +197,13 @@ export default function FacturationIndex() {
                                                         ) : f.note_numero && (
                                                             <span className="font-ref text-[11px] text-slate-500">N° {f.note_numero}</span>
                                                         )}
+                                                        {/* Droits liquidés au retour des Impôts (2026-11-23) : un
+                                                            dossier peut porter deux lignes ici, il faut savoir laquelle. */}
+                                                        {f.estComplementaire && (
+                                                            <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700">
+                                                                Complémentaire
+                                                            </span>
+                                                        )}
                                                         {f.dossier.typeActe && (
                                                             <span className="bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5 text-[10px] text-slate-500">
                                                                 {f.dossier.typeActe}

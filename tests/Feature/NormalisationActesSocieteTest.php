@@ -163,10 +163,10 @@ class NormalisationActesSocieteTest extends TestCase
         // Relevé sur les notes de frais de l'étude : la SAS coûte près du double de la SARL,
         // et ses frais APIP diffèrent. La base appliquait la même grille aux sept formes.
         $attendu = [
-            'SOC-SARL'  => ['Honoraires forfaitaires' => 4_500_000, 'Frais APIP et RCCM' => 390_000],
-            'SOC-SARLU' => ['Honoraires forfaitaires' => 4_500_000, 'Frais APIP et RCCM' => 390_000],
-            'SOC-SAS'   => ['Honoraires forfaitaires' => 8_500_000, 'Frais APIP et RCCM' => 490_000],
-            'SOC-SASU'  => ['Honoraires forfaitaires' => 8_500_000, 'Frais APIP et RCCM' => 490_000],
+            'SOC-SARL'  => ['Honoraires Forfaitaires' => 4_500_000, 'Frais APIP et RCCM' => 390_000],
+            'SOC-SARLU' => ['Honoraires Forfaitaires' => 4_500_000, 'Frais APIP et RCCM' => 390_000],
+            'SOC-SAS'   => ['Honoraires Forfaitaires' => 8_500_000, 'Frais APIP et RCCM' => 490_000],
+            'SOC-SASU'  => ['Honoraires Forfaitaires' => 8_500_000, 'Frais APIP et RCCM' => 490_000],
         ];
 
         foreach ($attendu as $code => $lignes) {
@@ -216,7 +216,7 @@ class NormalisationActesSocieteTest extends TestCase
 
         if ($sa) {
             $honoraires = Bareme::where('type_acte_id', $sa->id)
-                ->where('libelle', 'Honoraires forfaitaires')
+                ->where('libelle', 'Honoraires Forfaitaires')
                 ->first();
 
             $this->assertTrue(

@@ -40,6 +40,11 @@ class Formalite extends Model
         return $this->belongsTo(Dossier::class);
     }
 
+    public function decaissements()
+    {
+        return $this->hasMany(Decaissement::class);
+    }
+
     public function bareme()
     {
         return $this->belongsTo(Bareme::class);

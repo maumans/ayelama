@@ -72,6 +72,12 @@ class HandleInertiaRequests extends Middleware
 
         return [
             ...parent::share($request),
+            // Listes fermées servies par le serveur (2026-11-23) : l'écran n'en recopie aucune, il
+            // n'y a donc pas de miroir JavaScript à tenir d'accord. Constantes, aucune requête.
+            'referentiels' => [
+                'moyensPaiement' => \App\Enums\MoyenPaiement::options(),
+                'naturesLigne'   => \App\Enums\NatureLigne::options(),
+            ],
             'auth' => [
                 'user' => $user ? [
                     'id'         => $user->id,

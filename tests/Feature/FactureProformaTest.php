@@ -73,7 +73,9 @@ class FactureProformaTest extends TestCase
 
         $facture->refresh();
         $this->assertSame(StatutFacture::Emise, $facture->statut);
-        $this->assertSame(sprintf('001/MAB/%s', date('y')), $facture->note_numero);
+        // Premier numéro de l'année — 326 en 2026, reprise du registre papier (Facture::REPRISE_REGISTRE).
+        $premier = \App\Models\Facture::REPRISE_REGISTRE[date('y')] ?? 1;
+        $this->assertSame(sprintf('%03d/MAB/%s', $premier, date('y')), $facture->note_numero);
         $this->assertTrue($facture->note_date->isToday());
         $this->assertSame('Aïssata Camara', $facture->expediteur);
         $this->assertTrue($facture->peutRecevoirPaiement());
@@ -88,11 +90,13 @@ class FactureProformaTest extends TestCase
         $b = $this->proforma();
         $c = $this->proforma();
 
-        $b->emettre(); // 001
-        $a->emettre(); // 002 — id plus petit que b
-        $c->emettre(); // 003, et non 002 à nouveau
+        $b->emettre(); // n
+        $a->emettre(); // n + 1 — id plus petit que b
+        $c->emettre(); // n + 2, et non n + 1 à nouveau
 
-        $this->assertSame(['001', '002', '003'], [substr($b->note_numero, 0, 3), substr($a->fresh()->note_numero, 0, 3), substr($c->fresh()->note_numero, 0, 3)]);
+        $n = Facture::REPRISE_REGISTRE[date('y')] ?? 1; // 326 en 2026
+        $attendus = array_map(fn ($i) => sprintf('%03d', $n + $i), [0, 1, 2]);
+        $this->assertSame($attendus, [substr($b->note_numero, 0, 3), substr($a->fresh()->note_numero, 0, 3), substr($c->fresh()->note_numero, 0, 3)]);
     }
 
     public function test_une_facture_ne_semet_quune_fois_et_jamais_vide(): void
@@ -167,6 +171,20 @@ class FactureProformaTest extends TestCase
     private function html(Facture $facture): string
     {
         return view('factures.pdf', $this->vue($facture))->render();
+    }
+
+    public function test_la_reprise_du_registre_et_les_numeros_d_essai(): void
+    {
+        $annee = date('y');
+        $premier = Facture::REPRISE_REGISTRE[$annee] ?? 1;
+
+        // Les essais renumérotés « TEST-… » ne comptent pas dans la séquence.
+        $this->proforma()->update(['statut' => StatutFacture::Emise, 'note_numero' => "TEST-025/MAB/{$annee}"]);
+        $this->assertSame(sprintf('%03d/MAB/%s', $premier, $annee), Facture::genererNumero());
+
+        // Au-delà du point de reprise, la séquence suit son cours normal.
+        $this->proforma()->update(['statut' => StatutFacture::Emise, 'note_numero' => sprintf('%03d/MAB/%s', $premier + 4, $annee)]);
+        $this->assertSame(sprintf('%03d/MAB/%s', $premier + 5, $annee), Facture::genererNumero());
     }
 
     private function pages(Facture $facture): int

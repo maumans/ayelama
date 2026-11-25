@@ -7,6 +7,7 @@ use App\Enums\OrganismeFormalite;
 use App\Enums\RoleUtilisateur;
 use App\Enums\TypeAssemblee;
 use App\Models\Bareme;
+use App\Models\CompteBancaire;
 use App\Models\DocumentAttendu;
 use App\Models\ModeleActe;
 use App\Models\ModeleCourrier;
@@ -102,6 +103,7 @@ class ParametresController extends Controller
             'apparence'         => $settings,
             'securite'          => $this->securiteSettings(),
             'defauts'           => Setting::defaultAssignees(),
+            'comptesBancaires'  => $this->comptesBancaires(),
         ]);
     }
 
@@ -724,9 +726,13 @@ class ParametresController extends Controller
         return [
             'id'                  => $b->id,
             'organisme'           => $b->organisme,
+            'nature'              => $b->nature?->value,
             'libelle'             => $b->libelle,
             'taux'                => $b->taux,
             'montant_fixe'        => $b->montant_fixe,
+            // Montant par tranche de capital (débours des constitutions, 2026-11-23) : quand elles
+            // existent, elles remplacent `montant_fixe`.
+            'tranches'            => $b->tranches,
             'quantite_defaut'     => $b->quantite_defaut ?? 1,
             // Les honoraires de l'étude se remisent, un débours non : elle verse au tiers
             // l'intégralité de ce qu'elle facture. Voir App\Enums\TypeRemise.
@@ -825,6 +831,8 @@ class ParametresController extends Controller
             'montant_fixe'      => ['nullable', 'numeric', 'min:0'],
             'quantite_defaut'   => ['nullable', 'integer', 'min:1'],
             'remise_autorisee'  => ['boolean'],
+            // Honoraire ou débours ; absente, elle se déduit de l'organisme (Bareme::booted).
+            'nature'            => ['nullable', Rule::enum(\App\Enums\NatureLigne::class)],
             'base_calcul'       => ['required', 'in:valeur_acte,montant_fixe'],
             'description'       => ['nullable', 'string'],
             'genere_formalite'    => ['boolean'],
@@ -864,6 +872,7 @@ class ParametresController extends Controller
             'montant_fixe'      => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'quantite_defaut'   => ['sometimes', 'nullable', 'integer', 'min:1'],
             'remise_autorisee'  => ['sometimes', 'boolean'],
+            'nature'            => ['sometimes', Rule::enum(\App\Enums\NatureLigne::class)],
             'base_calcul'       => ['sometimes', 'in:valeur_acte,montant_fixe'],
             'description'       => ['sometimes', 'nullable', 'string'],
             'actif'             => ['sometimes', 'boolean'],
@@ -1051,6 +1060,53 @@ class ParametresController extends Controller
         return back()->with('success', 'Assignations par défaut mises à jour.');
     }
 
+    // ── Comptes bancaires de l'étude ──────────────────────────────────────
+
+    /** @return array<string, array<int, mixed>> */
+    private function reglesCompteBancaire(): array
+    {
+        return [
+            'banque'     => ['required', 'string', 'max:100'],
+            // Chiffres seulement, espaces tolérés à la saisie : c'est un numéro imprimé sur la facture,
+            // une lettre glissée par erreur partirait chez le client.
+            'numero'     => ['required', 'string', 'max:60', 'regex:/^[0-9 ]+$/'],
+            'actif'      => ['boolean'],
+            'a_verifier' => ['boolean'],
+        ];
+    }
+
+    public function storeCompteBancaire(Request $request)
+    {
+        $data = $request->validate($this->reglesCompteBancaire());
+        $data['numero'] = str_replace(' ', '', $data['numero']);
+        $data['ordre'] = (int) CompteBancaire::max('ordre') + 1;
+
+        CompteBancaire::create($data);
+
+        return back()->with('success', "Compte {$data['banque']} ajouté.");
+    }
+
+    /**
+     * Corriger un numéro ne touche **pas** les factures qui l'ont déjà imprimé : elles en gardent
+     * une copie (`Facture::choisirCompte()`). Seules les factures à venir prennent le nouveau.
+     */
+    public function updateCompteBancaire(Request $request, CompteBancaire $compteBancaire)
+    {
+        $data = $request->validate($this->reglesCompteBancaire());
+        $data['numero'] = str_replace(' ', '', $data['numero']);
+
+        $compteBancaire->update($data);
+
+        return back()->with('success', "Compte {$compteBancaire->banque} mis à jour.");
+    }
+
+    /** @return \Illuminate\Support\Collection<int, array<string, mixed>> */
+    private function comptesBancaires()
+    {
+        return CompteBancaire::withCount('factures')->orderBy('ordre')->orderBy('banque')->get()
+            ->map->versArray()->values();
+    }
+
     // ── Helper commun pour index() et apparence() ─────────────────────────
 
     private function buildIndexData(array $extra = []): array
@@ -1067,6 +1123,7 @@ class ParametresController extends Controller
             'apparence' => $settings,
             'securite'  => $this->securiteSettings(),
             'defauts'   => Setting::defaultAssignees(),
+            'comptesBancaires' => $this->comptesBancaires(),
         ], $extra);
     }
 }

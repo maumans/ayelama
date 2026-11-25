@@ -5,7 +5,7 @@ import {
     LayoutDashboard, FolderOpen, ClipboardCheck, Building2,
     FileText, Users, Mail, Settings, Search, Archive,
     ChevronLeft, ChevronRight, LogOut, User,
-    Menu, Link2, Banknote, Gift, Landmark
+    Menu, Link2, Banknote, Gift, Landmark, Wallet
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -126,6 +126,8 @@ function buildNavItems(can, notifications) {
         { href: '/revisions',  label: 'Certifications',    icon: ClipboardCheck,  show: can?.reviser || can?.administrer, badge: notifications?.revisionCount || null },
         { href: '/formalites', label: 'Formalités',        icon: Building2,       show: can?.gererFormalites || can?.administrer, badge: notifications?.urgentCount || null },
         { href: '/facturation', label: 'Facturation',      icon: Banknote,        show: can?.gererFacturation || can?.administrer, badge: notifications?.factureImpayeCount || null },
+        // Comptabilité des dossiers (2026-11-23) : encaissé, versé aux organismes, provision ou avance.
+        { href: '/comptabilite', label: 'Comptabilité',    icon: Wallet,          show: can?.gererFacturation || can?.administrer },
         { href: '/modeles',    label: "Modèles d'actes",   icon: FileText,        show: true },
         { href: '/ged',        label: 'GED',                icon: Archive,         show: true },
         { href: '/repertoire', label: 'Répertoire',        icon: Users,           show: true },

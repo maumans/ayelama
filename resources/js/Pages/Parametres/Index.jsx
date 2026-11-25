@@ -18,7 +18,9 @@ import {
     AlertTriangle, Check, CheckCircle, CheckCircle2, ChevronDown, ChevronUp,
     ClipboardCheck, ExternalLink, FileText, Lock, Palette, Pencil, Percent, Plus,
     Scale, Search, Settings, Shield, ShieldCheck, Trash2, Upload, UserCog, Users, X, XCircle, MapPin,
+    Landmark,
 } from 'lucide-react';
+import { notifyValidationError } from '@/lib/toast';
 import { ROLE_META } from '@/data/roles';
 import { RoleBadgeList } from '@/components/ui/role-badge';
 
@@ -48,6 +50,7 @@ const TABS = [
     { id: 'utilisateurs', label: 'Utilisateurs',       icon: Users         },
     { id: 'types-actes',  label: "Types d'actes",      icon: FileText      },
     { id: 'assignations', label: 'Assignations',       icon: UserCog       },
+    { id: 'banques',      label: 'Comptes bancaires',  icon: Landmark      },
     { id: 'apparence',    label: 'Apparence',          icon: Palette       },
     { id: 'securite',     label: 'Sécurité',           icon: ShieldCheck   },
 ];
@@ -825,6 +828,137 @@ function TabAssignations({ defauts = {}, utilisateurs = [] }) {
     );
 }
 
+/**
+ * Les comptes bancaires de l'étude (2026-11-20). Sur la facture, on choisit la banque et son numéro
+ * s'imprime : « N° de compte : 011406700100 ORABANK GUINEE SA ».
+ *
+ * Pas de suppression : une facture remise cite le compte. On le désactive — il disparaît du choix
+ * sans toucher les factures qui l'ont imprimé, et qui en gardent une copie.
+ */
+function ModalCompteBancaire({ open, onClose, compte }) {
+    const vide = { banque: '', numero: '', actif: true, a_verifier: false };
+    const [form, setForm] = useState(vide);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (open) setForm(compte ? { banque: compte.banque, numero: compte.numero, actif: compte.actif, a_verifier: compte.a_verifier } : vide);
+    }, [open, compte?.id]);
+
+    const enregistrer = (e) => {
+        e.preventDefault();
+        setSaving(true);
+        const options = { preserveScroll: true, onError: notifyValidationError, onSuccess: onClose, onFinish: () => setSaving(false) };
+        compte
+            ? router.patch(`/parametres/comptes-bancaires/${compte.id}`, form, options)
+            : router.post('/parametres/comptes-bancaires', form, options);
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>{compte ? `Modifier — ${compte.banque}` : 'Ajouter un compte bancaire'}</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={enregistrer} className="space-y-4">
+                    <div className="space-y-1.5">
+                        <Label htmlFor="cb-banque">Banque</Label>
+                        <Input id="cb-banque" value={form.banque} maxLength={100} placeholder="ORABANK GUINEE SA"
+                            onChange={(e) => setForm((p) => ({ ...p, banque: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                        <Label htmlFor="cb-numero">Numéro de compte</Label>
+                        <Input id="cb-numero" value={form.numero} maxLength={60} inputMode="numeric" className="font-ref"
+                            placeholder="011406700100"
+                            onChange={(e) => setForm((p) => ({ ...p, numero: e.target.value }))} />
+                        <p className="text-xs text-slate-500">Chiffres uniquement ; les espaces sont retirés. Imprimé tel quel sur la facture.</p>
+                    </div>
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Numéro à vérifier</span>
+                        <Switch checked={form.a_verifier} onCheckedChange={(v) => setForm((p) => ({ ...p, a_verifier: v }))} />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Proposé sur les factures</span>
+                        <Switch checked={form.actif} onCheckedChange={(v) => setForm((p) => ({ ...p, actif: v }))} />
+                    </label>
+                    {compte?.nbFactures > 0 && (
+                        <p className="text-xs text-slate-500 bg-slate-50 rounded-lg p-2.5">
+                            {compte.nbFactures} facture(s) citent ce compte. Elles gardent le numéro qu'elles ont
+                            imprimé : une correction ne vaut que pour les factures à venir.
+                        </p>
+                    )}
+                    <DialogFooter>
+                        <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>Annuler</Button>
+                        <Button type="submit" variant="seal" disabled={saving || !form.banque.trim() || !form.numero.trim()}>
+                            {saving ? 'Enregistrement…' : 'Enregistrer'}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function TabComptesBancaires({ comptes = [] }) {
+    const [edition, setEdition] = useState(null); // null = fermé, {} = ajout, compte = modification
+    const aVerifier = comptes.filter((c) => c.a_verifier && c.actif).length;
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+                <p className="text-xs text-slate-500 max-w-xl">
+                    Sur chaque facture, on choisit la banque de règlement ; son numéro de compte s'imprime dans
+                    l'en-tête. Un compte désactivé n'est plus proposé, sans changer les factures déjà remises.
+                </p>
+                <Button size="sm" variant="seal" onClick={() => setEdition({})}>
+                    <Plus className="h-4 w-4" /> Ajouter
+                </Button>
+            </div>
+
+            {aVerifier > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-800">
+                        {aVerifier} numéro(s) à vérifier : relevés sur une liste manuscrite, un chiffre y reste
+                        douteux. Contrôlez-les sur un relevé d'identité bancaire avant de les imprimer.
+                    </p>
+                </div>
+            )}
+
+            <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                {comptes.length === 0 && <p className="p-4 text-sm text-slate-500">Aucun compte bancaire.</p>}
+                {comptes.map((c) => (
+                    <div key={c.id} className={cn('flex items-center justify-between gap-3 px-4 py-3', !c.actif && 'opacity-50')}>
+                        <div className="min-w-0">
+                            <div className="text-sm font-medium text-ink flex items-center gap-2">
+                                {c.banque}
+                                {c.a_verifier && (
+                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                                        à vérifier
+                                    </span>
+                                )}
+                                {!c.actif && <span className="text-[10px] text-slate-500">désactivé</span>}
+                            </div>
+                            <div className="font-ref text-xs text-slate-600">{c.numero}</div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                            {c.nbFactures > 0 && <span className="text-xs text-slate-400">{c.nbFactures} facture(s)</span>}
+                            <Button size="sm" variant="ghost" onClick={() => setEdition(c)} aria-label={`Modifier ${c.banque}`}>
+                                <Pencil className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <ModalCompteBancaire
+                open={edition !== null}
+                onClose={() => setEdition(null)}
+                compte={edition?.id ? edition : null}
+            />
+        </div>
+    );
+}
+
 function TabSecurite({ securite = {} }) {
     const [form, setForm] = useState({
         otp_enabled: securite.otp_enabled ?? false,
@@ -899,6 +1033,7 @@ export default function ParametresIndex({
     apparence = {},
     securite = {},
     defauts = {},
+    comptesBancaires = [],
 }) {
     const [activeTab, setActiveTab] = useState('utilisateurs');
 
@@ -1037,6 +1172,9 @@ export default function ParametresIndex({
                                 )}
                                 {activeTab === 'assignations' && (
                                     <TabAssignations defauts={defauts} utilisateurs={utilisateurs} />
+                                )}
+                                {activeTab === 'banques' && (
+                                    <TabComptesBancaires comptes={comptesBancaires} />
                                 )}
                                 {activeTab === 'apparence' && (
                                     <TabApparence apparence={apparence} />

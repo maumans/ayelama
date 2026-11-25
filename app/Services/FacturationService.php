@@ -39,7 +39,9 @@ class FacturationService
         // La régénération supprime la facture existante (voir plus bas) — refusée dès
         // qu'un paiement a déjà été enregistré dessus, pour ne jamais perdre
         // l'historique des encaissements du dossier.
-        if ($dossier->factures()->whereHas('paiements')->exists()) {
+        // ⚠️ La **principale** seulement (2026-11-23) : une facture complémentaire de droits
+        // d'enregistrement ne se régénère jamais, et ses paiements ne bloquent pas la principale.
+        if ($dossier->factures()->principales()->whereHas('paiements')->exists()) {
             throw ValidationException::withMessages([
                 'facture' => ["Impossible de régénérer la facture : des paiements ont déjà été enregistrés sur ce dossier."],
             ]);
@@ -47,7 +49,7 @@ class FacturationService
 
         // Une facture **émise** porte un numéro légal : la supprimer pour la refaire laisserait un
         // trou dans la numérotation (retour R20, 2026-11-16). Seule une proforma se régénère.
-        if ($dossier->factures()->where('statut', \App\Enums\StatutFacture::Emise)->exists()) {
+        if ($dossier->factures()->principales()->where('statut', \App\Enums\StatutFacture::Emise)->exists()) {
             throw ValidationException::withMessages([
                 'facture' => ["Impossible de régénérer la facture : elle a déjà été émise et numérotée."],
             ]);
@@ -82,11 +84,19 @@ class FacturationService
             // et la nouvelle.
             $remisesAnterieures = $this->remisesParBareme($dossier);
 
+            // Même raison pour l'en-tête saisi à la main : la banque choisie, le nombre de pages
+            // (timbres, rôles) et l'expéditeur. Jusqu'au 2026-11-20, une régénération les effaçait
+            // — les pages tapées sur les deux lignes repartaient à 0, en silence.
+            $entete = $dossier->factures()->principales()->latest('id')->first()
+                ?->only(['compte_bancaire_id', 'banque', 'compte_numero', 'nb_pages', 'expediteur']) ?? [];
+
             // Supprimer l'ancienne facture si elle existe (regénération)
-            $dossier->factures()->delete();
+            // La principale seule : les complémentaires (droits connus au retour) restent.
+            $dossier->factures()->principales()->delete();
 
             // Créer la facture
             $facture = Facture::create([
+                ...$entete,
                 'dossier_id'       => $dossier->id,
                 // Proforma, sans numéro : il n'est attribué qu'à l'émission (R20).
                 'statut'           => \App\Enums\StatutFacture::Proforma,
@@ -107,7 +117,10 @@ class FacturationService
                     continue;
                 }
 
-                $quantite = $bareme->quantite_defaut ?? 1;
+                // Une ligne à la page prend les pages de la facture (timbres, rôles).
+                $quantite = $bareme->par_page
+                    ? (int) ($facture->nb_pages ?? 0)
+                    : ($bareme->quantite_defaut ?? 1);
 
                 $ligne = LigneFacture::create([
                     'facture_id'  => $facture->id,
@@ -120,6 +133,8 @@ class FacturationService
                     // Copié, pas relu : une facture émise garde la règle du jour où elle a été
                     // établie, même si le barème est reconfiguré ensuite.
                     'remise_autorisee' => (bool) $bareme->remise_autorisee,
+                    // Honoraire ou débours, copié pour la même raison (comptabilité des dossiers).
+                    'nature'           => $bareme->nature ?? \App\Enums\NatureLigne::pourOrganisme($bareme->organisme),
                     ...($remisesAnterieures[$bareme->id] ?? []),
                 ]);
 
@@ -151,7 +166,7 @@ class FacturationService
     private function remisesParBareme(Dossier $dossier): array
     {
         return LigneFacture::query()
-            ->whereIn('facture_id', $dossier->factures()->pluck('id'))
+            ->whereIn('facture_id', $dossier->factures()->principales()->pluck('id'))
             ->whereNotNull('bareme_id')
             ->whereNotNull('remise_type')
             ->get()
@@ -318,5 +333,81 @@ class FacturationService
             'assiette_chiffres' => $assiette ?? 0,
             'total_chiffres'    => 0,
         ]);
+    }
+
+    /**
+     * Établit — ou met à jour — la facture **complémentaire** des droits liquidés au retour d'une
+     * formalité (décision de l'étude du 2026-11-23).
+     *
+     * Les droits d'enregistrement des statuts et de la DNSV ne sont connus qu'au retour des Impôts,
+     * quand la facture principale est déjà émise, donc figée. Le montant saisi au retour devient
+     * une facture à part : proforma, rattachée à la principale, une ligne au libellé du barème,
+     * même banque de règlement. Le comptable l'émet — elle prend le numéro suivant du registre.
+     *
+     * **Idempotent** : un retour réenregistré (correction de saisie) met à jour la même
+     * complémentaire tant qu'elle est proforma. Émise, elle ne bouge plus — un montant différent
+     * est alors **signalé**, jamais appliqué en silence.
+     *
+     * @return array{facture: Facture, etat: 'creee'|'mise_a_jour'|'inchangee'|'emise_differente'}
+     */
+    public function etablirComplementaire(\App\Models\Formalite $formalite, float $montant): array
+    {
+        return DB::transaction(function () use ($formalite, $montant) {
+            $dossier = $formalite->dossier;
+            $libelle = $formalite->bareme?->libelle ?? $formalite->labelAffiche();
+
+            $existante = Facture::where('formalite_id', $formalite->id)->lockForUpdate()->first();
+
+            if ($existante) {
+                $actuel = (float) $existante->total_chiffres;
+
+                if (abs($actuel - $montant) < 0.01) {
+                    return ['facture' => $existante, 'etat' => 'inchangee'];
+                }
+
+                if (! $existante->estProforma()) {
+                    return ['facture' => $existante, 'etat' => 'emise_differente'];
+                }
+
+                $existante->lignes()->update(['montant' => $montant, 'quantite' => 1]);
+                $existante->recalculerTotal();
+
+                return ['facture' => $existante->fresh('lignes'), 'etat' => 'mise_a_jour'];
+            }
+
+            $principale = $dossier->factures()->principales()->latest('id')->first();
+
+            $facture = Facture::create([
+                'dossier_id'         => $dossier->id,
+                'statut'             => \App\Enums\StatutFacture::Proforma,
+                'nature'             => \App\Enums\NatureFacture::Complementaire,
+                'facture_origine_id' => $principale?->id,
+                'formalite_id'       => $formalite->id,
+                'note_numero'        => null,
+                'note_date'          => now(),
+                'objet'              => trim(($dossier->objet ?? '') . ' — ' . $libelle, ' —'),
+                'assiette_chiffres'  => 0,
+                'total_chiffres'     => 0,
+                // La banque de la principale : le client règle au même endroit.
+                'compte_bancaire_id' => $principale?->compte_bancaire_id,
+                'banque'             => $principale?->banque,
+                'compte_numero'      => $principale?->compte_numero,
+            ]);
+
+            LigneFacture::create([
+                'facture_id'       => $facture->id,
+                'bareme_id'        => $formalite->bareme_id,
+                'designation'      => $libelle,
+                'quantite'         => 1,
+                'montant'          => $montant,
+                // Un droit reversé aux Impôts ne se remise pas : c'est un débours.
+                'remise_autorisee' => false,
+                'nature'           => \App\Enums\NatureLigne::Debours,
+            ]);
+
+            $facture->recalculerTotal();
+
+            return ['facture' => $facture->fresh('lignes'), 'etat' => 'creee'];
+        });
     }
 }

@@ -79,13 +79,15 @@ rattachés à aucun type d'acte actif — voir §5.
 
 | Forme | Statuts | Page de garde | Attestation | Déclaration | DNSV | Insertion | RCCM |
 |---|---|---|---|---|---|---|---|
-| **SARLU** | ✅ | ⬜ | ✅ | ✅ | ✅ | ⬜ *(balisé, non téléversé)* | ⚠️ |
-| **SARL** | ⬜ | ⬜ | ✅ | ⬜ | ✅ | ⬜ | ⬜ |
+| **SARLU** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **SARL** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **SAS** | ⬜ | ⬜ | ✅ | ⬜ | ✅ | ⬜ | ⬜ |
 | **SASU** | ⬜ | ⬜ | ✅ | ⬜ | ✅ | ⬜ | ⬜ |
 | **SA** | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | **SNC** | ⬜ | — | — | — | — | ⬜ | ⬜ |
 | **GIE** | ⬜ | — | — | — | — | ⬜ | ⬜ |
+
+*SARLU et SARL rebalisées le 2026-11-20 sur les modèles finaux de l'étude — voir [`06-MODELES-FINAUX-2026-11.md`](06-MODELES-FINAUX-2026-11.md).*
 
 Les fichiers bruts sont dans `Documents reçus/SARL/`, `/SAS/`, `/SASU/`. **Plusieurs sont en
 `.doc`** (`STATUTS.doc`, `RCCM 1.doc`, `INSERTION.doc`, `PAGE DE GARDE.doc`,

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,19 +13,17 @@ import { AlertTriangle } from 'lucide-react';
 
 const fmtGNF = (n) => Number(n || 0).toLocaleString('fr-FR');
 
-const MOYENS_PAIEMENT = [
-    { value: 'especes', label: 'Espèces' },
-    { value: 'cheque', label: 'Chèque' },
-    { value: 'virement', label: 'Virement' },
-    { value: 'mobile_money', label: 'Mobile money' },
-];
+// Les moyens de paiement viennent du serveur (App\Enums\MoyenPaiement, partagé par
+// HandleInertiaRequests) depuis le 2026-11-23 : la liste vivait ici seule, et le serveur
+// acceptait n'importe quelle chaîne.
 
 function todayISO() {
     return new Date().toISOString().slice(0, 10);
 }
 
-export function ModalEnregistrerPaiement({ open, onClose, dossierReference, soldeRestant = 0, totalFacture = 0, paiement = null }) {
+export function ModalEnregistrerPaiement({ open, onClose, dossierReference, factureId = null, soldeRestant = 0, totalFacture = 0, paiement = null }) {
     const estModification = !!paiement;
+    const moyensPaiement = usePage().props.referentiels?.moyensPaiement ?? [];
 
     const [datePaiement, setDatePaiement] = useState(todayISO());
     const [montant, setMontant] = useState('');
@@ -56,6 +54,8 @@ export function ModalEnregistrerPaiement({ open, onClose, dossierReference, sold
 
     const enregistrer = () => {
         const payload = {
+            // La facture réglée : un dossier peut en porter plusieurs (complémentaire, 2026-11-23).
+            ...(factureId ? { facture_id: factureId } : {}),
             date_paiement: datePaiement,
             montant,
             moyen_paiement: moyenPaiement || null,
@@ -165,8 +165,8 @@ export function ModalEnregistrerPaiement({ open, onClose, dossierReference, sold
                             <SelectTrigger><SelectValue placeholder="Non précisé" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="__none__">Non précisé</SelectItem>
-                                {MOYENS_PAIEMENT.map(m => (
-                                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                                {moyensPaiement.map(m => (
+                                    <SelectItem key={m.valeur} value={m.valeur}>{m.label}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>

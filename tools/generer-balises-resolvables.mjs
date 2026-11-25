@@ -58,7 +58,7 @@ for (const b of [
     'office.bp', 'office.commune', 'office.ville', 'office.telephones', 'office.email',
     'dossier.reference', 'dossier.objet', 'acte.numero', 'acte.reference',
     'acte.nb_pages', 'acte.nb_pages_lettres',
-    'date_acte_jma', 'annee_lettres', 'date_acte_lettres', 'date_acte_lettres_complete',
+    'date_acte_jma', 'annee_lettres', 'date_acte_lettres', 'date_acte_lettres_complete', 'date_acte_court',
     // Dérivées par remplirQuestionnaire() hors du parcours des champs.
     'bail.date_fin',
     'pp.adresse', 'ger.adresse', 'acq.adresse', 'loc.adresse', 'liquidateur.adresse',
@@ -68,6 +68,11 @@ for (const b of [
     // depuis la constitution et la date d'effet (celle du PV réel était fausse de vingt jours).
     'soc.mention_liquidation', 'soc.duree_lettres',
     'dissolution.duree_reduite', 'dissolution.date_expiration',
+    // Variantes de rédaction — miroir de App\Support\VariantesRedaction::racine() (modèles
+    // finaux du 2026-11-20, docs/kit-modeles/06). L'objet social devient un bloc d'une puce par
+    // activité ; le nombre de parts et l'année du premier exercice s'écrivent en lettres.
+    'soc.nombre_parts_lettres', 'soc.nombre_actions_lettres', 'soc.premier_exercice_annee_lettres',
+    'soc.activites', 'soc.activites.libelle', 'soc.objet_social_ligne', 'soc.souscripteurs',
 ]) balises.add(b);
 
 // Données délivrées par les organismes au retour d'une formalité — miroir assumé de
@@ -84,6 +89,8 @@ for (const b of [
 for (const d of [
     'rccm_numero', 'nif', 'jal_journal', 'depot_greffe_numero',
     'quittance_numero', 'declaration_modificative_numero',
+    // Montant des droits d'enregistrement (2026-11-23) : rendu avec le point de milliers.
+    'montant_droits',
 ]) balises.add(`retour.${d}`);
 
 // Les deux données de type date, dont le moteur dérive `_jma` et `_lettres`. Les variantes
@@ -101,7 +108,15 @@ for (const d of ['rccm_date', 'jal_date_parution']) {
 // (champ `time`, 2026-11-16 — App\Support\Heure). Rien d'autre.
 const ajouter = (id, type) => {
     balises.add(id);
-    if (type === 'date') { balises.add(`${id}_jma`); balises.add(`${id}_lettres`); }
+    // `_texte` : « quinze Février mille neuf cent quatre-vingt » (VariantesRedaction::dateRedigee),
+    // à la racine comme dans un bloc depuis le 2026-11-20.
+    // `_court` : « 06 Mars 1993 » (VariantesRedaction::dateCourte) — formulaire RCCM.
+    if (type === 'date') { for (const s of ['_jma', '_lettres', '_texte', '_court']) balises.add(id + s); }
+    // Civilité longue et accords, dérivés de toute civilité (VariantesRedaction::personne()).
+    if (id.endsWith('.civilite')) {
+        const p = id.slice(0, -'civilite'.length);
+        for (const s of ['civilite_longue', 'ne', 'accord', 'lequel', 'il']) balises.add(p + s);
+    }
     if (id.endsWith('heure')) { balises.add(`${id}_lettres`); balises.add(`${id}_formate`); }
     if (id.endsWith('_chiffres')) {
         balises.add(id.replace('_chiffres', '_lettres'));
@@ -121,6 +136,13 @@ for (const champs of Object.values(QUESTIONNAIRES)) {
         if (f.type === 'repeatable') {
             balises.add(f.id);
             for (const s of f.fields ?? []) ajouter(`${f.id}.${s.id}`, s.type);
+            // Rang de l'élément (« 1°) ») — VariantesRedaction::bloc(), pour tout bloc.
+            balises.add(`${f.id}.numero`);
+            // Numérotation cumulée des parts et apport — VariantesRedaction::bloc().
+            if ((f.fields ?? []).some(s => s.id === 'parts_chiffres')) {
+                for (const s of ['parts_debut', 'parts_fin']) balises.add(`${f.id}.${s}`);
+                ajouter(`${f.id}.apport_chiffres`, 'number');
+            }
             if (f.clientRole) emplacements.add(f.id);
             continue;
         }
@@ -147,6 +169,11 @@ const SUFFIXES_MANDAT = [
 
 for (const emplacement of emplacements) {
     balises.add(`${emplacement}.comparution`);
+
+    // Nom de famille et prénoms **séparés** : seule la fiche client liée les fournit
+    // (mapClientToPrefixedFields / ClientProjectionService), jamais un découpage de prenom_nom.
+    // Le formulaire RCCM du greffe les demande en deux colonnes.
+    for (const s of ['nom_famille', 'prenoms', 'identite_notariale']) balises.add(`${emplacement}.${s}`);
 
     for (const suffixe of [...suffixesIdentite().map(s => `repr_${s}`), ...SUFFIXES_MANDAT]) {
         // `repr_titre_date` est une date au format JJ/MM/AAAA dans `donnees` : le moteur en

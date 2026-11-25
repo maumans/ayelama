@@ -82,7 +82,8 @@ class GrasConstitutionTest extends TestCase
         $this->assertStringContainsString('<w:b/>', $denomination);
         $this->assertStringContainsString('w:val="44"', $denomination, 'La taille du gabarit (22 pts) doit être conservée.');
 
-        foreach (['FD', 'Conakry'] as $valeur) {
+        // Le siège passe lui aussi en capitales depuis les modèles finaux du 2026-11-20.
+        foreach (['FD', 'CONAKRY'] as $valeur) {
             $this->assertStringContainsString('<w:b/>', (string) $this->runDe($xml, $valeur), "« {$valeur} » doit être en gras.");
         }
 

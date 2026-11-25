@@ -869,6 +869,7 @@ class DossierController extends Controller
             'formalites.pieces.versionActuelle', 'formalites.dependDe', 'formalites.dependants',
             'parties.client', 'parties.pieces.versionActuelle', 'journal.user',
             'factures.lignes', 'factures.paiements.recu', 'factures.paiements.enregistrePar',
+            'decaissements.enregistrePar',
             'courriers.redacteur', 'courriers.signeCachetePar',
         ]);
 
@@ -903,6 +904,8 @@ class DossierController extends Controller
                 'validerRevision'  => $dossier->revision && auth()->user()->can('valider', $dossier->revision),
                 'renvoyerRevision' => $dossier->revision && auth()->user()->can('renvoyer', $dossier->revision),
             ],
+            // Les banques de l'étude, pour l'en-tête de la facture : le numéro suit la banque choisie.
+            'comptesBancaires' => \App\Models\CompteBancaire::actifs()->get()->map->versArray()->values(),
             'reviseurs'   => User::withRole('reviseur')->where('actif', true)->get(['id', 'name']),
             'formalistes' => User::withRole('formaliste')->where('actif', true)->get(['id', 'name']),
             'notaires'    => User::withRole('notaire')->where('actif', true)->get(['id', 'name']),
@@ -1575,6 +1578,10 @@ class DossierController extends Controller
                 'created_at' => $j->created_at->diffForHumans(),
             ]),
             'factures' => $d->factures->map(fn ($f) => $f->versArray()),
+            // Comptabilité des dossiers (2026-11-23) : ce que l'étude a versé aux organismes, et la
+            // situation qui en découle — calculée par le même service que la vue d'ensemble.
+            'decaissements'       => $d->relationLoaded('decaissements') ? $d->decaissements->map->versArray()->values() : [],
+            'situationFinanciere' => $d->relationLoaded('decaissements') ? \App\Services\SituationFinanciere::pour($d) : null,
             'courriers' => $d->courriers->map(fn ($c) => [
                 'id'             => $c->id,
                 'reference'      => $c->reference,

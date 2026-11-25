@@ -37,45 +37,45 @@ class ModeleActeSeeder extends Seeder
             // SARLU
             // ════════════════════════════════════════════════════════════════
             [
-                'code' => 'SOC-SARLU', 'type_document' => 'acte_principal', 'version' => '1.0',
+                'code' => 'SOC-SARLU', 'type_document' => 'acte_principal', 'version' => '2.0',
                 'nom'  => 'Statuts SARLU',
-                'src'  => 'SARLU/STATUTS_SARLU_balises.docx',   // version avec balises
+                'src'  => 'Modèles finaux 2026-11/SARLU/statuts-sarlu.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/statuts-sarlu.docx',
             ],
             [
-                'code' => 'SOC-SARLU', 'type_document' => 'page_garde', 'version' => '1.0',
+                'code' => 'SOC-SARLU', 'type_document' => 'page_garde', 'version' => '2.0',
                 'nom'  => 'Page de garde SARLU',
-                'src'  => 'SARLU/PAGE DE GARDE.doc',             // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARLU/page-garde-sarlu.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/page-garde-sarlu.docx',
             ],
             [
-                'code' => 'SOC-SARLU', 'type_document' => 'attestation', 'version' => '1.0',
+                'code' => 'SOC-SARLU', 'type_document' => 'attestation', 'version' => '2.0',
                 'nom'  => 'Attestation de dépôt du capital SARLU',
-                'src'  => 'SARLU/ATTESTATION DE DEPÔT DU CAPITAL.docx',
+                'src'  => 'Modèles finaux 2026-11/SARLU/attestation-capital-sarlu.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/attestation-capital-sarlu.docx',
             ],
             [
-                'code' => 'SOC-SARLU', 'type_document' => 'declaration', 'version' => '1.0',
+                'code' => 'SOC-SARLU', 'type_document' => 'declaration', 'version' => '2.0',
                 'nom'  => "Déclaration sur l'honneur SARLU",
-                'src'  => "SARLU/DECLARATION SUR L'HONNEUR -.doc", // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARLU/declaration-honneur-sarlu.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/declaration-honneur-sarlu.docx',
             ],
             [
-                'code' => 'SOC-SARLU', 'type_document' => 'dnsv', 'version' => '1.0',
+                'code' => 'SOC-SARLU', 'type_document' => 'dnsv', 'version' => '2.0',
                 'nom'  => 'DNSV SARLU',
-                'src'  => 'SARLU/DNSV.docx',
+                'src'  => 'Modèles finaux 2026-11/SARLU/dnsv-sarlu.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/dnsv-sarlu.docx',
             ],
             [
-                'code' => 'SOC-SARLU', 'type_document' => 'insertion', 'version' => '1.0',
+                'code' => 'SOC-SARLU', 'type_document' => 'insertion', 'version' => '2.0',
                 'nom'  => 'Insertion au JORG SARLU',
-                'src'  => 'SARLU/INSERTION.doc',                 // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARLU/insertion-sarlu.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/insertion-sarlu.docx',
             ],
             [
-                'code' => 'SOC-SARLU', 'type_document' => 'rccm', 'version' => '1.0',
+                'code' => 'SOC-SARLU', 'type_document' => 'rccm', 'version' => '2.0',
                 'nom'  => 'RCCM SARLU',
-                'src'  => 'SARLU/RCCM.doc',                     // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARLU/rccm-sarlu.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/rccm-sarlu.docx',
             ],
 
@@ -83,45 +83,45 @@ class ModeleActeSeeder extends Seeder
             // SARL
             // ════════════════════════════════════════════════════════════════
             [
-                'code' => 'SOC-SARL', 'type_document' => 'acte_principal', 'version' => '2.1',
+                'code' => 'SOC-SARL', 'type_document' => 'acte_principal', 'version' => '2.0',
                 'nom'  => 'Statuts de SARL',
-                'src'  => 'SARL/STATUTS.doc',                   // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARL/statuts-sarl.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/statuts-sarl.docx',
             ],
             [
-                'code' => 'SOC-SARL', 'type_document' => 'page_garde', 'version' => '1.0',
+                'code' => 'SOC-SARL', 'type_document' => 'page_garde', 'version' => '2.0',
                 'nom'  => 'Page de garde SARL',
-                'src'  => 'SARL/PAGE DE GARDE.doc',              // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARL/page-garde-sarl.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/page-garde-sarl.docx',
             ],
             [
-                'code' => 'SOC-SARL', 'type_document' => 'attestation', 'version' => '1.0',
+                'code' => 'SOC-SARL', 'type_document' => 'attestation', 'version' => '2.0',
                 'nom'  => 'Attestation de dépôt du capital SARL',
-                'src'  => 'SARL/ATTESTATION DE DEPÔT DU CAPITAL.docx',
+                'src'  => 'Modèles finaux 2026-11/SARL/attestation-capital-sarl.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/attestation-capital-sarl.docx',
             ],
             [
-                'code' => 'SOC-SARL', 'type_document' => 'declaration', 'version' => '1.0',
+                'code' => 'SOC-SARL', 'type_document' => 'declaration', 'version' => '2.0',
                 'nom'  => "Déclaration sur l'honneur SARL",
-                'src'  => "SARL/DECLARATION SUR L'HONNEUR -.doc", // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARL/declaration-honneur-sarl.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/declaration-honneur-sarl.docx',
             ],
             [
-                'code' => 'SOC-SARL', 'type_document' => 'dnsv', 'version' => '1.0',
+                'code' => 'SOC-SARL', 'type_document' => 'dnsv', 'version' => '2.0',
                 'nom'  => 'DNSV SARL',
-                'src'  => 'SARL/DNSV.docx',
+                'src'  => 'Modèles finaux 2026-11/SARL/dnsv-sarl.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/dnsv-sarl.docx',
             ],
             [
-                'code' => 'SOC-SARL', 'type_document' => 'insertion', 'version' => '1.0',
+                'code' => 'SOC-SARL', 'type_document' => 'insertion', 'version' => '2.0',
                 'nom'  => 'Insertion au JORG SARL',
-                'src'  => 'SARL/INSERTION.doc',                  // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARL/insertion-sarl.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/insertion-sarl.docx',
             ],
             [
-                'code' => 'SOC-SARL', 'type_document' => 'rccm', 'version' => '1.0',
+                'code' => 'SOC-SARL', 'type_document' => 'rccm', 'version' => '2.0',
                 'nom'  => 'RCCM SARL',
-                'src'  => 'SARL/RCCM 1.doc',                    // .doc → inactif
+                'src'  => 'Modèles finaux 2026-11/SARL/rccm-sarl.docx', // modèles finaux de l'étude, 2026-11-20
                 'dest' => 'modeles/societe/rccm-sarl.docx',
             ],
 

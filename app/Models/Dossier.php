@@ -168,6 +168,12 @@ class Dossier extends Model
         return $this->hasMany(JournalActivite::class)->orderByDesc('created_at');
     }
 
+    /** Ce que l'étude a versé aux organismes pour ce dossier (comptabilité des dossiers, 2026-11-23). */
+    public function decaissements()
+    {
+        return $this->hasMany(Decaissement::class)->orderBy('date_decaissement')->orderBy('id');
+    }
+
     public function factures()
     {
         return $this->hasMany(Facture::class);

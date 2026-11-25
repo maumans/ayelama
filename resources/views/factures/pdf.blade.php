@@ -160,7 +160,8 @@
         </tr>
         <tr>
             <td class="etiquette">N° Compte</td>
-            <td>{{ $facture->compte_numero ?: '—' }}</td>
+            {{-- « 011406700100 ORABANK GUINEE SA » : numéro puis banque, comme les notes de l'étude. --}}
+            <td>{{ $facture->compteImprime() ?? '—' }}</td>
         </tr>
         <tr>
             <td class="etiquette">Objet</td>

@@ -161,22 +161,26 @@ class RemisesFactureTest extends TestCase
         $this->assertSame(0.0, $ligne->fresh()->remiseMontant());
     }
 
-    public function test_une_ligne_ajoutee_a_la_main_est_remisable(): void
+    public function test_une_ligne_ajoutee_a_la_main_se_remise_selon_sa_nature(): void
     {
-        // Elle n'a pas de barème dont hériter, et l'étude l'a créée délibérément : refuser par
-        // défaut l'obligerait à passer par Paramètres pour une ligne qui n'y figure pas.
+        // Jusqu'au 2026-11-23, toute ligne manuelle était remisable « faute de barème disant
+        // qu'elle serait un débours ». Mesuré : les 26 lignes manuelles en base étaient **toutes**
+        // des débours (JAL, RCCM, DNSV). La nature se déclare désormais à la saisie, et décide.
         $facture = $this->facture();
 
-        $this->actingAs($this->comptable())
-            ->post("/factures/{$facture->id}/lignes", [
-                'designation' => 'Prestation exceptionnelle',
-                'quantite'    => 1,
-                'montant'     => 200_000,
-            ])
-            ->assertSessionHasNoErrors();
+        foreach (['Prestation exceptionnelle' => 'honoraire', 'Insertion JAL' => 'debours'] as $designation => $nature) {
+            $this->actingAs($this->comptable())
+                ->post("/factures/{$facture->id}/lignes", [
+                    'designation' => $designation,
+                    'quantite'    => 1,
+                    'montant'     => 200_000,
+                    'nature'      => $nature,
+                ])
+                ->assertSessionHasNoErrors();
+        }
 
-        $ajoutee = LigneFacture::where('designation', 'Prestation exceptionnelle')->first();
-        $this->assertTrue($ajoutee->remiseAutorisee());
+        $this->assertTrue(LigneFacture::where('designation', 'Prestation exceptionnelle')->first()->remiseAutorisee());
+        $this->assertFalse(LigneFacture::where('designation', 'Insertion JAL')->first()->remiseAutorisee());
     }
 
     public function test_les_lignes_generees_heritent_du_reglage_de_leur_bareme(): void

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\NatureFacture;
+use App\Enums\NatureLigne;
 use App\Enums\StatutFacture;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -12,11 +14,20 @@ class Facture extends Model
     protected $fillable = [
         'dossier_id',
         'statut',
+        // Principale ou complémentaire (droits d'enregistrement connus au retour, 2026-11-23).
+        'nature',
+        'facture_origine_id',
+        'formalite_id',
         'emise_at',
         'note_numero',
         'note_date',
         'expediteur',
         'compte_numero',
+        // Banque choisie et sa copie : la facture garde ce qu'elle a imprimé (2026-11-20).
+        'compte_bancaire_id',
+        'banque',
+        // Pages des statuts et de la DNSV, sans pages de garde : quantité des timbres et des rôles.
+        'nb_pages',
         'objet',
         'assiette_chiffres',
         'total_chiffres',
@@ -27,6 +38,7 @@ class Facture extends Model
         return [
             'note_date'          => 'date',
             'statut'             => StatutFacture::class,
+            'nature'             => NatureFacture::class,
             'emise_at'           => 'datetime',
             'assiette_chiffres'  => 'decimal:2',
             'total_chiffres'     => 'decimal:2',
@@ -48,6 +60,108 @@ class Facture extends Model
     public function paiements()
     {
         return $this->hasMany(Paiement::class);
+    }
+
+    public function compteBancaire()
+    {
+        return $this->belongsTo(CompteBancaire::class);
+    }
+
+    /** La facture principale qu'une complémentaire complète. */
+    public function origine()
+    {
+        return $this->belongsTo(self::class, 'facture_origine_id');
+    }
+
+    /** Le retour de formalité qui a établi une complémentaire. */
+    public function formalite()
+    {
+        return $this->belongsTo(Formalite::class);
+    }
+
+    /**
+     * La facture calculée sur les barèmes — la seule que `FacturationService::genererFacture()`
+     * a le droit de supprimer et de recréer. Une complémentaire n'est jamais régénérée.
+     *
+     * `nature` nulle comprise : défaut de colonne, mais la prudence ne coûte rien ici.
+     */
+    public function scopePrincipales($query)
+    {
+        return $query->where(fn ($q) => $q->where('nature', NatureFacture::Principale)->orWhereNull('nature'));
+    }
+
+    public function estComplementaire(): bool
+    {
+        return $this->nature === NatureFacture::Complementaire;
+    }
+
+    /**
+     * Choisit la banque sur laquelle le client réglera : le numéro suit la banque. La facture en
+     * garde une **copie** — corriger plus tard un numéro de compte ne réécrit pas une facture
+     * remise. `null` retire le choix.
+     */
+    public function choisirCompte(?CompteBancaire $compte): void
+    {
+        $this->forceFill([
+            'compte_bancaire_id' => $compte?->id,
+            'banque'             => $compte?->banque,
+            'compte_numero'      => $compte?->numero,
+        ]);
+    }
+
+    /**
+     * Total net des lignes d'une nature — remises déduites. Une ligne sans nature (antérieure à la
+     * migration du 2026-11-23, qui les a toutes classées) compterait comme débours : c'est la
+     * lecture prudente, l'étude ne s'attribuant pas un argent qu'elle reverse peut-être.
+     */
+    public function totalParNature(NatureLigne $nature): float
+    {
+        return round($this->lignes->filter(fn (LigneFacture $l) => ($l->nature ?? NatureLigne::Debours) === $nature)
+            ->sum(fn (LigneFacture $l) => $l->total()), 2);
+    }
+
+    /** La facture porte-t-elle des lignes comptées à la page (timbres fiscaux, rôles) ? */
+    public function comptePages(): bool
+    {
+        // Lu sur les lignes déjà chargées quand elles le sont : `versArray()` sert aussi la liste
+        // de toutes les factures, et une requête par facture y ferait un N+1.
+        if ($this->relationLoaded('lignes')) {
+            $parPage = Bareme::where('par_page', true)->pluck('id')->all();
+
+            return $this->lignes->contains(fn (LigneFacture $l) => in_array($l->bareme_id, $parPage, true));
+        }
+
+        return $this->lignes()->whereHas('bareme', fn ($q) => $q->where('par_page', true))->exists();
+    }
+
+    /**
+     * Pose le nombre de pages et l'applique aux lignes comptées à la page.
+     *
+     * Règle de l'étude (2026-11-20) : pages des **statuts et de la DNSV**, sans les pages de
+     * garde — × 2 000 GNF de timbres et × 5 000 GNF de rôles. Une seule donnée pour les deux
+     * lignes, qu'on tapait jusque-là deux fois.
+     */
+    public function definirPages(?int $pages): self
+    {
+        DB::transaction(function () use ($pages) {
+            $this->update(['nb_pages' => $pages]);
+
+            $this->lignes()
+                ->whereHas('bareme', fn ($q) => $q->where('par_page', true))
+                ->update(['quantite' => $pages ?? 0]);
+
+            $this->recalculerTotal();
+        });
+
+        return $this;
+    }
+
+    /** « 011406700100 ORABANK GUINEE SA » — la forme des notes de l'étude. */
+    public function compteImprime(): ?string
+    {
+        $texte = trim(($this->compte_numero ?? '') . ' ' . ($this->banque ?? ''));
+
+        return $texte !== '' ? $texte : null;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -112,6 +226,13 @@ class Facture extends Model
         if ((float) $this->total_chiffres <= 0) {
             throw ValidationException::withMessages([
                 'facture' => ["Une facture sans montant ne s'émet pas : ajoutez d'abord une ligne."],
+            ]);
+        }
+        // Timbres et rôles à 0 page partiraient à 0 GNF chez le client, sans que rien ne le dise.
+        if ($this->comptePages() && ! ($this->nb_pages > 0)) {
+            throw ValidationException::withMessages([
+                'facture' => ["Indiquez le nombre de pages dans l'en-tête de la facture (pour une constitution : "
+                    . 'statuts et DNSV, sans les pages de garde) — les timbres fiscaux et les rôles en dépendent.'],
             ]);
         }
 
@@ -184,6 +305,16 @@ class Facture extends Model
             'note_date_iso'     => $this->note_date?->toDateString(),
             'expediteur'        => $this->expediteur,
             'objet'             => $this->objet,
+            'nature'            => $this->nature?->value ?? NatureFacture::Principale->value,
+            'natureLabel'       => ($this->nature ?? NatureFacture::Principale)->label(),
+            'estComplementaire' => $this->estComplementaire(),
+            // Le numéro de la principale complétée, pour que l'écran et le PDF disent laquelle.
+            'origineNumero'     => $this->facture_origine_id ? $this->origine?->note_numero : null,
+            'compte_bancaire_id' => $this->compte_bancaire_id,
+            'banque'            => $this->banque,
+            'compte_numero'     => $this->compte_numero,
+            'nb_pages'          => $this->nb_pages,
+            'comptePages'       => $this->comptePages(),
             'assiette_chiffres' => (float) ($this->assiette_chiffres ?? 0),
             'total_chiffres'    => (float) ($this->total_chiffres ?? 0),
             'totalPaye'         => $this->totalPaye(),
@@ -195,9 +326,14 @@ class Facture extends Model
             'estTropPercue'        => $this->estTropPercue(),
             'totalBrut'         => $this->totalBrut(),
             'totalRemises'      => $this->totalRemises(),
+            // Ce qui revient à l'étude, et ce qui passe aux organismes (comptabilité des dossiers).
+            'totalHonoraires'   => $this->totalParNature(NatureLigne::Honoraire),
+            'totalDebours'      => $this->totalParNature(NatureLigne::Debours),
             'lignes'            => $this->lignes->map(fn (LigneFacture $l) => [
                 'id'          => $l->id,
                 'designation' => $l->designation,
+                'nature'      => $l->nature?->value,
+                'natureLabel' => $l->nature?->label(),
                 'quantite'    => $l->quantite,
                 'montant'     => (float) $l->montant,
                 'montantBrut' => $l->montantBrut(),
@@ -224,6 +360,8 @@ class Facture extends Model
                 'date_paiement'  => $p->date_paiement?->format('d/m/Y'),
                 'montant'        => (float) $p->montant,
                 'moyen_paiement' => $p->moyen_paiement,
+                // « Espèces », et non « especes » brut à l'écran.
+                'moyenLabel'     => \App\Enums\MoyenPaiement::tryFrom((string) $p->moyen_paiement)?->label(),
                 'notes'          => $p->notes,
                 'enregistrePar'  => $p->enregistrePar?->name,
                 'recu'           => $p->recu ? [
@@ -278,6 +416,22 @@ class Facture extends Model
     }
 
     /**
+     * Premier numéro que l'application attribue, par année (« AA »), quand elle prend la suite d'un
+     * registre tenu ailleurs.
+     *
+     * L'étude numérotait ses notes de frais dans des classeurs Excel : la dernière connue est la
+     * **325/MAB/2026** (KOUMI INVESTMENTS LTD, 19 novembre 2026, `docs/ACTES/FACTURE.xls`). Décidé le
+     * 2026-11-20 : l'application devient le **registre unique** et reprend à 326. Les 25 factures
+     * qu'elle avait numérotées 001 à 025 étaient des **essais** : elles portent désormais
+     * « TEST-NNN/MAB/26 », hors séquence, pour ne pas doublonner le registre papier.
+     *
+     * Une seule année concernée : en 2027 la séquence repart à 1, sans entrée ici.
+     *
+     * @var array<string, int>
+     */
+    public const REPRISE_REGISTRE = ['26' => 326];
+
+    /**
      * Prochain numéro « NNN/MAB/AA » de l'année.
      *
      * ⚠️ **La séquence la plus haute, et non la dernière ligne par id** (corrigé le 2026-11-16).
@@ -293,9 +447,13 @@ class Facture extends Model
             ->when($verrouiller, fn ($q) => $q->lockForUpdate())
             ->pluck('note_numero');
 
+        // `^(\d+)\/` : un numéro hors séquence (« TEST-001/MAB/26 ») ne compte pas.
         $seq = 1 + (int) $numeros
             ->map(fn (string $n) => preg_match('/^(\d+)\//', $n, $m) ? (int) $m[1] : 0)
             ->max();
+
+        // Reprise du registre papier : jamais en dessous du premier numéro réservé à l'application.
+        $seq = max($seq, self::REPRISE_REGISTRE[$annee] ?? 1);
 
         return sprintf('%03d/MAB/%s', $seq, $annee);
     }

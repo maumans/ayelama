@@ -36,6 +36,9 @@ enum DonneeAuRetour: string
     case DepotGreffeNumero             = 'depot_greffe_numero';
     case QuittanceNumero               = 'quittance_numero';
     case DeclarationModificativeNumero = 'declaration_modificative_numero';
+    // Le montant des droits d'enregistrement liquidés par les Impôts (2026-11-23) : connu au seul
+    // retour, il établit la facture complémentaire (FacturationService::etablirComplementaire).
+    case MontantDroits                 = 'montant_droits';
 
     public function label(): string
     {
@@ -48,6 +51,7 @@ enum DonneeAuRetour: string
             self::DepotGreffeNumero             => 'Numéro de dépôt au greffe',
             self::QuittanceNumero               => 'Numéro de quittance',
             self::DeclarationModificativeNumero => 'N° de déclaration modificative RCCM',
+            self::MontantDroits                 => "Montant des droits d'enregistrement (GNF)",
         };
     }
 
@@ -63,6 +67,7 @@ enum DonneeAuRetour: string
             self::DepotGreffeNumero             => 'DEP-2026-0123',
             self::QuittanceNumero               => 'QT-2026-4567',
             self::DeclarationModificativeNumero => 'RCCM-GN-TCC.2026-XXXX',
+            self::MontantDroits                 => '1500000',
         };
     }
 
@@ -78,6 +83,7 @@ enum DonneeAuRetour: string
             self::DepotGreffeNumero,
             self::QuittanceNumero,
             self::DeclarationModificativeNumero => 'texte',
+            self::MontantDroits                 => 'montant',
         };
     }
 
@@ -107,7 +113,9 @@ enum DonneeAuRetour: string
             self::JalDateParution,
             self::DepotGreffeNumero,
             self::QuittanceNumero,
-            self::DeclarationModificativeNumero => null,
+            self::DeclarationModificativeNumero,
+            // Pas une donnée de la société : elle part sur une facture, pas sur la fiche.
+            self::MontantDroits                 => null,
         };
     }
 
@@ -127,6 +135,7 @@ enum DonneeAuRetour: string
         return match ($this->type()) {
             'date'  => ['nullable', 'date'],
             'texte' => ['nullable', 'string', 'max:120'],
+            'montant' => ['nullable', 'numeric', 'min:0', 'max:999999999999'],
         };
     }
 

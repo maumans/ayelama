@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\NatureLigne;
 use App\Enums\TypeRemise;
 use Illuminate\Database\Eloquent\Model;
 
@@ -13,6 +14,8 @@ class LigneFacture extends Model
         'facture_id',
         'bareme_id',
         'designation',
+        // Honoraire ou débours — copiée du barème à la génération (2026-11-23).
+        'nature',
         'quantite',
         'montant',
         'remise_autorisee',
@@ -27,6 +30,7 @@ class LigneFacture extends Model
             'montant'       => 'decimal:2',
             'remise_autorisee' => 'boolean',
             'remise_type'   => TypeRemise::class,
+            'nature'        => NatureLigne::class,
             'remise_valeur' => 'decimal:2',
         ];
     }
