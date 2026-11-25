@@ -229,6 +229,36 @@ class ComptabiliteDossiersTest extends TestCase
         $this->assertStringContainsString('SOC-2026-6011;', $csv);
     }
 
+    public function test_les_criteres_se_combinent_et_suivent_l_export(): void
+    {
+        $this->withoutVite();
+        $ancien = $this->dossier('SOC-2026-6020', EtapeDossier::Formalites);
+        $ancien->forceFill(['created_at' => '2026-01-15 10:00:00'])->save();
+        $facture = $this->factureEmise($ancien);
+        Paiement::create(['facture_id' => $facture->id, 'date_paiement' => now(), 'montant' => $facture->total_chiffres]);
+
+        $recent = $this->dossier('SOC-2026-6021', EtapeDossier::Formalites);
+        $recent->forceFill(['objet' => 'Cession de parts'])->save();
+        Decaissement::create(['dossier_id' => $recent->id, 'libelle' => 'Droits', 'date_decaissement' => now(), 'montant' => 100_000]);
+
+        $page = fn (string $qs) => $this->actingAs($this->comptable)->get('/comptabilite?' . $qs);
+
+        $page('filtre=soldes')->assertInertia(fn ($p) => $p->has('lignes', 1)->where('lignes.0.reference', 'SOC-2026-6020'));
+        $page('du=2026-06-01')->assertInertia(fn ($p) => $p->has('lignes', 1)->where('lignes.0.reference', 'SOC-2026-6021'));
+        $page('au=2026-01-31')->assertInertia(fn ($p) => $p->has('lignes', 1)->where('lignes.0.reference', 'SOC-2026-6020'));
+        $page('q=cession')->assertInertia(fn ($p) => $p->has('lignes', 1)->where('lignes.0.reference', 'SOC-2026-6021'));
+        $page('type=' . $this->type->code . '&etape=' . EtapeDossier::Formalites->value)->assertInertia(fn ($p) => $p->has('lignes', 2)
+            ->has('options.types', 1)->has('options.etapes', 1));
+        // Combinés : soldé ET ouvert récemment → aucun.
+        $page('filtre=soldes&du=2026-06-01')->assertInertia(fn ($p) => $p->has('lignes', 0));
+        // Une valeur inconnue est ignorée, pas appliquée en silence.
+        $page('etape=inexistante&filtre=nimporte')->assertInertia(fn ($p) => $p->has('lignes', 2)->where('criteres.etape', null)->where('filtre', null));
+
+        $csv = $this->actingAs($this->comptable)->get('/comptabilite/export.csv?q=cession')->getContent();
+        $this->assertStringContainsString('SOC-2026-6021;', $csv);
+        $this->assertStringNotContainsString('SOC-2026-6020;', $csv);
+    }
+
     public function test_la_comptabilite_est_reservee_a_ceux_qui_gerent_la_facturation(): void
     {
         $clerc = User::factory()->create(['actif' => true]);
