@@ -1995,6 +1995,11 @@ export default function DossierCreate() {
                                                         onSelect={setClientPrincipal}
                                                         onUnlink={() => setClientPrincipal(null)}
                                                         onCreateNew={() => setCreatingClientPrincipal(true)}
+                                                        /* `group: null` : le client du dossier ne tient aucun rôle, donc
+                                                            rien à lui réclamer. La correction passe par `ficheCorrigee`,
+                                                            qui la reprojette aussi dans les rôles où la même personne
+                                                            est désignée. */
+                                                        onEditClient={(client) => setEditingClient({ client, group: null })}
                                                         personnesDuDossier={personnesDuDossier}
                                                     />
                                                 </div>

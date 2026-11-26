@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Search, UserPlus, X, Check, Loader2, Users } from 'lucide-react';
+import { Search, UserPlus, X, Check, Loader2, Users, Pencil } from 'lucide-react';
 import { clientDisplayName, clientSubtitle } from '@/lib/clientFields';
 
 /**
@@ -25,7 +25,7 @@ import { clientDisplayName, clientSubtitle } from '@/lib/clientFields';
  */
 const LONGUEUR_MINIMALE = 2;
 
-export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placeholder, personnesDuDossier = [] }) {
+export function ClientPicker({ onSelect, onCreateNew, onEditClient, linked, onUnlink, placeholder, personnesDuDossier = [] }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [results, setResults] = useState([]);
@@ -73,20 +73,42 @@ export function ClientPicker({ onSelect, onCreateNew, linked, onUnlink, placehol
 
     if (linked) {
         return (
-            <div className="flex items-center gap-2 rounded-lg border border-seal/30 bg-seal-light px-3 py-2 text-sm">
-                <Check className="h-3.5 w-3.5 text-seal-hover shrink-0" />
-                <span className="flex-1 min-w-0 truncate">
-                    <span className="font-medium text-slate-800">{clientDisplayName(linked) || 'Client sans nom'}</span>
-                    {clientSubtitle(linked) && <span className="text-slate-500"> · {clientSubtitle(linked)}</span>}
-                </span>
-                <button
-                    type="button"
-                    onClick={onUnlink}
-                    className="text-slate-400 hover:text-danger transition-colors shrink-0"
-                    title="Retirer le lien client"
-                >
-                    <X className="h-3.5 w-3.5" />
-                </button>
+            <div className="rounded-lg border border-seal/30 bg-seal-light px-3 py-2 text-sm">
+                <div className="flex items-center gap-2">
+                    <Check className="h-3.5 w-3.5 text-seal-hover shrink-0" />
+                    <span className="flex-1 min-w-0 truncate">
+                        <span className="font-medium text-slate-800">{clientDisplayName(linked) || 'Client sans nom'}</span>
+                        {clientSubtitle(linked) && <span className="text-slate-500"> · {clientSubtitle(linked)}</span>}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={onUnlink}
+                        className="text-slate-400 hover:text-danger transition-colors shrink-0"
+                        title="Retirer le lien client"
+                    >
+                        <X className="h-3.5 w-3.5" />
+                    </button>
+                </div>
+
+                {/* Corriger la fiche sans quitter l'écran — même geste que dans les cartes de rôle
+                    (ClientRoleSection), où il existait déjà. Sans lui, une fiche créée à la volée et
+                    incomplète obligeait à passer par le Répertoire, puis à revenir.
+
+                    Sur sa **propre ligne**, et non à droite du nom : `DialogContent` est une grille,
+                    dont la colonne se dimensionne sur le contenu le plus large. Mesuré dans le modal
+                    « Modifier le dossier » (448 px) : le bouton en ligne portait le formulaire à
+                    468 px, qui débordait alors de la boîte — titre et libellés coupés à gauche.
+
+                    Optionnel : un appelant qui ne sait pas propager la correction ne le passe pas. */}
+                {onEditClient && (
+                    <button
+                        type="button"
+                        onClick={() => onEditClient(linked)}
+                        className="mt-1 inline-flex items-center gap-1 text-xs text-slate-500 transition-colors hover:text-seal hover:underline"
+                    >
+                        <Pencil className="h-3 w-3" /> Modifier la fiche
+                    </button>
+                )}
             </div>
         );
     }

@@ -208,6 +208,7 @@ function ModalEditDossier({
     const [clientPrincipal, setClientPrincipal] = useState(
         dossier.clientPrincipal ?? null,
     );
+    const [editionFiche, setEditionFiche] = useState(false);
 
     const [form, setForm] = useState({
         objet: dossier.objet ?? "",
@@ -260,6 +261,7 @@ function ModalEditDossier({
     };
 
     return (
+        <>
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
@@ -300,9 +302,12 @@ function ModalEditDossier({
                         certifications, les balises des factures et des formalités et le
                         signataire proposé de l'accord le reprennent.
 
-                        Pas de « Créer une fiche » ici, délibérément : ouvrir une seconde modale
-                        par-dessus celle-ci est fragile, et une fiche se crée depuis le Répertoire
-                        ou à la création du dossier. */}
+                        Pas de « Créer une fiche » ici : une fiche se crée depuis le Répertoire ou
+                        à la création du dossier. « Modifier la fiche » y est en revanche, comme
+                        dans les cartes de rôle — corriger une pièce d'identité périmée ne doit pas
+                        obliger à quitter le dossier. La modale de fiche est rendue **à côté** de
+                        celle-ci, et non dedans : c'est le montage déjà employé par le modal du
+                        questionnaire plus bas. */}
                     <div className="space-y-1.5">
                         <Label>Client du dossier</Label>
                         <ClientPicker
@@ -310,6 +315,7 @@ function ModalEditDossier({
                             linked={clientPrincipal}
                             onSelect={setClientPrincipal}
                             onUnlink={() => setClientPrincipal(null)}
+                            onEditClient={() => setEditionFiche(true)}
                         />
                         {!clientPrincipal && (
                             <p className="text-xs text-slate-500">
@@ -420,6 +426,21 @@ function ModalEditDossier({
                 </form>
             </DialogContent>
         </Dialog>
+
+        {/* La fiche est une référence vivante : la corriger ici vaut pour tous les dossiers
+            qui la citent (ClientProjectionService reprojette côté serveur). Le dossier, lui,
+            ne change que si l'on enregistre — la fiche corrigée reste donc désignée. */}
+        <ModalNouveauClient
+            open={editionFiche}
+            client={clientPrincipal}
+            contexte="Client du dossier"
+            onClose={() => setEditionFiche(false)}
+            onCreated={(client) => {
+                setClientPrincipal(client);
+                setEditionFiche(false);
+            }}
+        />
+        </>
     );
 }
 

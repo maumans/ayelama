@@ -32,6 +32,10 @@ export default function DemandeShow() {
     const [errors, setErrors] = useState({});
     const [clientLie, setClientLie] = useState(null);
     const [creatingClient, setCreatingClient] = useState(false);
+    // Corriger la fiche rattachée sans quitter la demande — même geste que dans l'assistant de
+    // création et dans les cartes de rôle. Un état distinct de `creatingClient` : la modale de
+    // création part des informations soumises (`initialValues`), celle-ci d'une fiche existante.
+    const [editingClient, setEditingClient] = useState(false);
 
     const key = TYPE_ACTE_CODE_MAP[demande.typeActe.code];
     const questionnaire = key ? (QUESTIONNAIRES[key] ?? []) : [];
@@ -179,6 +183,7 @@ export default function DemandeShow() {
                                 onSelect={setClientLie}
                                 onUnlink={() => setClientLie(null)}
                                 onCreateNew={() => setCreatingClient(true)}
+                                onEditClient={() => setEditingClient(true)}
                             />
                         </CardContent>
                     </Card>
@@ -189,6 +194,13 @@ export default function DemandeShow() {
                     onClose={() => setCreatingClient(false)}
                     onCreated={(client) => { setClientLie(client); setCreatingClient(false); }}
                     initialValues={clientDraft}
+                />
+
+                <ModalNouveauClient
+                    open={editingClient}
+                    client={clientLie}
+                    onClose={() => setEditingClient(false)}
+                    onCreated={(client) => { setClientLie(client); setEditingClient(false); }}
                 />
 
                 {demande.statut === 'soumise' && (
