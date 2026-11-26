@@ -12,7 +12,7 @@ class Dossier extends Model
     use SoftDeletes;
 
     protected $fillable = [
-        'reference', 'type_acte_id', 'societe_id',
+        'reference', 'type_acte_id', 'societe_id', 'client_principal_id',
         'etape', 'redacteur_id', 'reviseur_id',
         'notaire_id', 'formaliste_id',
         'objet', 'valeur', 'echeance', 'urgent', 'notes',
@@ -149,8 +149,13 @@ class Dossier extends Model
     /**
      * Rôles (valeurs `clientRole` de resources/js/data/questionnaires.js, stockées
      * telles quelles dans Partie::role) considérés comme "le client demandeur" de
-     * l'office, par ordre de priorité décroissante — heuristique, pas un flag en
-     * base : aucune notion de "partie principale" n'existe dans le schéma actuel.
+     * l'office, par ordre de priorité décroissante.
+     *
+     * Reste une **heuristique**, et le repli de `clientPrincipalLabel()` : depuis le
+     * 2026-11-26, `dossiers.client_principal_id` dit explicitement qui commande le dossier,
+     * pour le cas que cette liste ne peut pas couvrir — un donneur d'ordre qui ne tient
+     * aucun rôle dans l'acte. Aucune partie n'est « principale » en base ; cette liste ne
+     * sert qu'à nommer un dossier qui ne l'a pas dit lui-même.
      */
     private const ROLES_CLIENT_PRIORITAIRES = [
         'associe_unique', 'associe', 'gerant',
@@ -182,6 +187,19 @@ class Dossier extends Model
     public function courriers()
     {
         return $this->hasMany(Courrier::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Le client qui commande ce dossier — celui que l'étude facture et à qui elle écrit.
+     *
+     * Facultatif, et **distinct des parties** : le donneur d'ordre ne comparaît pas, n'a pas de
+     * pièces à fournir et n'a pas de balise dans les actes. Il est renseigné quand il ne tient
+     * aucun rôle dans l'acte (et peut l'être aussi quand il en tient un, pour lever l'ambiguïté
+     * entre plusieurs parties). Vide, {@see clientPrincipalLabel()} retombe sur l'heuristique.
+     */
+    public function clientPrincipal()
+    {
+        return $this->belongsTo(Client::class, 'client_principal_id');
     }
 
     /**
@@ -397,8 +415,22 @@ class Dossier extends Model
         return $this->parties->first();
     }
 
+    /**
+     * Le nom du client du dossier : le reçu de paiement, la liste des certifications, les
+     * balises des factures et des formalités, et le signataire proposé de l'accord client —
+     * tous passent par ici.
+     *
+     * La colonne d'abord, l'heuristique ensuite : renseignée, elle dit ce que le dossier ne
+     * pouvait pas deviner ; vide, le comportement est exactement celui d'avant le 2026-11-26,
+     * donc aucun dossier existant ne change de nom.
+     */
     public function clientPrincipalLabel(): ?string
     {
+        $this->loadMissing('clientPrincipal');
+        if ($this->clientPrincipal) {
+            return $this->clientPrincipal->nomComplet();
+        }
+
         $partie = $this->partiePrincipale();
         if (!$partie) {
             return null;

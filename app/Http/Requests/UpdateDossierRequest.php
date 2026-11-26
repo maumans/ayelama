@@ -40,6 +40,10 @@ class UpdateDossierRequest extends FormRequest
             // La valeur ne se saisit plus (2026-11-18) : l'assiette se déduit du questionnaire
             // (FacturationService::assiette). Refusée à toute étape plutôt qu'ignorée.
             'valeur'          => ['prohibited'],
+            // Le client du dossier se corrige à toute étape, comme l'échéance : c'est une
+            // donnée de suivi, pas une donnée de l'acte — la changer ne touche à aucune partie
+            // ni à aucun acte déjà produit.
+            'client_principal_id' => ['sometimes', 'nullable', 'integer', 'exists:clients,id'],
             'echeance'        => ['sometimes', 'nullable', 'date'],
             'urgent'          => ['sometimes', 'boolean'],
             'notes'           => ['sometimes', 'nullable', 'string', 'max:2000'],

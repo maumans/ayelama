@@ -81,6 +81,7 @@ import { DateField } from "@/components/ui/date-field";
 import { ModalEnvoiCourrier } from "@/Components/Courriers/ModalEnvoiCourrier";
 import { ModalNouveauClient } from "@/Components/ModalNouveauClient";
 import { ClientRoleSection } from "@/Components/ui/client-role-section";
+import { ClientPicker } from "@/Components/ui/client-picker";
 import { ChoixMultiple } from "@/Components/ui/choix-multiple";
 import { tableExclusionsModification } from "@/lib/exclusionsChoix";
 import { PiecesConstitutivesCard } from "@/Components/Societes/PiecesConstitutivesCard";
@@ -202,6 +203,12 @@ function ModalEditDossier({
     canReassigner,
     canModifierObjet,
 }) {
+    // Fiche entière et non un simple id : le sélecteur affiche le nom, la pièce et la
+    // résidence pour qu'on vérifie d'un coup d'œil qu'on désigne la bonne personne.
+    const [clientPrincipal, setClientPrincipal] = useState(
+        dossier.clientPrincipal ?? null,
+    );
+
     const [form, setForm] = useState({
         objet: dossier.objet ?? "",
         echeance: dossier.echeance ?? "",
@@ -213,7 +220,8 @@ function ModalEditDossier({
     });
 
     useEffect(() => {
-        if (open)
+        if (open) {
+            setClientPrincipal(dossier.clientPrincipal ?? null);
             setForm({
                 objet: dossier.objet ?? "",
                 echeance: dossier.echeance ?? "",
@@ -223,6 +231,7 @@ function ModalEditDossier({
                 reviseur_id: dossier.reviseur?.id ?? "",
                 formaliste_id: dossier.formaliste?.id ?? "",
             });
+        }
     }, [open]);
 
     const f = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
@@ -236,6 +245,9 @@ function ModalEditDossier({
                 // refuse, on ne l'envoie donc pas. La valeur n'est plus saisie du tout : elle se
                 // déduit du questionnaire (FacturationService::assiette).
                 ...(canModifierObjet ? { objet: form.objet } : {}),
+                // Détacher la fiche renvoie `null` : le serveur retombe alors sur
+                // l'heuristique des rôles, comme avant le 2026-11-26.
+                client_principal_id: clientPrincipal?.id ?? null,
                 echeance: form.echeance || null,
                 urgent: form.urgent,
                 notes: form.notes || null,
@@ -282,6 +294,30 @@ function ModalEditDossier({
                             </span>
                         </div>
                     )}
+                    {/* Le client qui commande le dossier. Se corrige à toute étape, même objet
+                        figé : ce n'est pas une donnée de l'acte, personne n'y comparaît, aucun
+                        acte déjà produit n'en dépend — seuls le reçu de paiement, la liste des
+                        certifications, les balises des factures et des formalités et le
+                        signataire proposé de l'accord le reprennent.
+
+                        Pas de « Créer une fiche » ici, délibérément : ouvrir une seconde modale
+                        par-dessus celle-ci est fragile, et une fiche se crée depuis le Répertoire
+                        ou à la création du dossier. */}
+                    <div className="space-y-1.5">
+                        <Label>Client du dossier</Label>
+                        <ClientPicker
+                            placeholder="Rechercher dans le répertoire (nom, pièce, téléphone)…"
+                            linked={clientPrincipal}
+                            onSelect={setClientPrincipal}
+                            onUnlink={() => setClientPrincipal(null)}
+                        />
+                        {!clientPrincipal && (
+                            <p className="text-xs text-slate-500">
+                                Non renseigné — le dossier porte le nom de la première partie à
+                                l'acte{dossier.clientPrincipalLabel ? ` (${dossier.clientPrincipalLabel})` : ""}.
+                            </p>
+                        )}
+                    </div>
                     {/* « Valeur (GNF) » retiré le 2026-11-18 : la création ne la saisit plus, et
                         l'assiette réelle (capital, prix, loyers) se déduit du questionnaire. Le
                         champ affichait « 0 » sur tout dossier récent, et ce qu'on y tapait ne

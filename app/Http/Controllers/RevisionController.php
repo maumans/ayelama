@@ -21,7 +21,7 @@ class RevisionController extends Controller
         $today = now()->toDateString();
         $user  = auth()->user();
 
-        $query = Dossier::with(['typeActe', 'redacteur', 'revision.reviseur', 'revision.points', 'documents', 'parties.client'])
+        $query = Dossier::with(['typeActe', 'redacteur', 'revision.reviseur', 'revision.points', 'documents', 'parties.client', 'clientPrincipal'])
             ->visiblePar($user)
             ->enRevision()
             ->when($request->q, fn ($q, $s) => $q->where(fn ($qq) =>

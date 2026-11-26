@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, libelleRepresentant, MOTIF_REPRESENTATION_PAR_LIBELLE } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
+import { ClientPicker } from '@/Components/ui/client-picker';
 import { ChoixMultiple } from '@/Components/ui/choix-multiple';
 import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
@@ -399,6 +400,18 @@ export default function DossierCreate() {
     // d'une saisie du clerc, alors que la liste des associés du registre peut être périmée.
     const [rolesDepuisRegistre, setRolesDepuisRegistre] = useState({});
     const [creatingClientForGroup, setCreatingClientForGroup] = useState(null);
+    /*
+     * Le client qui **commande** le dossier — celui que l'étude facture et à qui elle écrit.
+     *
+     * Distinct des parties à l'acte, et c'est tout l'intérêt : jusqu'au 2026-11-26, le nom du
+     * client (reçu de paiement, liste des certifications, balises des factures et des
+     * formalités, signataire proposé de l'accord) était **deviné** par
+     * `Dossier::partiePrincipale()`, qui parcourt les rôles par priorité. Un dossier commandé
+     * par quelqu'un qui n'y tient aucun rôle portait donc le nom d'un autre.
+     * Facultatif : laissé vide, le serveur devine comme avant.
+     */
+    const [clientPrincipal, setClientPrincipal] = useState(null);
+    const [creatingClientPrincipal, setCreatingClientPrincipal] = useState(false);
     // { client, group } — édition en place d'une fiche déjà rattachée à un rôle.
     const [editingClient, setEditingClient] = useState(null);
     // Rôles saisis en texte libre plutôt que via une fiche client (tiers ponctuel
@@ -1053,7 +1066,13 @@ export default function DossierCreate() {
     // soumission un client ajouté sans être désigné — tout en l'annonçant « réutilisé » au
     // récapitulatif — et sa « qualité libre » (témoin, accompagnateur) ne parvenait à aucun acte :
     // 0 partie de ce type mesurée en base.
-    const personnesDuDossier = personnesDesignees(questionnaire, formValues, clientLinks, clientsImportes);
+    const personnesDuDossier = personnesDesignees(questionnaire, formValues, clientLinks, [
+        ...clientsImportes,
+        // Le plus souvent, le client du dossier tient aussi un rôle dans l'acte : le proposer
+        // évite de le rechercher une seconde fois, et sa place est nommée pour qu'on ne le
+        // confonde pas avec une personne déjà désignée.
+        ...(clientPrincipal ? [{ client: clientPrincipal, role: 'Client du dossier' }] : []),
+    ]);
 
     /**
      * Une fiche vient d'être créée ou corrigée : la reprojeter partout où le formulaire la cite.
@@ -1066,6 +1085,7 @@ export default function DossierCreate() {
         setClientLinks(prev => remplacerFicheDansLiens(prev, client));
         setFormValues(prev => reappliquerFiche(questionnaire, prev, clientLinks, client));
         setClientsImportes(prev => prev.map(c => c.id === client.id ? client : c));
+        setClientPrincipal(prev => (prev && prev.id === client.id ? client : prev));
     };
 
     /**
@@ -1097,7 +1117,7 @@ export default function DossierCreate() {
             const form = construireFormDataBrouillon({
                 etat: {
                     step, categorie, sousGroupe, typeActe, formValues, clientLinks,
-                    clientsImportes, saisieLibreRoles, objet, urgent, notes,
+                    clientsImportes, saisieLibreRoles, objet, urgent, notes, clientPrincipal,
                     notaireId, reviseurId, formalisteId, piecesBrouillon,
                     // Sans elle, reprendre un brouillon de modification perdait la société
                     // choisie : les champs `soc.*` restaient remplis mais `societe_id` était
@@ -1145,6 +1165,7 @@ export default function DossierCreate() {
         // fiches restent proposées, la « qualité libre » est abandonnée avec la carte qui la saisissait.
         setClientsImportes(e.clientsImportes ?? (e.dossierClients ?? []).map(p => p?.client).filter(Boolean));
         setSaisieLibreRoles(e.saisieLibreRoles ?? {});
+        setClientPrincipal(e.clientPrincipal ?? null);
         setSocieteLink(e.societeLink ?? null);
         setObjet(e.objet ?? '');
         setUrgent(!!e.urgent);
@@ -1291,6 +1312,8 @@ export default function DossierCreate() {
             // Société du registre sur laquelle porte le dossier — la fiche reste la source de
             // vérité, `donnees.soc.*` n'en est que la projection destinée aux modèles Word.
             societe_id: societeLink?.id || undefined,
+            // Non validé = écarté en silence par `validated()` : voir StoreDossierRequest.
+            client_principal_id: clientPrincipal?.id || undefined,
             objet: objet,
             urgent: urgent,
             notes: notes || undefined,
@@ -1947,6 +1970,34 @@ export default function DossierCreate() {
                                                     )}
                                                     {errors.objet && <p className="text-xs text-danger">{errors.objet}</p>}
                                                 </div>
+                                                {/* Qui commande le dossier.
+                                                    Avant le 2026-11-26, cette information n'existait nulle part :
+                                                    le nom du client porté par le reçu de paiement, la liste des
+                                                    certifications, les balises des factures et des formalités et
+                                                    le signataire proposé de l'accord était **deviné** à partir
+                                                    des rôles (Dossier::partiePrincipale()). Un dossier commandé
+                                                    par quelqu'un qui n'y tient aucun rôle prenait le nom d'un
+                                                    autre, sans qu'aucun écran ne permette de le corriger.
+
+                                                    Facultatif, et laissé vide le serveur devine comme avant :
+                                                    les dossiers existants ne changent pas de nom. */}
+                                                <div className="space-y-1.5">
+                                                    <Label>Client du dossier</Label>
+                                                    <p className="text-xs text-slate-500">
+                                                        Qui commande cet acte — la personne que l'étude facture et à qui
+                                                        elle écrit. Renseignez-la surtout si elle ne figure dans aucun
+                                                        rôle ci-dessous&nbsp;; sinon, le dossier prendra le nom de la
+                                                        première partie à l'acte.
+                                                    </p>
+                                                    <ClientPicker
+                                                        placeholder="Rechercher dans le répertoire (nom, pièce, téléphone)…"
+                                                        linked={clientPrincipal}
+                                                        onSelect={setClientPrincipal}
+                                                        onUnlink={() => setClientPrincipal(null)}
+                                                        onCreateNew={() => setCreatingClientPrincipal(true)}
+                                                        personnesDuDossier={personnesDuDossier}
+                                                    />
+                                                </div>
                                                 <label htmlFor="urgent" className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer w-fit">
                                                     <Checkbox
                                                         id="urgent"
@@ -2123,6 +2174,14 @@ export default function DossierCreate() {
                                 <RecapCard icon={FileText} iconColor="text-blue-600" iconBg="bg-blue-50" title="Dossier" onEdit={() => setStep(1)}>
                                     <div className="space-y-3">
                                         <RecapField label="Objet" value={objet || '—'} />
+                                        {/* Dit explicitement ce qui se passera si le champ est vide,
+                                            plutôt qu'un tiret : c'est là que le nom du dossier se joue. */}
+                                        <RecapField
+                                            label="Client du dossier"
+                                            value={clientPrincipal
+                                                ? clientDisplayName(clientPrincipal)
+                                                : "Non renseigné — le dossier prendra le nom de la première partie à l'acte"}
+                                        />
                                         {notes && <RecapField label="Notes" value={notes} />}
                                     </div>
                                 </RecapCard>
@@ -2386,6 +2445,18 @@ export default function DossierCreate() {
                         applyClientToSection(creatingClientForGroup, client);
                     }
                     setCreatingClientForGroup(null);
+                }}
+            />
+
+            {/* Le client du dossier ne tient aucun rôle dans l'acte : rien à lui réclamer
+                au-delà de ce qu'une fiche porte — d'où `champsAttendus` vide. */}
+            <ModalNouveauClient
+                open={creatingClientPrincipal}
+                onClose={() => setCreatingClientPrincipal(false)}
+                contexte="Client du dossier"
+                onCreated={(client) => {
+                    setClientPrincipal(client);
+                    setCreatingClientPrincipal(false);
                 }}
             />
 

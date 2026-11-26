@@ -422,6 +422,7 @@ class DossierController extends Controller
                 'reference'     => $reference,
                 'type_acte_id'  => $typeActe->id,
                 'societe_id'    => $data['societe_id'] ?? null,
+                'client_principal_id' => $data['client_principal_id'] ?? null,
                 'etape'         => EtapeDossier::Initialisation,
                 'redacteur_id'  => auth()->id(),
                 'reviseur_id'   => $data['reviseur_id'] ?? null,
@@ -864,6 +865,7 @@ class DossierController extends Controller
 
         $dossier->load([
             'typeActe', 'societe.dossier:id,reference', 'societe.piecesConstitutives.versionActuelle',
+            'clientPrincipal',
             'redacteur', 'reviseur', 'notaire', 'formaliste',
             'questionnaire', 'documents.versionActuelle', 'documents.signeCachetePar', 'revision.reviseur', 'revision.points',
             'formalites.pieces.versionActuelle', 'formalites.dependDe', 'formalites.dependants',
@@ -1481,6 +1483,10 @@ class DossierController extends Controller
                 : null,
             // Nom proposé pour signer à l'écran : le client principal (R23).
             'clientPrincipalLabel' => $d->clientPrincipalLabel(),
+            // La fiche elle-même, quand le dossier la désigne : le modal « Modifier le dossier »
+            // doit pouvoir l'afficher et la changer. Nulle quand le nom ci-dessus vient encore
+            // de l'heuristique des rôles — l'écran le dit alors explicitement.
+            'clientPrincipal' => $d->clientPrincipal,
             // Titre, consigne et bouton d'impression dépendent du type de dossier : une
             // modification de statuts attend la décision des associés, pas une fiche signée.
             'accordAttendu' => $d->pieceAccordAttendue(),

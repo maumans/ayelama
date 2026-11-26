@@ -659,9 +659,12 @@ export function getManagedClientRoles(questionnaire) {
  * alors que le récapitulatif l'annonçait « réutilisé ». La liste est désormais **dérivée** de ce
  * qui a un effet (les rôles) : elle ne peut plus dire autre chose qu'eux.
  *
- * `extras` : fiches proposées sans rôle encore attribué — aujourd'hui les personnes connues de la
- * société, importées depuis sa fiche (cédant, gérant sortant… que le registre ne sait pas
- * attribuer seul).
+ * `extras` : fiches proposées sans rôle dans l'acte. Deux formes acceptées — une fiche nue (les
+ * personnes connues de la société, importées depuis sa fiche : cédant, gérant sortant… que le
+ * registre ne sait pas attribuer seul) ou `{ client, role }` pour nommer sa place quand elle en a
+ * une hors de l'acte. C'est le cas du **client du dossier** (`dossiers.client_principal_id`) :
+ * il commande l'acte sans forcément y comparaître, et doit malgré tout être proposé aux rôles —
+ * le plus souvent, c'est bien lui.
  *
  * @returns {Array<{client: object, roles: string[]}>}
  */
@@ -690,7 +693,11 @@ export function personnesDesignees(questionnaire = [], formValues = {}, clientLi
         });
     }
 
-    for (const client of extras) noter(client, null);
+    for (const extra of extras) {
+        // Une fiche nue, ou { client, role } quand l'appelant sait nommer sa place.
+        if (extra?.client) noter(extra.client, extra.role ?? null);
+        else noter(extra, null);
+    }
 
     return [...parId.values()];
 }

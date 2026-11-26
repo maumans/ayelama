@@ -25,6 +25,10 @@ class StoreDossierRequest extends FormRequest
             // modification ou une dissolution (fiche choisie), créée après coup pour une
             // constitution (voir DossierController::creerDossier).
             'societe_id'    => ['nullable', 'integer', 'exists:societes,id'],
+            // Qui commande le dossier, quand ce n'est aucune des parties à l'acte. Donnée du
+            // dossier et non de l'acte : pas de rôle, pas de pièces, pas de balise. Sans elle,
+            // `clientPrincipalLabel()` continue de deviner d'après les rôles.
+            'client_principal_id' => ['nullable', 'integer', 'exists:clients,id'],
             'objet'         => ['required', 'string', 'min:10', 'max:500'],
             // Plus saisie : l'assiette se déduit du questionnaire (FacturationService::assiette).
             'valeur'        => ['prohibited'],
