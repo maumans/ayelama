@@ -5,7 +5,7 @@ import {
     LayoutDashboard, FolderOpen, ClipboardCheck, Building2,
     FileText, Users, Mail, Settings, Search, Archive,
     ChevronLeft, ChevronRight, LogOut, User,
-    Menu, Link2, Banknote, Gift, Landmark, Wallet
+    Menu, Link2, Banknote, Gift, Landmark, Wallet, Scale, ExternalLink
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -288,8 +288,38 @@ export default function AppLayout({ children, breadcrumbs = [] }) {
                         })}
                     </nav>
 
-                    {/* Bas: paramètres + profil */}
+                    {/* Bas: documentation externe + paramètres + profil */}
                     <div className="border-t border-ink-medium px-2 py-2 space-y-0.5">
+                        {/* Le droit guinéen n'est codé nulle part dans cette application, et ne doit
+                            pas l'être : le CLAUDE.md du dépôt le range parmi « ce qu'on ne devine
+                            pas ». La référence consultée reste donc hors de l'outil — autant qu'elle
+                            soit à portée de clic depuis n'importe quel écran, plutôt que dans un
+                            favori du navigateur que les postes de l'étude ne partagent pas.
+
+                            Un vrai `<a target="_blank">` et non un `Link` d'Inertia : celui-ci ferait
+                            une visite XHR sur un domaine externe, qui n'aboutit pas. `rel` complet —
+                            sans `noopener`, la page ouverte garde une poignée sur celle-ci. */}
+                        <Tooltip disabled={!collapsed}>
+                            <TooltipTrigger asChild>
+                                <a
+                                    href="https://droitguineen.com/"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-ink-medium/60 hover:text-white"
+                                >
+                                    <Scale className="h-4 w-4 shrink-0" />
+                                    {!collapsed && (
+                                        <>
+                                            <span className="flex-1 truncate">Droit guinéen</span>
+                                            {/* Dit que l'on quitte l'application avant le clic. */}
+                                            <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+                                        </>
+                                    )}
+                                </a>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">Droit guinéen — s'ouvre dans un nouvel onglet</TooltipContent>
+                        </Tooltip>
+
                         {can?.administrer && (
                             <Tooltip disabled={!collapsed}>
                                 <TooltipTrigger asChild>
