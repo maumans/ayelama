@@ -116,10 +116,12 @@ class CascadeGeoQuestionnaireTest extends TestCase
         $conakry = Lieu::parNom('Conakry', Lieu::NIVEAU_VILLE);
 
         $this->assertNotNull($conakry);
+        // 13 communes depuis la loi L/2024/003 (2026-11-25) : le seeder en portait 5, celles d'avant
+        // la réforme, et une installation neuve repartait de l'ancien découpage.
         $this->assertEqualsCanonicalizing(
-            ['Kaloum', 'Dixinn', 'Matam', 'Ratoma', 'Matoto'],
+            ['Kaloum', 'Kassa', 'Dixinn', 'Matam', 'Ratoma', 'Lambanyi', 'Sonfonia', 'Gbessia',
+                'Matoto', 'Tombolia', 'Kagbélen', 'Sanoyah', 'Manéah'],
             $conakry->enfants->pluck('nom')->all(),
-            'Les 5 communes de Conakry sont la partie du référentiel qui est affirmée.',
         );
 
         // Une préfecture est d'abord une **ville** — c'est ce qui manquait à la base, où
@@ -135,16 +137,19 @@ class CascadeGeoQuestionnaireTest extends TestCase
         $this->assertSame($prefecture->id, $communeUrbaine->parent_id);
     }
 
-    public function test_tous_les_quartiers_amorces_sont_marques_a_verifier(): void
+    public function test_les_quartiers_amorces_sans_source_officielle_sont_marques_a_verifier(): void
     {
-        // Leur liste n'est ni garantie exhaustive ni garantie à jour : les présenter comme sûrs
-        // serait pire que du texte libre.
+        // (2026-11-25) Jusqu'ici, **tous** les quartiers amorcés étaient à vérifier : aucune source.
+        // Ils viennent désormais de la liste de l'étude, et seuls ceux qui ne reposent que sur
+        // Wikipédia — ou sur lesquels la liste elle-même doute — le restent.
         $this->seed(\Database\Seeders\LieuSeeder::class);
 
-        $this->assertSame(
-            0,
-            Lieu::niveau(Lieu::NIVEAU_QUARTIER)->where('a_verifier', false)->count(),
-        );
+        $quartiersDe = fn (string $commune) => Lieu::niveau(Lieu::NIVEAU_QUARTIER)
+            ->whereIn('parent_id', Lieu::where('nom', $commune)->pluck('id'));
+
+        $this->assertSame(0, $quartiersDe('Manéah')->where('a_verifier', false)->count(), 'Manéah ne repose que sur Wikipédia.');
+        $this->assertSame(0, $quartiersDe('Dixinn')->where('a_verifier', true)->count(), 'Dixinn vient de l\'INS.');
+        $this->assertTrue($quartiersDe('Lambanyi')->where('nom', 'Yattaya Centre')->value('a_verifier'), 'Cité sous deux communes.');
         $this->assertSame(
             0,
             Lieu::where('a_verifier', true)->where('niveau', '!=', Lieu::NIVEAU_QUARTIER)->count(),

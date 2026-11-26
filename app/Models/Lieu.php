@@ -93,11 +93,15 @@ class Lieu extends Model
             ...self::actif()
             ->with('parent:id,nom')
             ->orderBy('nom')
-            ->get(['id', 'parent_id', 'niveau', 'nom'])
+            ->get(['id', 'parent_id', 'niveau', 'nom', 'a_verifier'])
             ->groupBy('niveau')
             ->map(fn ($groupe) => $groupe->map(fn (self $l) => [
                 'nom'    => $l->nom,
                 'parent' => $l->parent?->nom,
+                // `lieu-select.jsx` affiche « (à vérifier) » depuis l'origine, mais la clé n'était
+                // pas servie : le drapeau ne se voyait qu'en Paramètres. Il compte au moment du
+                // choix — Kassa, Kagbélen, Sanoyah et Manéah ne reposent que sur Wikipédia.
+                'a_verifier' => (bool) $l->a_verifier,
             ])->values())
             ->toArray(),
         ]);

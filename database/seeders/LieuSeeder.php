@@ -4,56 +4,25 @@ namespace Database\Seeders;
 
 use App\Models\Lieu;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Artisan;
 
 /**
  * Amorce le référentiel des lieux.
  *
  * ⚠️ **Deux natures de données, délibérément distinguées.**
  *
- * Ce qui est **affirmé** : Conakry et ses 5 communes, les 33 préfectures. Ces découpages sont
- * stables et vérifiables.
- *
- * Ce qui est **marqué à vérifier** (`a_verifier = true`) : les quartiers. Leur liste n'est ni
- * garantie exhaustive ni garantie à jour — le découpage évolue, et certains quartiers changent de
- * commune de rattachement. Une donnée administrative fausse présentée comme sûre serait pire que du
- * texte libre dans une application notariale : l'étude les valide depuis
- * *Paramètres > Lieux*, filtre « à vérifier ».
+ * Ce qui est **affirmé** : les 33 préfectures et leur commune urbaine. Conakry, ses 13 communes et
+ * leurs quartiers viennent de `database/data/quartiers-conakry-2024.json` via
+ * `ayelema:lieux-conakry` : chaque quartier y porte la fiabilité de sa source — validé s'il vient du
+ * MATD ou de l'INS, **à vérifier** s'il ne repose que sur Wikipédia ou si la liste elle-même doute.
+ * Une donnée administrative fausse présentée comme sûre serait pire que du texte libre dans une
+ * application notariale : l'étude valide le reste depuis *Paramètres > Lieux*, filtre « à vérifier ».
  *
  * Idempotent : relançable sans créer de doublon, et **sans écraser** les corrections de l'étude —
  * un lieu déjà présent n'est jamais remis à `a_verifier`.
  */
 class LieuSeeder extends Seeder
 {
-    /**
-     * Communes de Conakry → quartiers connus.
-     *
-     * Conakry est traitée à part des préfectures : c'est une zone spéciale, et c'est là que se
-     * trouve l'essentiel de la clientèle de l'étude (elle-même à Ratoma).
-     */
-    private const CONAKRY = [
-        'Kaloum' => [
-            'Almamya', 'Boulbinet', 'Coronthie', 'Kouléwondy', 'Manquepas', 'Sandervalia',
-            'Sans-fil', 'Téminétaye', 'Tombo',
-        ],
-        'Dixinn' => [
-            'Bellevue', 'Camayenne', 'Cameroun', 'Dixinn Centre', 'Dixinn Port', 'Hafia',
-            'Kénien', 'Landreah', 'Minière', 'Belle-vue École',
-        ],
-        'Matam' => [
-            'Bonfi', 'Boussoura', 'Coléah', 'Hermakonon', 'Madina', 'Matam Centre',
-            'Mafanco', 'Touguiwondy',
-        ],
-        'Ratoma' => [
-            'Bambéto', 'Cimenterie', 'Dar-es-Salam', 'Hamdallaye', 'Kaporo', 'Kipé', 'Kobaya',
-            'Koloma', 'Lambanyi', 'Nongo', 'Ratoma Centre', 'Simbaya', 'Sonfonia', 'Taouyah',
-            'Wanindara', 'Yattaya',
-        ],
-        'Matoto' => [
-            'Béanzin', 'Dabompa', 'Dabondy', 'Gbessia', 'Kissosso', 'Matoto Centre', 'Sangoyah',
-            'Simbaya Gare', 'Tanerie', 'Tombolia', 'Yimbaya',
-        ],
-    ];
-
     /**
      * Les 33 préfectures, groupées par région administrative.
      *
@@ -73,17 +42,11 @@ class LieuSeeder extends Seeder
 
     public function run(): void
     {
-        $conakry = $this->lieu(null, Lieu::NIVEAU_VILLE, 'Conakry');
-
-        foreach (self::CONAKRY as $commune => $quartiers) {
-            $lieuCommune = $this->lieu($conakry->id, Lieu::NIVEAU_COMMUNE, $commune);
-
-            foreach ($quartiers as $quartier) {
-                // Seuls les quartiers portent le drapeau : c'est là que mon information n'est pas
-                // garantie.
-                $this->lieu($lieuCommune->id, Lieu::NIVEAU_QUARTIER, $quartier, aVerifier: true);
-            }
-        }
+        // Conakry, ses 13 communes et leurs quartiers : une seule source, le fichier de l'étude, et
+        // une seule écriture, la commande qui le lit. Le seeder portait sa propre liste — celle
+        // d'avant la loi L/2024/003, 5 communes — et une installation neuve repartait donc de
+        // l'ancien découpage (2026-11-25).
+        Artisan::call('ayelema:lieux-conakry', ['--appliquer' => true]);
 
         foreach (self::PREFECTURES as $prefectures) {
             foreach ($prefectures as $prefecture) {

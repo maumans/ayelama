@@ -1,7 +1,7 @@
 {
     "source": "geonames GN.zip (CC-BY 4.0) + loi L2024\/003\/CNT du 18\/01\/2024 + fr.wikipedia.org\/wiki\/Subdivision_de_la_Guinée",
     "genere_le": "2026-09-10",
-    "note": "Les quartiers ne sont renseignés que pour Conakry : aucune source exploitable ne les couvre au niveau national (4 142 districts\/quartiers ; OCHA\/HDX ne descend à ce niveau que pour Conakry, et GeoNames n'a aucun PPLX pour la Guinée). Ailleurs, le référentiel se peuple par l'usage, via le bouton d'ajout de la cascade. ⚠️ La répartition des quartiers de Conakry est celle d'avant le découpage de 2024 : les communes créées (Gbessia, Lambanyi, Sonfonia, Tombolia, Kagbelen, Sanoyah, Manéah, Kassa) n'ont pas encore leurs quartiers, faute de disposer de l'annexe de la loi L2024\/003.",
+    "note": "Aucun quartier n'est déclaré ici. Ailleurs qu'à Conakry, aucune source exploitable ne les couvre au niveau national (4 142 districts\/quartiers ; OCHA\/HDX ne descend à ce niveau que pour Conakry, et GeoNames n'a aucun PPLX pour la Guinée) : le référentiel se peuple par l'usage, via le bouton d'ajout de la cascade. Les quartiers de Conakry ont leur propre fichier depuis le 2026-11-25 (database\/data\/quartiers-conakry-2024.json, commande ayelema:lieux-conakry) : les déclarer aussi ici rendrait --corriger destructeur pour eux.",
     "villes": [
         {
             "nom": "Beyla",
@@ -65,69 +65,7 @@
                 "Sanoyah",
                 "Sonfonia",
                 "Tombolia"
-            ],
-            "quartiers": {
-                "Dixinn": [
-                    "Belle-vue École",
-                    "Bellevue",
-                    "Camayenne",
-                    "Cameroun",
-                    "Dixinn Centre",
-                    "Dixinn Port",
-                    "Hafia",
-                    "Kénien",
-                    "Landreah",
-                    "Minière"
-                ],
-                "Kaloum": [
-                    "Almamya",
-                    "Boulbinet",
-                    "Coronthie",
-                    "Kouléwondy",
-                    "Manquepas",
-                    "Sandervalia",
-                    "Sans-fil",
-                    "Téminétaye",
-                    "Tombo"
-                ],
-                "Matam": [
-                    "Bonfi",
-                    "Boussoura",
-                    "Coléah",
-                    "Hermakonon",
-                    "Madina",
-                    "Mafanco",
-                    "Matam Centre",
-                    "Touguiwondy"
-                ],
-                "Matoto": [
-                    "Béanzin",
-                    "Dabompa",
-                    "Dabondy",
-                    "Kissosso",
-                    "Matoto Centre",
-                    "Sangoyah",
-                    "Simbaya Gare",
-                    "Tanerie",
-                    "Yimbaya"
-                ],
-                "Ratoma": [
-                    "Bambéto",
-                    "Cimenterie",
-                    "Dar-es-Salam",
-                    "Hamdallaye",
-                    "Kaporo",
-                    "Kipé",
-                    "Kobaya",
-                    "Koloma",
-                    "Nongo",
-                    "Ratoma Centre",
-                    "Simbaya",
-                    "Taouyah",
-                    "Wanindara",
-                    "Yattaya"
-                ]
-            }
+            ]
         },
         {
             "nom": "Coyah",

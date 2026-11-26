@@ -1,0 +1,162 @@
+{
+    "ville": "Conakry",
+    "etabli_le": "2026-11-25",
+    "reforme": "Loi L/2024/003/CNT : Ratoma et Matoto scindées en trois communes chacune ; Kagbélen, Sanoyah et Manéah rattachées à Conakry. Kassa est une commune distincte de Kaloum depuis 2021.",
+    "sources": {
+        "MATD-2024": { "libelle": "Ministère de l'Administration du Territoire et de la Décentralisation, avril 2024", "a_verifier": false },
+        "INS-2022": { "libelle": "Institut national de la statistique, 2022", "a_verifier": false },
+        "WIKIPEDIA": { "libelle": "fr.wikipedia.org — source secondaire, moins fiable : tout ce qui en vient est à vérifier", "a_verifier": true }
+    },
+    "note": "Liste fournie par l'étude le 2026-11-25. Une entrée chaîne hérite de la fiabilité de la source de sa commune ; une entrée objet porte son propre `a_verifier` et le motif du doute. Les chefs-lieux sont signalés pour mémoire : le référentiel n'a pas de colonne pour eux.",
+    "communes": [
+        {
+            "nom": "Kaloum",
+            "source": "INS-2022",
+            "quartiers": [
+                "Almamya", "Boulbinet", "Coronthie", "Koulewondy", "Manquepas", "Sandervalia",
+                "Sans-Fil", "Téminetaye", "Tombo",
+                { "nom": "Almamya I", "a_verifier": true, "motif": "L'INS distingue Almamya I et II ; la liste de référence ne retient qu'Almamya." },
+                { "nom": "Almamya II", "a_verifier": true, "motif": "L'INS distingue Almamya I et II ; la liste de référence ne retient qu'Almamya." },
+                { "nom": "Coronthie I", "a_verifier": true, "motif": "L'INS distingue Coronthie I et II ; la liste de référence ne retient que Coronthie." },
+                { "nom": "Coronthie II", "a_verifier": true, "motif": "L'INS distingue Coronthie I et II ; la liste de référence ne retient que Coronthie." }
+            ]
+        },
+        {
+            "nom": "Kassa",
+            "source": "WIKIPEDIA",
+            "note": "Kassa est découpée en deux districts (Kassa, Fotoba) eux-mêmes divisés en secteurs. Le référentiel n'a que trois niveaux : ce sont les secteurs qui y figurent comme quartiers, les districts ne sont pas créés.",
+            "quartiers": [
+                { "nom": "Kassa 1", "a_verifier": true, "motif": "Secteur du district Kassa (Wikipédia)." },
+                { "nom": "Kassa 2", "a_verifier": true, "motif": "Secteur du district Kassa (Wikipédia)." },
+                { "nom": "Kassa 3", "a_verifier": true, "motif": "Secteur du district Kassa (Wikipédia)." },
+                { "nom": "Koromandja", "a_verifier": true, "motif": "Secteur du district Kassa (Wikipédia)." },
+                { "nom": "Mangué", "a_verifier": true, "motif": "Secteur du district Kassa (Wikipédia)." },
+                { "nom": "Soro", "a_verifier": true, "motif": "Secteur du district Kassa (Wikipédia)." },
+                { "nom": "Room", "a_verifier": true, "motif": "Secteur du district Kassa (Wikipédia)." },
+                { "nom": "Fotoba Centre", "a_verifier": true, "motif": "Secteur du district Fotoba (Wikipédia)." },
+                { "nom": "Rogbanè", "a_verifier": true, "motif": "Secteur du district Fotoba (Wikipédia)." },
+                { "nom": "Boom", "a_verifier": true, "motif": "Secteur du district Fotoba (Wikipédia)." }
+            ]
+        },
+        {
+            "nom": "Dixinn",
+            "source": "INS-2022",
+            "quartiers": [
+                "Belle-Vue École", "Belle-Vue Marché I", "Belle-Vue Marché II", "Camayenne", "Cameroun",
+                "Dixinn Centre I", "Dixinn Centre II", "Dixinn Gare", "Dixinn Gare Rails", "Dixinn Mosquée",
+                "Dixinn Port", "Hafia Château d'eau", "Hafia I", "Hafia II", "Hafia III", "Hafia Minière I",
+                "Hafia Minière II", "Hafia Minière Centre", "Hafia Mosquée", "Kénien", "Landréah", "Minière Cité"
+            ]
+        },
+        {
+            "nom": "Matam",
+            "source": "INS-2022",
+            "quartiers": [
+                "Bonfi", "Bonfi Marché", "Bonfi Routière", "Boussoura", "Carrière Centre", "Carrière Cité",
+                "Coléah Centre", "Coléah Cité", "Coléah Domino", "Coléah Imprimerie", "Hermakonon Mosquée",
+                "Hermakonon Permanence", "Lansébounyi", "Madina Centre", "Madina Cité (SIG)", "Madina École",
+                "Madina Marché", "Madina Mosquée", "Mafanco", "Mafanco Centre", "Matam", "Matam Centre",
+                "Matam Lido", "Touguiwondy"
+            ]
+        },
+        {
+            "nom": "Ratoma",
+            "source": "MATD-2024",
+            "chef_lieu": "Taouyah",
+            "quartiers": [
+                "Taouyah", "Ratoma Dispensaire", "Ratoma Centre", "Kaporo Rails", "Hamdallaye 1",
+                "Hamdallaye 2", "Koloma Soloprimo", "Kipé", "Kaporo Centre"
+            ]
+        },
+        {
+            "nom": "Lambanyi",
+            "source": "MATD-2024",
+            "chef_lieu": "Lambanyi",
+            "quartiers": [
+                "Nongo Centre", "Nongo Taady", "Lambanyi", "Yembeya", "Wareah", "Simbaya Gare",
+                { "nom": "Yattaya Centre", "a_verifier": true, "motif": "Cité à la fois sous Lambanyi et sous Sonfonia." },
+                { "nom": "Nassouroulaye", "a_verifier": true, "motif": "Cité à la fois sous Lambanyi et sous Gbessia." },
+                "Bantounka 1", "Bantounka 2", "Soumambossia", "Wanindara", "Wanindara Rails", "Kinifi"
+            ]
+        },
+        {
+            "nom": "Sonfonia",
+            "source": "MATD-2024",
+            "chef_lieu": "Sonfonia Centre 1",
+            "quartiers": [
+                "Kobaya", "Yattaya Fossidet",
+                { "nom": "Yattaya Centre", "a_verifier": true, "motif": "Cité à la fois sous Lambanyi et sous Sonfonia." },
+                "Sonfonia Gare 1", "Sonfonia Gare 2", "Sonfonia Centre 1", "Sonfonia Centre 2"
+            ]
+        },
+        {
+            "nom": "Gbessia",
+            "source": "MATD-2024",
+            "chef_lieu": "Cité de l'Air",
+            "quartiers": [
+                "Dabondy 1", "Dabondy 2", "Dabondy 3", "Dabondy École", "Dabondy Rails", "Gbessia Cité 1",
+                "Gbessia Cité 2", "Gbessia Cité 3", "Gbessia École", "Gbessia Centre", "Gbessia Port 1",
+                "Gbessia Port 2", "Dar-es-Salam", "Cité de l'Air", "Béhanzin", "Tanènè Marché",
+                "Tanènè Mosquée", "Yimbaya École", "Yimbaya Permanence", "Yimbaya Port", "Yimbaya Tannerie",
+                "Hamdallaye Mosquée",
+                { "nom": "Simbaya 1", "a_verifier": true, "motif": "Simbaya est partagé : Simbaya 1 sous Gbessia, Simbaya 2 et Simbaya École sous Matoto, Simbaya Gare sous Lambanyi." },
+                { "nom": "Koloma 1", "a_verifier": true, "motif": "Koloma est d'ordinaire rattaché à Ratoma (Koloma Soloprimo) : son rattachement à Gbessia reste à confirmer." },
+                { "nom": "Koloma 2", "a_verifier": true, "motif": "Koloma est d'ordinaire rattaché à Ratoma (Koloma Soloprimo) : son rattachement à Gbessia reste à confirmer." },
+                { "nom": "Nassouroulaye", "a_verifier": true, "motif": "Cité à la fois sous Lambanyi et sous Gbessia." }
+            ]
+        },
+        {
+            "nom": "Matoto",
+            "source": "MATD-2024",
+            "chef_lieu": "Simbaya 2",
+            "quartiers": [
+                "Matoto Centre",
+                { "nom": "Simbaya 2", "a_verifier": true, "motif": "Simbaya est partagé : Simbaya 1 sous Gbessia, Simbaya 2 et Simbaya École sous Matoto, Simbaya Gare sous Lambanyi." },
+                { "nom": "Simbaya École", "a_verifier": true, "motif": "Simbaya est partagé : Simbaya 1 sous Gbessia, Simbaya 2 et Simbaya École sous Matoto, Simbaya Gare sous Lambanyi." },
+                "Matoto Marché", "Matoto Khabitaya", "Sangoyah Mosquée", "Sangoyah Marché", "Kissosso",
+                "Kissosso Plateau", "Marché Enco 5", "Wanindara Dispensaire", "Wanindara Marché"
+            ]
+        },
+        {
+            "nom": "Tombolia",
+            "source": "MATD-2024",
+            "chef_lieu": "Tombolia",
+            "quartiers": [
+                "Enta Marché", "Enta Fassa", "Tombolia", "Tombolia Plateau", "Dabompa Village",
+                "Dabompa Plateau", "Lansanayah"
+            ]
+        },
+        {
+            "nom": "Kagbélen",
+            "source": "WIKIPEDIA",
+            "chef_lieu": "Kagbélen Plateau",
+            "quartiers": [
+                "Kagbélen Plateau", "Kènendé", "Kagbélen Village", "Dondolikhouré", "Kindiady", "Tobolon 1",
+                "Tobolon 2", "Keitayah", "Ansoumaniah Plateau", "Tanga", "Kirikilan", "Fofomèrè",
+                "Bailobaya Centre", "Bailobaya Plateau",
+                { "nom": "Ansoumaniah Village", "a_verifier": true, "motif": "Cité par certaines sources seulement." },
+                { "nom": "Samatran", "a_verifier": true, "motif": "Cité par certaines sources seulement." }
+            ]
+        },
+        {
+            "nom": "Sanoyah",
+            "source": "WIKIPEDIA",
+            "chef_lieu": "Sanoyah Km36",
+            "note": "Onze quartiers sont annoncés, dix sont connus. Le onzième n'est pas inventé : Sogouéta, cité par la presse, figure marqué à vérifier.",
+            "quartiers": [
+                "Sanoyah Km36", "Sanoyah Rails Plateau", "Sanoyah Dispensaire", "Kountiah Nord", "Sanoyah CBA",
+                "Kalokhoya", "Sampiliyah", "Fassiah Centre", "Fassiah Textile", "CBC",
+                { "nom": "Sogouéta", "a_verifier": true, "motif": "Cité par la presse, non confirmé — peut-être le onzième quartier annoncé." }
+            ]
+        },
+        {
+            "nom": "Manéah",
+            "source": "WIKIPEDIA",
+            "chef_lieu": "Tanènè I",
+            "quartiers": [
+                "Tanènè I", "Tanènè II", "Hermakonon", "Bambaya", "Kassonya", "Kakoulima", "Sombè",
+                "Bentouraya Plateau", "Bentouraya Village", "Friguiyadi Nord", "Friguiyadi Village", "Gomboya Nord"
+            ]
+        }
+    ]
+}

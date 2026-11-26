@@ -42,19 +42,21 @@ use Illuminate\Support\Facades\DB;
  * pour Conakry, et GeoNames n'a **aucun** `PPLX` pour la Guinée. En inventer aurait mis des noms faux
  * dans des actes authentiques.
  *
- * Le fichier déclare donc les quartiers de **Conakry seulement**, et ailleurs le référentiel se
- * peuple par l'usage, via le bouton d'ajout de la cascade.
- *
- * ⚠️ **La répartition des quartiers de Conakry est celle d'avant le découpage de 2024** : les huit
- * communes créées (Gbessia, Lambanyi, Sonfonia, Tombolia, Kagbelen, Sanoyah, Manéah, Kassa) n'ont
- * pas encore leurs quartiers, faute de disposer de l'annexe de la loi L2024/003. Répartir au hasard
- * mettrait une fausse adresse dans un acte.
+ * Le fichier ne déclare **plus aucun quartier** (2026-11-25). Ceux de Conakry ont leur propre
+ * fichier et leur propre commande — `database/data/quartiers-conakry-2024.json`,
+ * `ayelema:lieux-conakry` — depuis que l'étude a fourni leur répartition entre les 13 communes de la
+ * loi L2024/003. Ailleurs, le référentiel se peuple par l'usage, via le bouton d'ajout de la cascade.
  *
  * ## `--corriger`
  *
- * Retire ou désactive les quartiers restés accrochés à l'ancien découpage — voir `corriger()`.
- * Ce geste est **distinct de l'import** parce qu'il *modifie* des lignes existantes, ce que l'import
- * s'interdit.
+ * Retire ou désactive les quartiers absents de la liste déclarée de leur commune — voir
+ * `corriger()`. Ce geste est **distinct de l'import** parce qu'il *modifie* des lignes existantes,
+ * ce que l'import s'interdit.
+ *
+ * ⚠️ **Sans effet sur le fichier livré**, qui ne déclare plus de quartiers : c'est voulu. Y laisser
+ * l'ancienne liste de Conakry aurait fait de `--corriger` une suppression des 158 quartiers ajoutés
+ * par `ayelema:lieux-conakry`, absents de cette liste. L'option reste pour un fichier fourni par
+ * `--fichier`.
  *
  * Dry-run par défaut, comme `ayelema:brouillons-purger` et `ayelema:lieux-rapprocher`.
  */

@@ -294,6 +294,9 @@ app/
 │   │                               #   le découpage réel (39 préfectures, 353 communes, Conakry à 13
 │   │                               #   depuis la loi L2024/003). Dry-run par défaut ; complète sans
 │   │                               #   jamais réécrire un lieu saisi par l'étude.
+│   ├── AlignerQuartiersConakry.php # (2026-11-25) ayelema:lieux-conakry — les 13 communes de Conakry
+│   │                               #   et leurs 183 quartiers (database/data/quartiers-conakry-2024.json).
+│   │                               #   Dry-run par défaut ; n'ajoute que, sauf --desactiver-obsoletes.
 │   │                               #   Données : database/data/lieux-guinee.json (versionné, non
 │   │                               #   téléchargé à l'exécution) + generer-lieux.py pour le régénérer
 │   ├── AlerterEcheances.php        # ayelema:alerter-echeances — hourly, anti-doublon 12h
@@ -2259,6 +2262,89 @@ soit 14 px.
   non générée et un zoom iOS sont invisibles pour `vite build` comme pour la suite : c'est
   exactement ce que la règle 2 de `CLAUDE.md` demande de rendre bruyant
 
+### 🏙️ Conakry : 13 communes et leurs quartiers, d'après la liste de l'étude (2026-11-25)
+
+L'étude a signalé un référentiel « non conforme et mal respecté », et fourni la répartition des
+quartiers entre les **13 communes** de la loi L/2024/003/CNT — l'annexe qui manquait le 2026-09-10.
+
+#### Ce que la mesure a montré
+
+- Les 13 communes existaient, mais **8 n'avaient aucun quartier** (Gbessia, Kagbelen, Kassa,
+  Lambanyi, Manéah, Sanoyah, Sonfonia ; Tombolia n'avait que « Dapompa », saisi par l'étude).
+- Les **53 quartiers** amorcés pendaient toujours des 5 communes d'avant la réforme : « Nongo »,
+  « Kobaya », « Wanindara » sous Ratoma, « Yimbaya », « Dabondy » sous Matoto.
+- Références réelles : 21 fiches et 89 questionnaires portent Conakry ; « Almamya » est employé 33
+  fois, « Nongo » 5, « Kaporo » 3, « Tanerie » 10. Aucune banque n'a de lieu renseigné.
+- ⚠️ **« Manéah » existait aussi sous Dubréka** (import GeoNames, antérieur au rattachement). Or la
+  cascade filtre les quartiers par le **nom** de leur commune : ajouter les quartiers de Manéah les
+  aurait proposés sous Dubréka · Manéah.
+- `Normalisation::comparable()` colle les mots d'un nom à tiret (« Sans-fil » → `sansfil`) mais
+  sépare ceux d'un nom à espace (`sans fil`) : rapprocher la liste avec elle aurait créé des doublons.
+
+#### Ce qui est livré
+
+- [x] **`database/data/quartiers-conakry-2024.json`** — 13 communes, 183 quartiers, chacun avec la
+  source de sa commune (MATD 2024, INS 2022, Wikipédia). Une source porte sa fiabilité ; une entrée
+  peut porter son propre doute, **et son motif** (obligatoire, contrôlé)
+- [x] **`php artisan ayelema:lieux-conakry`** — dry-run par défaut, idempotent, transactionnel.
+  Rapproche par **`Normalisation::cleLieu()`** (accents, casse, tirets, espaces ignorés ; I–IV lus
+  1–4), qui ne remplace pas `comparable()` : celle-ci porte l'unicité et a déjà rempli la base
+- [x] **Ne renomme jamais** : la cascade compare le nom à l'identique, renommer « Kagbelen » en
+  « Kagbélen » ferait passer chaque fiche en « hors référentiel ». Les 6 écarts sont **rapportés**
+- [x] **Ne supprime jamais, ne réactive jamais, ne déplace rien.** `--desactiver-obsoletes` désactive
+  les lieux de l'ancien découpage **sauf** s'ils sont employés, saisis par l'étude (`created_by_id`)
+  ou validés par elle (amorcés sans source puis `a_verifier` levé). Ceux-là sont rapportés pour
+  arbitrage en *Paramètres > Lieux*
+- [x] La cascade reçoit enfin **`a_verifier`** : `lieu-select.jsx` affichait « (à vérifier) » depuis
+  l'origine, mais `Lieu::referentielComplet()` ne servait pas la clé
+- [x] `lieux-guinee.json` ne déclare **plus** les quartiers de Conakry : les y laisser faisait de
+  `lieux-importer --corriger` une suppression des 158 quartiers ajoutés. `LieuSeeder` délègue Conakry
+  à la commande — il amorçait encore les 5 communes d'avant 2024
+- [x] **Local, exécuté** : 158 quartiers créés, 38 retrouvés, 16 lieux désactivés (dont
+  Dubréka · Manéah), 11 protégés. Second passage : rien. Toutes les valeurs référencées se résolvent
+  comme avant. Cascade vérifiée dans l'assistant de création (Conakry → Gbessia : 26 quartiers ;
+  Dubréka n'offre plus Manéah) ; l'intake reçoit les mêmes données par ses props
+- [x] `QuartiersConakryTest` (17 tests)
+
+#### Les ambiguïtés de la liste, tranchées
+
+| Cas | Traitement |
+|---|---|
+| Yattaya Centre (Lambanyi, Sonfonia), Nassouroulaye (Lambanyi, Gbessia) | créés sous les deux, **à vérifier des deux côtés** — rien ne dit laquelle des attributions est fausse |
+| Simbaya 1 (Gbessia), Simbaya 2 et École (Matoto) | à vérifier, motif écrit |
+| Koloma 1 et 2 sous Gbessia | à vérifier : Koloma est d'ordinaire à Ratoma (Koloma Soloprimo) |
+| 11ᵉ quartier de Sanoyah | **non inventé** ; Sogouéta (presse, non confirmé) ajouté à vérifier |
+| Ansoumaniah Village, Samatran | ajoutés à vérifier (certaines sources seulement) |
+| Districts et secteurs de Kassa | les **secteurs** sont les quartiers ; les districts Kassa et Fotoba ne sont pas créés (le référentiel a trois niveaux) |
+| Almamya I/II, Coronthie I/II (INS) | ajoutés à vérifier, à côté d'Almamya et Coronthie, conservés |
+| Kassa, Kagbélen, Sanoyah, Manéah | Wikipédia seulement : **tous** leurs quartiers à vérifier |
+
+#### Procédure en production — ⚠️ à lancer seulement avec l'accord de l'utilisateur
+
+1. **Sauvegarder** la table : `mysqldump --single-transaction <base> lieux > lieux-avant-conakry-2024.sql`
+   (la commande n'écrit que dans `lieux`).
+2. Déployer le code, puis **simuler** : `php artisan ayelema:lieux-conakry --desactiver-obsoletes -v`.
+   Lire le rapport avec l'étude : quartiers à créer, orthographes conservées, lieux à désactiver,
+   lieux protégés. Les données de production peuvent différer du local (validations, saisies).
+3. **Ajouter seulement** : `php artisan ayelema:lieux-conakry --appliquer`.
+4. **Facultatif, sur décision de l'étude** au vu du rapport :
+   `php artisan ayelema:lieux-conakry --appliquer --desactiver-obsoletes` (désactivation réversible
+   depuis *Paramètres > Lieux*).
+5. **Contrôler** : relancer la simulation — elle doit annoncer 0 commune et 0 quartier à créer ;
+   `php artisan ayelema:lieux-rapprocher` ne doit pas compter plus d'écarts qu'avant ; ouvrir une
+   fiche société de Kaloum et vérifier que son quartier reste sélectionné.
+6. Retour arrière : réactiver depuis *Paramètres > Lieux*, ou restaurer le dump (les lieux créés
+   portent `source LIKE 'conakry-2024:%'`).
+
+#### Laissé de côté, délibérément
+
+- Les lieux **protégés** (Nongo, Kaporo, Tanerie, Coléah, Madina, Sangoyah sous leurs anciennes
+  communes ; Bellevue, Hafia, Minière, Dixinn Centre validés par l'étude ; Dapompa) restent
+  proposés : c'est à l'étude de reprendre les fiches puis de les désactiver.
+- La cascade filtre toujours par **nom** de commune : Tanéné, Koba, Missira… existent sous deux
+  préfectures. Sans quartiers, aucun effet aujourd'hui — la commande signale tout homonyme d'une
+  commune de Conakry.
+
 ---
 
 ### ⚙️ Changement de workflow (2026-07-03)
@@ -2707,6 +2793,7 @@ registre) et `modif.*` l'état **après**. Les statuts mis à jour doivent porte
 | 129 | Trois décisions de l'étude sur ses notes de frais. (1) **Débours** sur les **sept constitutions**, selon le capital : colonne `baremes.tranches` (`Bareme::montantParTranche()`), grille déclarée **une fois** dans `ReglesGestionHonorairesSeeder::GRILLE_DEBOURS` et posée par `poserDebours()`, que la migration réutilise. ⚠️ Seuls deux points sont connus (10 M → 500 000, 100 M → 1 000 000) : la coupure à 100 M est une lecture, la ligne porte `a_confirmer`. Non remisable, sans formalité. (2) **Libellés des notes** : « Honoraires Forfaitaires », « Insertion dans un Journal d'Annonces Légales », « Timbres fiscaux », « Rôles » — renommés en base **et** dans les seeders, qui retrouvent les barèmes par libellé (un renommage en base seul aurait été défait au prochain semis, ou recréé en double). Aucune facture touchée : ses lignes gardent leur désignation. (3) « Enregistrement au Tribunal de Commerce » retiré aussi des **modifications** — ⚠️ il y ouvrait la démarche de greffe, qui ne s'ouvre plus d'office (accepté par l'étude). `DeboursEtLibellesBaremesTest` (5 tests) | 2026-11-23 |
 | 130 | Les **droits d'enregistrement** font l'objet d'une **facture complémentaire** établie au **retour des Impôts** (décision de l'étude). Ils ne sont connus qu'à ce retour, quand la principale est déjà émise, donc figée. Le montant se saisit comme une donnée au retour (`DonneeAuRetour::MontantDroits`, type `montant`, déclarée sur les 7 barèmes « Droits d'enregistrement des Statuts et de la DNSV » avec `quittance_numero`, que la base ne portait pas). Un retour qui en porte un établit une proforma `NatureFacture::Complementaire`, rattachée à la principale (`facture_origine_id`), à la formalité (`formalite_id`, **unique** : un retour réenregistré met à jour la même proforma, jamais une seconde), même banque, ligne non remisable ; le comptable l'émet, elle prend le numéro suivant. Émise, elle ne se réécrit plus : un montant différent est **signalé**, pas appliqué. ⚠️ Trois endroits supposaient **une seule facture par dossier** : `genererFacture()` supprimait toutes les factures (désormais `principales()` seulement), l'encaissement visait « la dernière » — qui serait devenue la complémentaire (désormais `facture_id`, la principale par défaut), et l'onglet Facturation n'affichait que la dernière (désormais toutes, principale d'abord). Les blocages d'étape et `Dossier::soldeRestant()` additionnaient déjà toutes les factures. `FactureComplementaireTest` (7 tests) | 2026-11-23 |
 | 131 | **Comptabilité des dossiers seulement** — l'étude ne demande **pas** de comptabilité générale (SYSCOHADA) : ni journaux, ni grand livre, ni exercice. Ce qui est livré répond à « que doit ce client, qu'a-t-il versé, qu'a-t-on reversé aux organismes, que détient-on ou avance-t-on pour lui ». (1) **Honoraire ou débours** : `NatureLigne`, portée par le barème (déduite de l'organisme si absente, `Bareme::booted`) **et copiée sur la ligne** ; obligatoire pour une ligne manuelle, dont elle décide la remise — elles étaient toutes remisables alors que les 26 mesurées étaient des débours. (2) **Versements aux organismes** : table `decaissements` ; le montant payé au **dépôt** d'une formalité en crée un (mis à jour au redépôt, jamais doublé), les autres se saisissent dans l'onglet Facturation ; `formalites.montant_paye` en devient la **somme**, tenue par le modèle — ses lecteurs n'ont pas changé. Les 41 montants existants (11 100 000 GNF) repris, marqués `reprise` (moyen jamais demandé). (3) `MoyenPaiement`, liste fermée servie aux écrans par `HandleInertiaRequests` (aucun miroir JS). (4) `SituationFinanciere::pour()` — **un seul calcul** pour la fiche et la vue d'ensemble `/comptabilite` (filtres, export CSV pour Excel) ; factures **émises** seulement. Mesuré après reprise : 26 dossiers, 7 en avance (8 525 000 GNF, les 7 relevés le 2026-11-20). ⚠️ `Bareme::booted` ne pose la nature que si la colonne existe : la migration du débours enregistre des barèmes avant elle. `ComptabiliteDossiersTest` (11 tests) | 2026-11-23 |
+| 132 | **Les quartiers de Conakry ont leur propre fichier et leur propre commande** (`quartiers-conakry-2024.json`, `ayelema:lieux-conakry`), d'après la liste fournie par l'étude le 2026-11-25 : 13 communes, 183 quartiers. L'opération doit tourner en production sur des données paramétrées, d'où ses quatre interdits : **ni suppression, ni renommage, ni réactivation, ni déplacement**. Elle ajoute, et retrouve l'existant par `Normalisation::cleLieu()` — une clé de rapprochement distincte de `comparable()`, qui porte l'unicité et colle « Sans-fil » mais sépare « Sans Fil ». Ne pas renommer est une contrainte, pas une prudence : la cascade compare le nom à l'identique, et un renommage ferait passer chaque fiche en « hors référentiel ». La désactivation de l'ancien découpage est **une option distincte** (`--desactiver-obsoletes`) qui épargne tout lieu employé, saisi ou validé par l'étude. Chaque quartier porte la fiabilité de sa source (MATD, INS validés ; Wikipédia à vérifier) ou un doute propre **motivé** ; et la cascade reçoit désormais `a_verifier`, que `lieu-select.jsx` savait afficher mais qui n'était pas servi. Corollaires : `lieux-guinee.json` ne déclare plus ces quartiers (sinon `lieux-importer --corriger` aurait supprimé les nouveaux), `LieuSeeder` délègue Conakry à la commande, et Dubréka · Manéah — homonyme d'avant le rattachement — est désactivée, la cascade filtrant les quartiers par nom de commune. Procédure de production : section « Conakry : 13 communes » de §5 |
 
 ---
 

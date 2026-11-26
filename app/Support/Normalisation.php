@@ -34,6 +34,34 @@ class Normalisation
     }
 
     /**
+     * Clé de **rapprochement** d'un nom de lieu — plus large que `comparable()`.
+     *
+     * `comparable()` porte l'unicité du référentiel et ne doit pas bouger : elle a déjà rempli
+     * `nom_normalise` sur toute la base. Or elle **colle** les mots d'un nom à tiret
+     * (« Sans-fil » → `sansfil`) mais **sépare** ceux d'un nom à espace (« Sans Fil » → `sans fil`),
+     * et ne sait rien des numéros. Rapprocher une liste officielle de l'existant avec elle aurait
+     * créé des doublons visibles : « Belle-Vue École » à côté de « Belle-vue École », « Tanènè I » à
+     * côté de « Tanènè 1 ».
+     *
+     * Ici : accents, casse, tirets, apostrophes et espaces ignorés ; chiffres romains isolés
+     * (I à IV) lus comme arabes. « Almamya I » et « Almamya 1 » ont la même clé, « Almamya » non.
+     */
+    public static function cleLieu(mixed $valeur): string
+    {
+        $texte = mb_strtolower(trim((string) $valeur));
+        $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT', $texte);
+        $texte = preg_replace('/[^a-z0-9]+/', ' ', $ascii !== false ? mb_strtolower($ascii) : $texte);
+
+        $romains = ['i' => '1', 'ii' => '2', 'iii' => '3', 'iv' => '4'];
+        $mots = array_map(
+            fn (string $mot) => $romains[$mot] ?? $mot,
+            preg_split('/\s+/', trim($texte), -1, PREG_SPLIT_NO_EMPTY),
+        );
+
+        return implode('', $mots);
+    }
+
+    /**
      * Convertit en ISO (`AAAA-MM-JJ`) les valeurs reçues au format français `JJ/MM/AAAA`, et ne
      * renvoie **que** les champs effectivement convertis — de quoi les fusionner dans une requête
      * sans écraser ce qui était déjà au bon format.

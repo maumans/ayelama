@@ -192,42 +192,19 @@ class LieuxTest extends TestCase
         $this->assertCount(13, $conakry['communes'], 'Conakry compte 13 communes depuis la loi L2024/003.');
         $this->assertContains('Lambanyi', $conakry['communes']);
 
-        // ── Les quartiers : Conakry seulement ────────────────────────────────
+        // ── Aucun quartier ici (2026-11-25) ─────────────────────────────────
         //
-        // Aucune source n'expose les 4 142 districts du pays ; le fichier n'en déclare donc que
-        // pour Conakry, et le référentiel se peuple par l'usage ailleurs.
+        // Ailleurs qu'à Conakry, aucune source n'expose les 4 142 districts du pays. Et ceux de
+        // Conakry vivent dans `quartiers-conakry-2024.json` : les déclarer aussi ici ferait de
+        // `--corriger` une suppression des quartiers absents de cette liste-ci — soit tous ceux des
+        // huit communes créées en 2024. Le garde-fou « un nom, un seul niveau » a suivi les données
+        // dans `QuartiersConakryTest`.
         foreach ($donnees['villes'] as $ville) {
-            if ($ville['nom'] === 'Conakry') {
-                $this->assertNotEmpty($ville['quartiers'] ?? [], 'Conakry doit déclarer ses quartiers.');
-                continue;
-            }
-
             $this->assertArrayNotHasKey(
                 'quartiers',
                 $ville,
-                "« {$ville['nom']} » ne doit pas déclarer de quartiers : aucune source ne les couvre.",
+                "« {$ville['nom']} » ne doit pas déclarer de quartiers dans lieux-guinee.json.",
             );
-        }
-
-        // ⚠️ **Le garde-fou qui aurait attrapé le défaut du jour** : « Lambanyi » et « Sonfonia »
-        // figuraient à la fois comme communes de Conakry et comme quartiers de Ratoma. Un nom ne
-        // peut pas désigner deux niveaux du même endroit.
-        $communes = array_map(fn (string $c) => mb_strtolower($c), $conakry['communes']);
-
-        foreach ($conakry['quartiers'] as $commune => $quartiers) {
-            $this->assertContains(
-                $commune,
-                $conakry['communes'],
-                "Les quartiers sont déclarés sous « {$commune} », qui n'est pas une commune de Conakry.",
-            );
-
-            foreach ($quartiers as $quartier) {
-                $this->assertNotContains(
-                    mb_strtolower($quartier),
-                    $communes,
-                    "« {$quartier} » est une commune de Conakry : il ne peut pas être aussi un quartier.",
-                );
-            }
         }
     }
 
