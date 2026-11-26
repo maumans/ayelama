@@ -118,14 +118,29 @@ class RestrictionsEtapesTest extends TestCase
         $partie  = Partie::create(['dossier_id' => $dossier->id, 'nom' => 'Ibrahima DIALLO', 'role' => 'associe_unique']);
 
         $this->actingAs($this->notaire)
-            ->post("/dossiers/{$dossier->reference}/parties", ['nom' => 'Ajout tardif', 'role' => 'temoin'])
-            ->assertForbidden();
-
-        $this->actingAs($this->notaire)
             ->delete("/parties/{$partie->id}")
             ->assertForbidden();
 
         $this->assertDatabaseCount('parties', 1);
+    }
+
+    /**
+     * Plus aucune entrée ne crée de partie **hors** des rôles du questionnaire, à aucune étape.
+     *
+     * Retiré le 2026-11-26 : une telle partie (témoin, accompagnateur…) n'a pas d'emplacement dans
+     * `donnees`, donc n'atteint aucun acte ni aucune checklist — et aucune n'existait en base. Les
+     * personnes entrent par les rôles (`StoreDossierRequest::partiesRules()`, qui refuse désormais
+     * un rôle inconnu).
+     */
+    public function test_on_najoute_plus_de_partie_hors_questionnaire(): void
+    {
+        $dossier = $this->dossier(EtapeDossier::Edition);
+
+        $reponse = $this->actingAs($this->admin)
+            ->post("/dossiers/{$dossier->reference}/parties", ['nom' => 'Témoin', 'role' => 'temoin']);
+
+        $this->assertContains($reponse->status(), [404, 405]);
+        $this->assertDatabaseCount('parties', 0);
     }
 
     public function test_laccord_client_ne_peut_plus_etre_remplace_apres_ledition(): void

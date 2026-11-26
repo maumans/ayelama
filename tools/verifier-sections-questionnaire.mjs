@@ -8,6 +8,9 @@
  *   C. La nature déclarée à l'écran part bien au serveur, pour **toute** section liée à un rôle.
  *   D. Rattacher une fiche remplit la section **entière**, pas seulement sa partie visible.
  *   E. Le rattachement d'office ne se déclenche que sur un candidat **unique** et rattachable.
+ *   I. Une fiche corrigée est reprojetée **partout** où le formulaire la cite (reappliquerFiche).
+ *   J. Une fiche complète ne se voit rien réclamer par le modal (manquantsPourFiche).
+ *   K. Les cases qui déplient une section sont toutes reconnues (champsDepliantLaSection).
  *
  * **Le défaut que ce contrôle attrape.** `groupFieldsBySection()` ouvre une carte au **premier**
  * champ portant `section`. Un champ déclaré avant ce marqueur tombe donc dans la carte
@@ -67,10 +70,12 @@ const urlQuestionnaires = copier('resources/js/data/questionnaires.js', (t) => t
 ));
 const urlParties = copier('resources/js/lib/partiesPayload.js');
 
-const { QUESTIONNAIRES } = await import(urlQuestionnaires);
-const { groupFieldsBySection, buildPartiesPayload, rolesARattacherDoffice,
+const { QUESTIONNAIRES, getVisibleFields } = await import(urlQuestionnaires);
+const { groupFieldsBySection, champsDepliantLaSection, buildPartiesPayload, rolesARattacherDoffice,
         lignesDeRepartitionDepuisRegistre, repartitionEstVierge,
-        optionsDynamiques, SOURCES_OPTIONS_DYNAMIQUES } = await import(urlParties);
+        optionsDynamiques, SOURCES_OPTIONS_DYNAMIQUES,
+        reappliquerFiche, remplacerFicheDansLiens, manquantsPourFiche,
+        roleRepresentant, personnesDesignees } = await import(urlParties);
 const { suffixesIdentite, mapClientToPrefixedFields, mapClientToRepeatableItem } = await import(urlChampsClient);
 
 fs.rmSync(tmp, { recursive: true, force: true });
@@ -547,3 +552,200 @@ if (sourcesInconnues.length > 0) {
 }
 
 console.log(`H. ${nbChampsDynamiques} champ(s) à options dynamiques — sources connues, aucun doublon.`);
+
+// ── I. Une fiche corrigée est reprojetée partout ─────────────────────────────────────────
+//
+// Jusqu'au 2026-11-26, corriger une fiche depuis une section scalaire ne mettait à jour que son
+// rattachement : les champs masqués gardaient l'ancienne valeur, et « Fiche incomplète » survivait
+// à « Compléter la fiche ». `reappliquerFiche()` doit atteindre les quatre emplacements possibles
+// d'une même personne. Le contrôle : rattacher une fiche A **partout**, la corriger en B, et
+// vérifier que chaque clé que B projette porte bien la valeur de B.
+
+const ficheA = { ...ficheTest('physique'), id: 7 };
+const ficheB = Object.fromEntries(Object.entries(ficheA).map(([k, v]) =>
+    [k, typeof v === 'string' && k !== 'type' && !/date|_le$/.test(k) ? `${v} (corrigé)` : v]));
+ficheB.date_naissance = '1981-02-02';
+ficheB.piece_delivree_le = '2021-03-03';
+ficheB.piece_expire_le = '2031-04-04';
+
+const nonReprojetes = [];
+let emplacements = 0;
+
+for (const [nom, champs] of Object.entries(QUESTIONNAIRES)) {
+    const liens = {};
+    let valeurs = {};
+    const attendu = {};
+
+    for (const groupe of groupFieldsBySection(champs)) {
+        if (!groupe.clientRole || groupe.fields[0].type === 'repeatable') continue;
+        const prefixe = groupe.fields[0].id.split('.')[0];
+        const ids = groupe.fields.map(f => f.id);
+        liens[groupe.clientRole] = ficheA;
+        liens[roleRepresentant(groupe.clientRole)] = ficheA;
+        valeurs = { ...valeurs, ...mapClientToPrefixedFields(ficheA, prefixe, ids), ...mapClientToPrefixedFields(ficheA, prefixe, ids, 'repr_') };
+        Object.assign(attendu, mapClientToPrefixedFields(ficheB, prefixe, ids), mapClientToPrefixedFields(ficheB, prefixe, ids, 'repr_'));
+        emplacements += 2;
+    }
+
+    for (const champ of champs) {
+        if (champ.type !== 'repeatable' || !champ.clientRole) continue;
+        const ids = (champ.fields ?? []).map(f => f.id);
+        valeurs[champ.id] = [{
+            ...mapClientToRepeatableItem(ficheA, ids), client: ficheA,
+            ...mapClientToRepeatableItem(ficheA, ids, 'repr_'), representant_client: ficheA,
+        }];
+        attendu[champ.id] = { ...mapClientToRepeatableItem(ficheB, ids), ...mapClientToRepeatableItem(ficheB, ids, 'repr_') };
+        emplacements += 2;
+    }
+
+    const apres = reappliquerFiche(champs, valeurs, liens, ficheB);
+
+    for (const [cle, valeur] of Object.entries(attendu)) {
+        if (typeof valeur === 'object') {
+            const ligne = apres[cle]?.[0] ?? {};
+            for (const [sous, v] of Object.entries(valeur)) {
+                if (ligne[sous] !== v) nonReprojetes.push(`  ${nom} → ${cle}[0].${sous} : « ${ligne[sous]} » au lieu de « ${v} »`);
+            }
+            if (ligne.client !== ficheB || ligne.representant_client !== ficheB) {
+                nonReprojetes.push(`  ${nom} → ${cle}[0] : la ligne ne porte pas la fiche corrigée`);
+            }
+        } else if (apres[cle] !== valeur) {
+            nonReprojetes.push(`  ${nom} → ${cle} : « ${apres[cle]} » au lieu de « ${valeur} »`);
+        }
+    }
+
+    const liensApres = remplacerFicheDansLiens(liens, ficheB);
+    if (Object.values(liensApres).some(c => c !== ficheB)) {
+        nonReprojetes.push(`  ${nom} : un rattachement désigne encore l'ancienne fiche`);
+    }
+
+    // Et la liste des personnes du dossier ne la compte qu'une fois, avec toutes ses places.
+    const designees = personnesDesignees(champs, apres, liensApres);
+    if (designees.length > 1) {
+        nonReprojetes.push(`  ${nom} : la même fiche apparaît ${designees.length} fois parmi les personnes du dossier`);
+    }
+}
+
+if (nonReprojetes.length > 0) {
+    console.error(
+        `\n${nonReprojetes.length} valeur(s) d'une fiche corrigée ne sont pas reprojetées :\n\n` +
+        `${nonReprojetes.slice(0, 30).join('\n')}\n\n` +
+        "L'écran garderait l'ancienne valeur — et l'avertissement « Fiche incomplète » qui va avec.\n" +
+        'Voir reappliquerFiche() dans lib/partiesPayload.js.',
+    );
+    process.exit(1);
+}
+
+console.log(`I. ${emplacements} emplacement(s) de personne — une fiche corrigée les atteint tous.`);
+
+// ── J. Une fiche complète ne se voit rien réclamer ─────────────────────────────────────
+//
+// Le modal de fiche signale ce que la section reprendra encore (`manquantsPourFiche`). S'il
+// réclamait un champ qu'une fiche **complète** ne peut pas fournir, il mentirait exactement comme
+// « Fiche incomplète » mentait sur `type_personne` (contrôle B). L'une au moins des deux natures
+// doit satisfaire chaque section — l'autre peut légitimement manquer de quelque chose (une
+// société n'a pas de date de naissance).
+
+const reclames = [];
+let sectionsJ = 0;
+
+for (const [nom, champs] of Object.entries(QUESTIONNAIRES)) {
+    for (const groupe of groupFieldsBySection(champs)) {
+        if (!groupe.clientRole) continue;
+
+        const verifier = (champsSection, prefixe) => {
+            for (const personne of ['partie', 'representant']) {
+                sectionsJ++;
+                const parNature = ['physique', 'morale'].map(type => manquantsPourFiche({
+                    champs: champsSection,
+                    client: ficheTest(type),
+                    // Case « se fait représenter » cochée : sans elle les champs du représentant
+                    // sont masqués, et le contrôle ne vérifierait rien pour lui.
+                    valeurs: prefixe ? { [`${prefixe}.est_represente`]: true } : { est_represente: true },
+                    prefixe,
+                    personne,
+                }));
+                if (parNature.every(m => m.length > 0)) {
+                    reclames.push(`  ${nom} → « ${groupe.name} » (${personne}) : ${parNature[0].join(', ')}`);
+                }
+            }
+        };
+
+        if (groupe.fields[0].type === 'repeatable') {
+            for (const champ of groupe.fields.filter(f => f.type === 'repeatable')) verifier(champ.fields ?? [], null);
+        } else {
+            verifier(groupe.fields, groupe.fields[0].id.split('.')[0]);
+        }
+    }
+}
+
+if (reclames.length > 0) {
+    console.error(
+        `\n${reclames.length} section(s) réclameraient à une fiche complète un champ qu'elle ne peut pas fournir :\n\n` +
+        `${reclames.join('\n')}\n\n` +
+        'Voir manquantsPourFiche() (lib/partiesPayload.js) et les projections de lib/clientFields.js.',
+    );
+    process.exit(1);
+}
+
+console.log(`J. ${sectionsJ} personne(s) de section — une fiche complète n'y manque de rien.`);
+
+// ── K. Une case qui replie sa section doit être reconnue comme telle ──────────────────
+//
+// `ClientRoleSection` ne rend ses enfants qu'une fois une fiche rattachée. La case
+// « Le gérant est une personne différente de l'associé unique » vit dans cette section :
+// cochée, elle la dépliait… et disparaissait avec elle tant qu'aucune personne n'était
+// désignée. Plus moyen de revenir en arrière sans créer la partie qu'on voulait annuler.
+//
+// `champsDepliantLaSection()` sort ces cases de la carte. Le contrôle ne fait pas confiance
+// à sa lecture des `showIf` : il **mesure** le repli avec le vrai moteur de visibilité
+// (`getVisibleFields`). Un jour où une case déplierait sa section par un `includes` ou un
+// `all` que l'analyse ne sait pas lire, l'écart se verrait ici — pas en production.
+
+const malReconnues = [];
+let casesK = 0;
+
+for (const [nom, champs] of Object.entries(QUESTIONNAIRES)) {
+    // Tout déplier : chaque case à cocher du questionnaire est posée à vrai.
+    const toutVrai = {};
+    for (const f of champs) if (f.type === 'checkbox') toutVrai[f.id] = true;
+
+    for (const groupe of groupFieldsBySection(getVisibleFields(champs, toutVrai))) {
+        if (!groupe.clientRole) continue;
+
+        const ids = new Set(groupe.fields.map(f => f.id));
+        // Mesure : décocher cette case laisse-t-elle la section à un seul champ ?
+        const replient = groupe.fields.filter(f => {
+            if (f.type !== 'checkbox') return false;
+            const sansElle = { ...toutVrai, [f.id]: false };
+            const restants = getVisibleFields(champs, sansElle).filter(c => ids.has(c.id));
+            return restants.length <= 1;
+        }).map(f => f.id);
+
+        const reconnues = champsDepliantLaSection(groupe.fields).map(f => f.id);
+        casesK += replient.length;
+
+        const oubliees = replient.filter(id => !reconnues.includes(id));
+        const enTrop    = reconnues.filter(id => !replient.includes(id));
+        if (oubliees.length > 0 || enTrop.length > 0) {
+            malReconnues.push(
+                `  ${nom} → « ${groupe.name} » (rôle ${groupe.clientRole})` +
+                (oubliees.length ? `\n      replie la section sans être reconnue : ${oubliees.join(', ')}` : '') +
+                (enTrop.length ? `\n      reconnue à tort : ${enTrop.join(', ')}` : ''),
+            );
+        }
+    }
+}
+
+if (malReconnues.length > 0) {
+    console.error(
+        `\n${malReconnues.length} section(s) dont la case de dépliage est mal reconnue :\n\n` +
+        `${malReconnues.join('\n')}\n\n` +
+        'Une case oubliée est rendue **dans** ClientRoleSection : cochée sans fiche rattachée,\n' +
+        'elle disparaît et ne peut plus être décochée. Voir champsDepliantLaSection()\n' +
+        '(lib/partiesPayload.js) et son rendu dans Dossiers/Create.jsx.',
+    );
+    process.exit(1);
+}
+
+console.log(`K. ${casesK} case(s) dépliant une section — toutes reconnues, aucune en trop.`);

@@ -1,6 +1,6 @@
-import { buildPartieFields, estChampRepresentation } from '@/lib/clientFields';
+import { buildPartieFields, estChampRepresentation, estChampIdentite, personneDuChamp, mapClientToPrefixedFields, mapClientToRepeatableItem } from '@/lib/clientFields';
 import { typePersonneCanonique } from '@/lib/piecesRequises';
-import { MOTIF_REPRESENTATION_PAR_LIBELLE, FORME_TITRE_PAR_LIBELLE } from '@/data/questionnaires';
+import { MOTIF_REPRESENTATION_PAR_LIBELLE, FORME_TITRE_PAR_LIBELLE, getVisibleFields } from '@/data/questionnaires';
 import { frDateToISO } from '@/lib/dates';
 import { groupeRepresentant } from '@/lib/piecesStagees';
 
@@ -27,6 +27,40 @@ export function groupFieldsBySection(fields) {
         current.fields.push(field);
     }
     return groups;
+}
+
+/**
+ * Champs qui **déplient** une section : ceux dont la visibilité de *tous* les autres champs
+ * du groupe dépend. En pratique la case « Le gérant est une personne différente de l'associé
+ * unique » (`ger.est_different`) et ses semblables.
+ *
+ * Ils doivent être rendus **hors** de `ClientRoleSection` : ce composant ne rend ses enfants
+ * qu'une fois une fiche rattachée (ou en cours de changement). Cochée puis laissée sans
+ * personne désignée, la case partait donc avec le reste de la section — plus moyen de la
+ * décocher sans d'abord rattacher quelqu'un, c'est-à-dire sans créer la partie qu'on voulait
+ * justement annuler.
+ *
+ * Critère volontairement étroit : « tous les autres », et non « au moins un ». La case
+ * « se fait représenter à l'acte » n'ouvre que les champs `repr_*` du groupe, pas la section
+ * entière ; la décocher ne la replie pas, et elle reste là où elle est.
+ *
+ * @param {object[]} fields  champs **visibles** d'une section (après `getVisibleFields`)
+ * @returns {object[]}       sous-ensemble de `fields`, dans l'ordre d'origine
+ */
+export function champsDepliantLaSection(fields) {
+    if (fields.length <= 1) return [];
+
+    const propres = new Set(fields.map(f => f.id));
+    const cites = (showIf, id) => {
+        if (!showIf) return false;
+        if (showIf.all !== undefined) return showIf.all.some(c => cites(c, id));
+        return showIf.field === id;
+    };
+
+    return fields.filter(f =>
+        propres.has(f.id)
+        && fields.every(autre => autre.id === f.id || cites(autre.showIf, f.id)),
+    );
 }
 
 // Construit le payload `parties` (dossiers.store / dossiers.questionnaire) à partir
@@ -613,4 +647,165 @@ export function getManagedClientRoles(questionnaire) {
     // DossierController::supprimerRepresentantsOrphelins(). La règle est d'ailleurs verrouillée
     // côté serveur par une règle de validation : un payload forgé ne peut pas la contourner.
     return Array.from(roles);
+}
+
+/**
+ * Les personnes déjà désignées dans ce dossier, avec la place qu'elles y tiennent.
+ *
+ * Remplace, depuis le 2026-11-26, la carte « Clients du dossier » et son état `dossierClients`.
+ * Cette carte tenait une **seconde** liste des personnes, à côté des rôles : on y ajoutait un
+ * client, puis on le retrouvait en petite puce dix cartes plus bas, sans savoir s'il tenait déjà
+ * un rôle — et un client ajouté là sans être désigné nulle part était abandonné à la soumission,
+ * alors que le récapitulatif l'annonçait « réutilisé ». La liste est désormais **dérivée** de ce
+ * qui a un effet (les rôles) : elle ne peut plus dire autre chose qu'eux.
+ *
+ * `extras` : fiches proposées sans rôle encore attribué — aujourd'hui les personnes connues de la
+ * société, importées depuis sa fiche (cédant, gérant sortant… que le registre ne sait pas
+ * attribuer seul).
+ *
+ * @returns {Array<{client: object, roles: string[]}>}
+ */
+export function personnesDesignees(questionnaire = [], formValues = {}, clientLinks = {}, extras = []) {
+    const parId = new Map();
+    const noter = (client, role) => {
+        if (!client?.id) return;
+        const entree = parId.get(client.id) ?? { client, roles: [] };
+        if (role && !entree.roles.includes(role)) entree.roles.push(role);
+        parId.set(client.id, entree);
+    };
+
+    for (const group of groupFieldsBySection(questionnaire)) {
+        if (!group.clientRole) continue;
+        noter(clientLinks[group.clientRole], group.name);
+        noter(clientLinks[roleRepresentant(group.clientRole)], group.name ? `Représentant — ${group.name.toLowerCase()}` : 'Représentant');
+    }
+
+    for (const field of questionnaire) {
+        if (field.type !== 'repeatable' || !field.clientRole) continue;
+        (formValues[field.id] ?? []).forEach((item, idx) => {
+            // Même libellé que la carte de la ligne (RepeatableGroup) : on doit reconnaître
+            // l'endroit d'un coup d'œil.
+            noter(item?.client, `${field.label} ${idx + 1}`);
+            noter(item?.representant_client, `Représentant — ${field.label.toLowerCase()} ${idx + 1}`);
+        });
+    }
+
+    for (const client of extras) noter(client, null);
+
+    return [...parId.values()];
+}
+
+/**
+ * Reprojette une fiche client **corrigée** partout où le formulaire la cite.
+ *
+ * Jusqu'au 2026-11-26, corriger une fiche depuis une section scalaire ne mettait à jour que
+ * `clientLinks` : les champs d'identité, masqués, gardaient l'ancienne valeur dans `formValues`.
+ * Or c'est `formValues` que lisent l'avertissement « Fiche incomplète » et la liste des blocants.
+ * Après « Compléter la fiche », l'écran continuait donc d'exiger la date de naissance qu'on venait
+ * de saisir — jusqu'à détacher puis rattacher la fiche. Le serveur reprojetait bien à
+ * l'enregistrement : seul l'écran mentait, mais il bloquait.
+ *
+ * Quatre emplacements, et c'est pourquoi la fonction est ici plutôt que dans un écran : section
+ * scalaire, représentant d'une section scalaire, ligne de bloc, représentant d'une ligne. La même
+ * personne peut occuper plusieurs d'entre eux — associé unique et gérant, par exemple.
+ *
+ * Pure : rend `formValues` inchangé (même référence) si la fiche n'est citée nulle part.
+ * Le rattachement (`clientLinks`) se met à jour à part, par l'appelant.
+ */
+export function reappliquerFiche(questionnaire = [], formValues = {}, clientLinks = {}, client = null) {
+    if (!client?.id) return formValues;
+
+    const patch = {};
+
+    for (const group of groupFieldsBySection(questionnaire)) {
+        if (!group.clientRole || group.fields[0]?.type === 'repeatable') continue;
+        const prefixe = group.fields[0].id.split('.')[0];
+        // Le schéma **complet** du rôle — même règle que le rattachement (contrôle D).
+        const ids = champsDuRole(questionnaire, group.clientRole);
+
+        if (clientLinks[group.clientRole]?.id === client.id) {
+            Object.assign(patch, mapClientToPrefixedFields(client, prefixe, ids));
+        }
+        if (clientLinks[roleRepresentant(group.clientRole)]?.id === client.id) {
+            Object.assign(patch, mapClientToPrefixedFields(client, prefixe, ids, 'repr_'));
+        }
+    }
+
+    for (const field of questionnaire) {
+        if (field.type !== 'repeatable' || !field.clientRole) continue;
+        const lignes = formValues[field.id];
+        if (!Array.isArray(lignes)) continue;
+
+        const ids = (field.fields ?? []).map(f => f.id);
+        let change = false;
+        const suivantes = lignes.map(item => {
+            let suivant = item;
+            if (item?.client?.id === client.id) {
+                suivant = { ...suivant, ...mapClientToRepeatableItem(client, ids), client };
+                change = true;
+            }
+            if (item?.representant_client?.id === client.id) {
+                suivant = { ...suivant, ...mapClientToRepeatableItem(client, ids, 'repr_'), representant_client: client };
+                change = true;
+            }
+            return suivant;
+        });
+        if (change) patch[field.id] = suivantes;
+    }
+
+    return Object.keys(patch).length > 0 ? { ...formValues, ...patch } : formValues;
+}
+
+/**
+ * Remplace une fiche corrigée dans les rattachements (`clientLinks`). Pendant de
+ * {@see reappliquerFiche}, pour la même raison : les deux écrans qui corrigent une fiche
+ * (Create, modal de Show) le faisaient chacun à la main.
+ */
+export function remplacerFicheDansLiens(clientLinks = {}, client = null) {
+    if (!client?.id) return clientLinks;
+
+    return Object.fromEntries(
+        Object.entries(clientLinks).map(([role, c]) => [role, c?.id === client.id ? client : c]),
+    );
+}
+
+/**
+ * Ce qu'une section exigera encore de cette fiche, si on la rattachait telle quelle.
+ *
+ * Sert au modal de création/correction de fiche, pour **signaler** — jamais bloquer — les
+ * informations que l'acte reprendra : sans cela, on ne découvrait qu'après coup, par « Fiche
+ * incomplète — il manque… », que l'associé unique demandait onze champs alors que la fiche n'en
+ * exige qu'un (le nom). Signaler et non bloquer, par choix de l'étude (2026-11-26) : une fiche
+ * client est une référence qu'on crée sans rôle et qu'on complète au fil de ses usages.
+ *
+ * Le calcul **simule le rattachement** avec les fonctions de projection elles-mêmes
+ * (`mapClientToPrefixedFields` / `mapClientToRepeatableItem`) plutôt qu'avec une table « champ du
+ * modal → champ de section » qui serait un troisième miroir à tenir. Même règle que
+ * `champsIdentiteManquants()` de Create.jsx : champ requis, d'identité, de cette personne, visible
+ * une fois la fiche projetée (une société ne se voit pas réclamer de date de naissance).
+ *
+ * @param {object}  args
+ * @param {Array}   args.champs     schéma **complet** de la section (scalaire) ou de la ligne (bloc)
+ * @param {object}  args.client     la fiche en cours de saisie
+ * @param {object}  args.valeurs    `formValues` (scalaire) ou l'item de la ligne (bloc)
+ * @param {?string} args.prefixe    `'pp'`… pour une section scalaire, `null` pour une ligne de bloc
+ * @param {string}  args.personne   `'partie'` ou `'representant'`
+ * @returns {string[]} libellés des champs manquants
+ */
+export function manquantsPourFiche({ champs = [], client = null, valeurs = {}, prefixe = null, personne = 'partie' } = {}) {
+    if (!client) return [];
+
+    const sousPrefixe = personne === 'representant' ? 'repr_' : '';
+    const ids = champs.map(f => f.id);
+    const projete = prefixe
+        ? mapClientToPrefixedFields(client, prefixe, ids, sousPrefixe)
+        : mapClientToRepeatableItem(client, ids, sousPrefixe);
+    const simule = { ...valeurs, ...projete };
+
+    return getVisibleFields(champs, simule)
+        .filter(f => f.required
+            && estChampIdentite(f.id)
+            && personneDuChamp(f.id) === personne
+            && !simule[f.id])
+        .map(f => f.label);
 }

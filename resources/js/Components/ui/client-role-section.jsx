@@ -29,7 +29,7 @@ export function ClientRoleSection({
     onUnlink,
     onCreateNew,
     onEditClient,
-    poolClients = [],
+    personnesDuDossier = [],
     champsManquants = [],
     saisieLibre = false,
     onToggleSaisieLibre,
@@ -102,8 +102,8 @@ export function ClientRoleSection({
             <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-3">
                 <p className="mb-2 text-xs text-slate-500">
                     {roleLabel
-                        ? <>Désignez la personne qui tient le rôle de <span className="font-medium text-slate-700">{roleLabel.toLowerCase()}</span> — choisissez-la parmi les clients du dossier, cherchez-la dans le répertoire, ou créez sa fiche.</>
-                        : 'Choisissez la personne parmi les clients du dossier, le répertoire, ou créez sa fiche.'}
+                        ? <>Qui est <span className="font-medium text-slate-700">{roleLabel.toLowerCase()}</span>&nbsp;? Reprenez une personne déjà dans ce dossier, cherchez sa fiche dans le répertoire, ou créez-la — son identité sera reprise partout où vous la désignez.</>
+                        : 'Reprenez une personne déjà dans ce dossier, cherchez sa fiche dans le répertoire, ou créez-la.'}
                 </p>
 
                 {/* ── Ce que le registre sait déjà, proposé **ici** ────────────────────
@@ -145,12 +145,12 @@ export function ClientRoleSection({
                 )}
 
                 <ClientPicker
-                    placeholder={roleLabel ? `Rechercher un client existant (${roleLabel})…` : 'Rechercher un client existant…'}
+                    placeholder="Rechercher dans le répertoire (nom, pièce, téléphone)…"
                     linked={null}
                     onSelect={(client) => { onSelect?.(client); setChangement(false); }}
                     onUnlink={onUnlink}
                     onCreateNew={onCreateNew}
-                    poolClients={poolClients}
+                    personnesDuDossier={personnesDuDossier}
                 />
                 <div className="mt-2 flex items-center justify-between gap-3">
                     {!readOnly && onToggleSaisieLibre && (

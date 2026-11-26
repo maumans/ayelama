@@ -292,6 +292,23 @@ class Partie extends Model
         return array_fill_keys(self::ROLES_ADMETTANT_PERSONNE_MORALE, 'associe_morale');
     }
 
+    /**
+     * Tous les rôles qu'une partie peut tenir : ceux qui ont un jeu de pièces et ceux qui n'en ont
+     * délibérément aucun. `PiecesRequisesParRoleTest` garantit que chaque `clientRole` du
+     * questionnaire figure dans l'une des deux tables — cette union est donc exactement la liste
+     * des rôles que le formulaire peut émettre, plus le représentant (`mandataire`).
+     *
+     * Sert de liste blanche à `StoreDossierRequest::partiesRules()` depuis le 2026-11-26 : le rôle y
+     * était une chaîne libre, ce qui laissait naître des parties « témoin » ou « accompagnateur »
+     * sans place dans aucun acte. Un rôle inconnu échoue désormais à la validation, bruyamment.
+     *
+     * @return array<int, string>
+     */
+    public static function rolesConnus(): array
+    {
+        return array_values(array_unique(array_merge(array_keys(self::JEU_PAR_ROLE), self::ROLES_SANS_PIECES)));
+    }
+
     /** @return array<int, string> Rôles délibérément sans pièce — voir ROLES_SANS_PIECES. */
     public static function rolesSansPieces(): array
     {

@@ -79,7 +79,6 @@ import {
 import { RepeatableGroup } from "@/Components/ui/RepeatableGroup";
 import { DateField } from "@/components/ui/date-field";
 import { ModalEnvoiCourrier } from "@/Components/Courriers/ModalEnvoiCourrier";
-import { ClientPicker } from "@/Components/ui/client-picker";
 import { ModalNouveauClient } from "@/Components/ModalNouveauClient";
 import { ClientRoleSection } from "@/Components/ui/client-role-section";
 import { ChoixMultiple } from "@/Components/ui/choix-multiple";
@@ -95,7 +94,6 @@ import { ClotureTab } from "@/Components/Dossiers/ClotureTab";
 const ANCRE_PIECES_PARTIES = "pieces-parties";
 import {
     mapClientToPrefixedFields,
-    buildPartieFields,
     estChampIdentite,
     personneDuChamp,
 } from "@/lib/clientFields";
@@ -107,6 +105,10 @@ import {
     champsDuRole,
     candidatsDuRegistre,
     optionsDynamiques,
+    personnesDesignees,
+    reappliquerFiche,
+    remplacerFicheDansLiens,
+    manquantsPourFiche,
 } from "@/lib/partiesPayload";
 import {
     capitauxApresModification,
@@ -688,6 +690,36 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
     const allFields = fields.length > 0 ? fields : genericFields;
     const visibleFields = getVisibleFields(allFields, formValues);
 
+    // Personnes déjà désignées dans ce dossier, proposées dans chaque section — même source que
+    // l'assistant de création (personnesDesignees), qui l'a introduite le 2026-11-26. Ce modal
+    // n'en proposait aucune : il fallait rechercher dans le répertoire la personne que l'on
+    // venait de désigner deux cartes plus haut.
+    const personnesDuDossier = personnesDesignees(allFields, formValues, clientLinks);
+
+    /** Ce que la section reprendra encore de la fiche ouverte — même calcul que l'assistant. */
+    const attendusPour = (group) => {
+        const complet = group?.clientRole
+            ? groupFieldsBySection(allFields).find((g) => g.clientRole === group.clientRole)
+            : null;
+        if (!complet) return null;
+        const prefixe = complet.fields[0].id.split(".")[0];
+
+        return (fiche) =>
+            manquantsPourFiche({
+                champs: complet.fields,
+                client: fiche,
+                valeurs: formValues,
+                prefixe,
+                personne: group.cible === "representant" ? "representant" : "partie",
+            });
+    };
+
+    /** Fiche créée ou corrigée : la reprojeter partout où ce formulaire la cite — voir reappliquerFiche(). */
+    const ficheCorrigee = (client) => {
+        setClientLinks((prev) => remplacerFicheDansLiens(prev, client));
+        setFormValues((prev) => reappliquerFiche(allFields, prev, clientLinks, client));
+    };
+
     /**
      * Nombre d'options chargées par champ géo, remonté par `LieuSelect`.
      *
@@ -748,7 +780,14 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                                                 </h4>
                                             </div>
                                         )}
-                                        {group.clientRole && (
+                                        {/* `group.fields.length > 1` : même condition que l'assistant
+                                            (`estSectionClient`). Une section encore repliée à sa seule case
+                                            « le gérant est une personne différente… » ne produit aucune partie
+                                            (`buildPartiesPayload` saute un groupe sans nom) : y proposer une
+                                            fiche à rattacher faisait désigner quelqu'un pour rien. La case,
+                                            elle, est rendue dans la liste à plat ci-dessous — donc toujours
+                                            décochable. */}
+                                        {group.clientRole && group.fields.length > 1 && (
                                             <div className="mb-1">
                                                 {/* Même composant que l'assistant de création : la section
                                             désigne une fiche client au lieu de resaisir son identité,
@@ -779,6 +818,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                                                     onEditClient={(client) =>
                                                         setEditingClient(client)
                                                     }
+                                                    personnesDuDossier={personnesDuDossier}
                                                     champsManquants={champsIdentiteManquants(
                                                         group,
                                                     )}
@@ -852,6 +892,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                                                                     client,
                                                                 )
                                                             }
+                                                            personnesDuDossier={personnesDuDossier}
                                                             champsManquants={champsIdentiteManquants(
                                                                 group,
                                                                 "representant",
@@ -973,6 +1014,8 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                                                                 partiesById={
                                                                     partiesById
                                                                 }
+                                                                personnesDuDossier={personnesDuDossier}
+                                                                onClientCreated={ficheCorrigee}
                                                                 piecesRequises={piecesRequises}
                                                                 stagedPieces={
                                                                     stagedPieces[
@@ -1026,6 +1069,9 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                                                 )
                                             )
                                                 return null;
+                                            // Section repliée (gérant = associé unique) : aucune partie n'en
+                                            // naît, une pièce déposée ici serait jetée — miroir de Create.jsx.
+                                            if (group.fields.length <= 1) return null;
 
                                             // Une Partie déjà enregistrée a sa vraie checklist sur l'onglet
                                             // Informations, alimentée par `piecesChecklist()` : la proposer ici
@@ -1197,6 +1243,8 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
             <ModalNouveauClient
                 open={creatingClientForGroup !== null}
                 onClose={() => setCreatingClientForGroup(null)}
+                champsAttendus={attendusPour(creatingClientForGroup)}
+                contexte={creatingClientForGroup?.name}
                 onCreated={(client) => {
                     // Une seule modale pour les deux personnes d'une section — le groupe porte
                     // `cible` quand la création vient de la carte du représentant. Miroir de
@@ -1220,14 +1268,7 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                 client={editingClient}
                 onClose={() => setEditingClient(null)}
                 onCreated={(client) => {
-                    setClientLinks((prev) =>
-                        Object.fromEntries(
-                            Object.entries(prev).map(([role, c]) => [
-                                role,
-                                c?.id === client.id ? client : c,
-                            ]),
-                        ),
-                    );
+                    ficheCorrigee(client);
                     setEditingClient(null);
                 }}
             />
@@ -1652,7 +1693,6 @@ function InformationsTab({
     can,
     onEditQuest,
     managedRoles,
-    onAjouterPersonne,
     onSupprimerPersonne,
     societe,
     modificationStatutaire,
@@ -1969,22 +2009,14 @@ function InformationsTab({
                         <Users className="h-4 w-4 text-seal" />
                         Personnes associées au dossier
                     </CardTitle>
-                    {can?.modifierQuestionnaire ? (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 gap-1.5"
-                            onClick={onAjouterPersonne}
-                        >
-                            <Plus className="h-3.5 w-3.5" /> Ajouter une
-                            personne
-                        </Button>
-                    ) : (
-                        can?.update && (
-                            <span className="text-xs text-slate-400 max-w-[240px] text-right leading-snug">
-                                Composition de l'acte arrêtée depuis l'Édition.
-                            </span>
-                        )
+                    {/* « Ajouter une personne » (témoin, accompagnateur…) retiré le 2026-11-26 :
+                        une partie sans place dans le questionnaire n'atteint aucun acte ni aucune
+                        checklist de pièces, et aucune n'avait été créée. Les personnes entrent
+                        désormais par les rôles du questionnaire (« Modifier »). */}
+                    {!can?.modifierQuestionnaire && can?.update && (
+                        <span className="text-xs text-slate-400 max-w-[240px] text-right leading-snug">
+                            Composition de l'acte arrêtée depuis l'Édition.
+                        </span>
                     )}
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -5182,98 +5214,6 @@ function tabPasEncoreAtteint(tabValue, etapeActuelle, dossier) {
     return !dejaDesDonnees;
 }
 
-// Ajoute une personne au dossier en dehors des rôles gérés par le questionnaire
-// (ex. accompagnateur, témoin) — persiste immédiatement via un endpoint dédié,
-// indépendant du flux de sauvegarde du questionnaire.
-function ModalAjouterPersonne({ open, onClose, reference }) {
-    const [client, setClient] = useState(null);
-    const [role, setRole] = useState("");
-    const [creatingClient, setCreatingClient] = useState(false);
-    const [saving, setSaving] = useState(false);
-
-    useEffect(() => {
-        if (open) {
-            setClient(null);
-            setRole("");
-        }
-    }, [open]);
-
-    const submit = () => {
-        if (!client || !role.trim()) return;
-        setSaving(true);
-        router.post(
-            `/dossiers/${reference}/parties`,
-            {
-                ...buildPartieFields(client, {}, ""),
-                role: role.trim(),
-                client_id: client.id,
-            },
-            {
-                preserveScroll: true,
-                onSuccess: () => onClose(),
-                onError: notifyValidationError,
-                onFinish: () => setSaving(false),
-            },
-        );
-    };
-
-    return (
-        <>
-            <Dialog open={open} onOpenChange={onClose}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Ajouter une personne</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-3 py-2">
-                        <p className="text-xs text-slate-400">
-                            Personne présente pour ce dossier mais qui n'est pas
-                            forcément liée à l'acte en cours (accompagnateur,
-                            témoin…).
-                        </p>
-                        <div className="space-y-1.5">
-                            <Label>Client</Label>
-                            <ClientPicker
-                                placeholder="Rechercher un client existant…"
-                                linked={client}
-                                onSelect={setClient}
-                                onUnlink={() => setClient(null)}
-                                onCreateNew={() => setCreatingClient(true)}
-                            />
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label>Qualité</Label>
-                            <Input
-                                placeholder="ex : témoin, accompagnateur…"
-                                value={role}
-                                onChange={(e) => setRole(e.target.value)}
-                            />
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={onClose}>
-                            Annuler
-                        </Button>
-                        <Button
-                            onClick={submit}
-                            disabled={saving || !client || !role.trim()}
-                        >
-                            {saving ? "Ajout…" : "Ajouter"}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-            <ModalNouveauClient
-                open={creatingClient}
-                onClose={() => setCreatingClient(false)}
-                onCreated={(c) => {
-                    setClient(c);
-                    setCreatingClient(false);
-                }}
-            />
-        </>
-    );
-}
-
 export default function DossierShow() {
     const {
         dossier,
@@ -5294,7 +5234,6 @@ export default function DossierShow() {
     const [avancerErrors, setAvancerErrors] = useState([]);
     const [editDossierOpen, setEditDossierOpen] = useState(false);
     const [editQuestOpen, setEditQuestOpen] = useState(false);
-    const [ajoutPersonneOpen, setAjoutPersonneOpen] = useState(false);
     const [historiqueOpen, setHistoriqueOpen] = useState(false);
     // Aperçu des documents de l'onglet Certification, déplié sous la carte concernée.
     // Le panneau d'aperçu unique en pied de page a été supprimé : chaque liste déplie
@@ -6221,9 +6160,6 @@ export default function DossierShow() {
                                             setEditQuestOpen(true)
                                         }
                                         managedRoles={managedRoles}
-                                        onAjouterPersonne={() =>
-                                            setAjoutPersonneOpen(true)
-                                        }
                                         onSupprimerPersonne={supprimerPersonne}
                                         societe={societe}
                                         modificationStatutaire={
@@ -7016,11 +6952,6 @@ export default function DossierShow() {
                         onClose={() => setEditQuestOpen(false)}
                         dossier={dossier}
                         societe={societe}
-                    />
-                    <ModalAjouterPersonne
-                        open={ajoutPersonneOpen}
-                        onClose={() => setAjoutPersonneOpen(false)}
-                        reference={reference}
                     />
                 </>
             )}

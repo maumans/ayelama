@@ -126,7 +126,7 @@ export function SocietePicker({
                                     onClick={() => onImporterPersonnes(p)}
                                     disabled={!p.client_id}
                                     title={p.client_id
-                                        ? 'Ajouter cette personne aux clients du dossier'
+                                        ? 'La proposer dans chaque section du dossier (« Déjà dans ce dossier »)'
                                         : "Cette personne n'a pas de fiche client — à créer manuellement"}
                                     className="inline-flex items-center gap-1 rounded-full border border-seal/30 bg-white px-2.5 py-1 text-xs text-slate-700 transition-colors hover:bg-seal/10 disabled:cursor-not-allowed disabled:opacity-50"
                                 >

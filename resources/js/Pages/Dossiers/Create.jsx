@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QUESTIONNAIRES, TYPE_ACTE_CODE_MAP, getVisibleFields, purgerChampsInvisibles, libelleRepresentant, MOTIF_REPRESENTATION_PAR_LIBELLE } from '@/data/questionnaires';
 import { RepeatableGroup } from '@/Components/ui/RepeatableGroup';
-import { ClientPicker } from '@/Components/ui/client-picker';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ChoixMultiple } from '@/Components/ui/choix-multiple';
 import { tableExclusionsModification } from '@/lib/exclusionsChoix';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { PiecesConstitutivesCard } from '@/Components/Societes/PiecesConstitutivesCard';
 import { ChoixSociete } from '@/Components/Societes/ChoixSociete';
-import { mapClientToPrefixedFields, buildPartieFields, clientDisplayName, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
+import { mapClientToPrefixedFields, clientDisplayName, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
 import { mapSocieteToQuestionnaire, estChampSociete, ficheRenseigneChamp, societeDisplayName } from '@/lib/societeFields';
-import { groupFieldsBySection, buildPartiesPayload, roleRepresentant, champsDuRole, rolesARattacherDoffice, candidatsDuRegistre, lignesDeRepartitionDepuisRegistre, repartitionEstVierge, optionsDynamiques } from '@/lib/partiesPayload';
+import { groupFieldsBySection, champsDepliantLaSection, buildPartiesPayload, roleRepresentant, champsDuRole, personnesDesignees, reappliquerFiche, remplacerFicheDansLiens, manquantsPourFiche, rolesARattacherDoffice, candidatsDuRegistre, lignesDeRepartitionDepuisRegistre, repartitionEstVierge, optionsDynamiques } from '@/lib/partiesPayload';
 import { piecesRequisesPour, piecesDuRepresentant } from '@/lib/piecesRequises';
 import { apresRetraitLigne, sansLigne, sansGroupe, transformerGroupes, groupeRepresentant } from '@/lib/piecesStagees';
 import { useReprenables } from '@/lib/useReprenables';
@@ -37,7 +36,6 @@ import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
 import AppLayout from '@/Layouts/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
@@ -406,12 +404,12 @@ export default function DossierCreate() {
     // Rôles saisis en texte libre plutôt que via une fiche client (tiers ponctuel
     // qu'on ne verse pas au répertoire) — { [clientRole]: true }.
     const [saisieLibreRoles, setSaisieLibreRoles] = useState({});
-    // Clients ajoutés en haut du formulaire (personnes physiques/morales créées ou choisies
-    // dans le répertoire pour ce dossier). Certains reçoivent une qualité libre directement
-    // (témoin, accompagnateur…), d'autres restent disponibles pour être réutilisés comme
-    // gérant/associé/etc. via les sélecteurs de client des sections ci-dessous.
-    const [dossierClients, setDossierClients] = useState([]); // [{ client, role }]
-    const [creatingClientForDossierIndex, setCreatingClientForDossierIndex] = useState(null);
+    // Fiches versées depuis la société du registre **sans rôle attribué** (`importerPersonneConnue`) :
+    // un associé d'origine qu'on désignera peut-être cédant, ou gérant sortant. Les personnes
+    // déjà désignées n'ont pas besoin d'état propre — elles se lisent dans les rôles, voir
+    // `personnesDesignees()`. Ce tableau remplace `dossierClients` et la carte « Clients du
+    // dossier », retirées le 2026-11-26.
+    const [clientsImportes, setClientsImportes] = useState([]);
     // Société du registre sur laquelle porte le dossier (modification, dissolution) : sa fiche
     // préremplit les champs `soc.*` et devient `dossiers.societe_id`. Distincte de
     // `clientLinks` — une société n'est pas une partie à l'acte, c'est son objet.
@@ -760,7 +758,6 @@ export default function DossierCreate() {
 
         for (const { role, group, client } of retenus) {
             applyClientToSection(group, client);
-            addClientToPool(client);
             setRolesDepuisRegistre(prev => ({ ...prev, [role]: true }));
         }
 
@@ -867,8 +864,8 @@ export default function DossierCreate() {
     };
 
     /**
-     * Verse une personne connue de la société aux « clients du dossier », d'où elle est
-     * réutilisable comme cédant, gérant sortant, souscripteur… Ne l'affecte à aucun rôle : un
+     * Propose une personne connue de la société dans chaque section (« Déjà dans ce dossier »), d'où
+     * elle est réutilisable comme cédant, gérant sortant, souscripteur… Ne l'affecte à aucun rôle : un
      * associé d'origine peut avoir déjà cédé toutes ses parts, c'est au clerc de dire à quel
      * titre il intervient.
      *
@@ -882,8 +879,8 @@ export default function DossierCreate() {
             toast.error(`${personne?.nom ?? 'Cette personne'} n'a pas de fiche client — créez-la depuis la section concernée.`);
             return;
         }
-        addClientToPool(personne.client);
-        toast.success(`${clientDisplayName(personne.client)} ajouté aux clients du dossier.`);
+        setClientsImportes(prev => prev.some(c => c.id === personne.client.id) ? prev : [...prev, personne.client]);
+        toast.success(`${clientDisplayName(personne.client)} est proposé dans chaque section, sous « Déjà dans ce dossier ».`);
     };
 
     /**
@@ -1049,37 +1046,47 @@ export default function DossierCreate() {
             .map(f => f.label);
     };
 
-    // "Clients du dossier" : ajoutés en haut du formulaire, avant de savoir précisément
-    // à quel rôle ils correspondront. Une qualité libre est optionnelle (ex. accompagnateur,
-    // témoin) — sans qualité, le client reste simplement disponible à la réutilisation.
-    const addDossierClient = () => setDossierClients(prev => [...prev, { client: null, role: '' }]);
-    const removeDossierClient = (i) => setDossierClients(prev => prev.filter((_, idx) => idx !== i));
-    const setDossierClientClient = (i, client) => setDossierClients(prev => prev.map((p, idx) => idx === i ? { ...p, client } : p));
-    const setDossierClientRole = (i, role) => setDossierClients(prev => prev.map((p, idx) => idx === i ? { ...p, role } : p));
+    // Les personnes déjà désignées dans le dossier, avec leur place — proposées dans chaque
+    // section pour être reprises sans recherche. **Dérivées** des rôles : la carte « Clients du
+    // dossier » qui en tenait une seconde liste a été retirée le 2026-11-26 (retour d'usage). Elle
+    // offrait deux chemins vers le même rôle, ne disait pas qui tenait quoi, abandonnait à la
+    // soumission un client ajouté sans être désigné — tout en l'annonçant « réutilisé » au
+    // récapitulatif — et sa « qualité libre » (témoin, accompagnateur) ne parvenait à aucun acte :
+    // 0 partie de ce type mesurée en base.
+    const personnesDuDossier = personnesDesignees(questionnaire, formValues, clientLinks, clientsImportes);
 
-    // Pool dédupliqué des clients déjà ajoutés au dossier — proposé en sélection rapide
-    // dans chaque section liée à un rôle (gérant, associé…) pour réutilisation immédiate.
-    // La carte « Clients du dossier » n'a pas de sens pour une modification ou une dissolution
-    // de société (retour R01, 2026-11-16) : les personnes y viennent des rôles du questionnaire
-    // (cédant, cessionnaire, gérant, liquidateur…) et du registre de la société. Une « qualité
-    // libre » y créait une partie sans jeu de pièces ni place dans les actes.
-    // ⚠️ Seuls la carte et ses parties à qualité libre sont retirées : `dossierClients` reste le
-    // **pool** de réutilisation, que `addClientToPool` et `importerPersonneConnue` alimentent
-    // encore — le vider casserait la sélection rapide dans les sections de rôle.
-    const carteClientsDossier = !['modification', 'dissolution'].includes(
-        societeGroupe(typeActe?.code),
-    );
+    /**
+     * Une fiche vient d'être créée ou corrigée : la reprojeter partout où le formulaire la cite.
+     *
+     * Sans cela, une correction faite depuis une section ne valait que pour son rattachement —
+     * les champs masqués gardaient l'ancienne valeur, et l'avertissement « Fiche incomplète »
+     * survivait à « Compléter la fiche ». Voir reappliquerFiche().
+     */
+    const ficheCorrigee = (client) => {
+        setClientLinks(prev => remplacerFicheDansLiens(prev, client));
+        setFormValues(prev => reappliquerFiche(questionnaire, prev, clientLinks, client));
+        setClientsImportes(prev => prev.map(c => c.id === client.id ? client : c));
+    };
 
-    const poolClients = Array.from(
-        new Map(dossierClients.filter(p => p.client).map(p => [p.client.id, p.client])).values()
-    );
+    /**
+     * Ce que la section d'où l'on crée ou corrige une fiche reprendra encore — signalé dans le
+     * modal, sans bloquer. Le schéma **complet** de la section (pas sa version rendue) : un bloc
+     * bimodal n'affiche ses champs de société qu'une fois la nature connue.
+     */
+    const attendusPour = (group, cible = 'partie') => {
+        const complet = group?.clientRole
+            ? groupFieldsBySection(questionnaire).find(g => g.clientRole === group.clientRole)
+            : null;
+        if (!complet) return null;
+        const prefixe = complet.fields[0].id.split('.')[0];
 
-    // Un client créé/choisi directement depuis une section de rôle (gérant, associé…)
-    // rejoint aussi le pool du dossier, pour être réutilisable ailleurs sans le rechercher.
-    const addClientToPool = (client) => {
-        setDossierClients(prev => prev.some(p => p.client?.id === client.id)
-            ? prev
-            : [...prev, { client, role: '' }]);
+        return (fiche) => manquantsPourFiche({
+            champs: complet.fields,
+            client: fiche,
+            valeurs: formValues,
+            prefixe,
+            personne: cible === 'representant' ? 'representant' : 'partie',
+        });
     };
 
     // ── Brouillon : enregistrer, reprendre, abandonner ───────────────────────
@@ -1090,7 +1097,7 @@ export default function DossierCreate() {
             const form = construireFormDataBrouillon({
                 etat: {
                     step, categorie, sousGroupe, typeActe, formValues, clientLinks,
-                    dossierClients, saisieLibreRoles, objet, urgent, notes,
+                    clientsImportes, saisieLibreRoles, objet, urgent, notes,
                     notaireId, reviseurId, formalisteId, piecesBrouillon,
                     // Sans elle, reprendre un brouillon de modification perdait la société
                     // choisie : les champs `soc.*` restaient remplis mais `societe_id` était
@@ -1134,7 +1141,9 @@ export default function DossierCreate() {
         setTypeActe(type);
         setFormValues(e.formValues ?? {});
         setClientLinks(e.clientLinks ?? {});
-        setDossierClients(e.dossierClients ?? []);
+        // Un brouillon antérieur au 2026-11-26 porte `dossierClients` ([{ client, role }]) : ses
+        // fiches restent proposées, la « qualité libre » est abandonnée avec la carte qui la saisissait.
+        setClientsImportes(e.clientsImportes ?? (e.dossierClients ?? []).map(p => p?.client).filter(Boolean));
         setSaisieLibreRoles(e.saisieLibreRoles ?? {});
         setSocieteLink(e.societeLink ?? null);
         setObjet(e.objet ?? '');
@@ -1269,12 +1278,6 @@ export default function DossierCreate() {
             setErrors({ type_acte_id: 'Type d\'acte introuvable. Vérifiez la configuration.' });
             return;
         }
-        // Sans la carte, une qualité libre héritée d'un brouillon ou d'un changement de type
-        // d'acte ne doit pas devenir une partie invisible (voir `carteClientsDossier`).
-        const autresPartiesPayload = (carteClientsDossier ? dossierClients : [])
-            .filter(p => p.client && p.role.trim())
-            .map(p => ({ ...buildPartieFields(p.client, {}, ''), role: p.role.trim(), client_id: p.client.id }));
-
         // Purgé des champs des blocs décochés : une valeur laissée par une modification finalement
         // abandonnée serait projetée dans les actes et, pour `modif.valeur_parts_cedees`, servirait
         // d'assiette à la facture (voir purgerChampsInvisibles). Sert aussi à construire les
@@ -1298,10 +1301,7 @@ export default function DossierCreate() {
             // Le brouillon détient les pièces déjà téléversées : le serveur les
             // rattache aux parties puis le supprime (voir DossierController).
             brouillon_id: brouillonId || undefined,
-            parties: [
-                ...buildPartiesPayload(questionnaire, donneesSoumises, clientLinks, stagedPieces, piecesBrouillon),
-                ...autresPartiesPayload,
-            ],
+            parties: buildPartiesPayload(questionnaire, donneesSoumises, clientLinks, stagedPieces, piecesBrouillon),
         }, {
             forceFormData: true,
             onError: (errs) => { setErrors(errs); setSubmitting(false); notifyValidationError(errs); },
@@ -1401,8 +1401,8 @@ export default function DossierCreate() {
                                                                                     fieldDef={f}
                                                                                     value={formValues[f.id] ?? []}
                                                                                     onChange={val => setFormValues(prev => ({ ...prev, [f.id]: val }))}
-                                                                                    poolClients={poolClients}
-                                                                                    onClientCreated={addClientToPool}
+                                                                                    personnesDuDossier={personnesDuDossier}
+                                                                                    onClientCreated={ficheCorrigee}
                                                                                     piecesRequises={piecesRequises}
                                                                                     stagedPieces={stagedPieces[f.id] || {}}
                                                                                     onStagedPieceChange={(key, file) => handleStagedPieceChange(f.id, key, file)}
@@ -1436,7 +1436,14 @@ export default function DossierCreate() {
                                                         );
 
                                                         const champsVisibles  = champsAffichables(group);
-                                                        const champsPartie    = champsVisibles.filter(f => personneDuChamp(f.id) === 'partie');
+                                                        // La case qui déplie la section (« le gérant est une personne
+                                                        // différente… ») est rendue au-dessus de la carte, pas dedans :
+                                                        // ClientRoleSection replie ses enfants tant qu'aucune fiche n'est
+                                                        // rattachée, et la case partait avec eux — on ne pouvait plus la
+                                                        // décocher sans désigner d'abord quelqu'un.
+                                                        const champsOuvrants  = estSectionClient ? champsDepliantLaSection(champsVisibles) : [];
+                                                        const idsOuvrants     = new Set(champsOuvrants.map(f => f.id));
+                                                        const champsPartie    = champsVisibles.filter(f => personneDuChamp(f.id) === 'partie' && !idsOuvrants.has(f.id));
                                                         const champsRepr      = champsVisibles.filter(f => personneDuChamp(f.id) === 'representant');
                                                         const grille          = grilleDe(champsPartie);
 
@@ -1483,6 +1490,10 @@ export default function DossierCreate() {
                                                         const prefixeGroupe = group.fields[0].id.split('.')[0];
 
                                                         return (
+                                                            <>
+                                                            {champsOuvrants.length > 0 && (
+                                                                <div className="mb-3">{grilleDe(champsOuvrants)}</div>
+                                                            )}
                                                             <ClientRoleSection
                                                                 roleLabel={group.name}
                                                                 linked={clientLinks[group.clientRole] ?? null}
@@ -1490,7 +1501,7 @@ export default function DossierCreate() {
                                                                 onUnlink={() => unlinkClientFromSection(group.clientRole)}
                                                                 onCreateNew={() => setCreatingClientForGroup(group)}
                                                                 onEditClient={(client) => setEditingClient({ client, group })}
-                                                                poolClients={poolClients}
+                                                                personnesDuDossier={personnesDuDossier}
                                                                 champsManquants={champsIdentiteManquants(group)}
                                                                 saisieLibre={!!saisieLibreRoles[group.clientRole]}
                                                                 onToggleSaisieLibre={(v) => toggleSaisieLibre(group.clientRole, v)}
@@ -1498,7 +1509,6 @@ export default function DossierCreate() {
                                                                 suggestionsRegistre={candidatsDuRegistre(societeLink?.personnesConnues, group.clientRole)}
                                                                 onSelectRegistre={(client) => {
                                                                     applyClientToSection(group, client);
-                                                                    addClientToPool(client);
                                                                     setRolesDepuisRegistre(prev => ({ ...prev, [group.clientRole]: true }));
                                                                 }}
                                                             >
@@ -1521,7 +1531,7 @@ export default function DossierCreate() {
                                                                             onUnlink={() => unlinkClientFromSection(roleRepr)}
                                                                             onCreateNew={() => setCreatingClientForGroup({ ...group, cible: 'representant' })}
                                                                             onEditClient={(client) => setEditingClient({ client, group, cible: 'representant' })}
-                                                                            poolClients={poolClients}
+                                                                            personnesDuDossier={personnesDuDossier}
                                                                             champsManquants={champsIdentiteManquants(group, 'representant')}
                                                                             saisieLibre={!!saisieLibreRoles[roleRepr]}
                                                                             onToggleSaisieLibre={(v) => toggleSaisieLibre(roleRepr, v)}
@@ -1553,6 +1563,7 @@ export default function DossierCreate() {
                                                                     </div>
                                                                 )}
                                                             </ClientRoleSection>
+                                                            </>
                                                         );
                                                         })()}
 
@@ -1574,6 +1585,12 @@ export default function DossierCreate() {
                                                             if (!group.clientRole) return null;
                                                             // On vérifie s'il y a un repeatable group dans cette section, si oui on skip car c'est RepeatableGroup qui s'en charge.
                                                             if (group.fields.some(f => f.type === 'repeatable')) return null;
+                                                            // Section repliée — seule sa case reste visible (SARLU/SASU : « le gérant
+                                                            // est une personne différente » non cochée, donc le gérant est l'associé
+                                                            // unique). Aucune partie n'en naît (`buildPartiesPayload` saute un groupe
+                                                            // sans nom) : une pièce déposée ici était **jetée** en silence. Même
+                                                            // condition que `estSectionClient` plus haut.
+                                                            if (group.fields.length <= 1) return null;
 
                                                             // Règle servie par le serveur, plus recomposée ici. L'ancienne liste
                                                             // blanche nommait sept rôles (bailleur, locataire, vendeur, acheteur,
@@ -1893,49 +1910,6 @@ export default function DossierCreate() {
                                     Détails — <span className="text-slate-500">{typeSelected?.label}</span>
                                 </h2>
 
-                                {/* Clients du dossier — créés/choisis en premier, réutilisables ensuite pour un rôle précis.
-                                    Absente d'une modification ou d'une dissolution : voir `carteClientsDossier`. */}
-                                {carteClientsDossier && (
-                                <Card>
-                                    <CardContent className="p-5 space-y-3">
-                                        <GroupHeader icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50">
-                                            Clients du dossier
-                                        </GroupHeader>
-                                        <p className="text-xs text-slate-400 -mt-2">
-                                            Ajoutez ici les clients (personnes physiques ou morales) concernés par ce dossier.
-                                            Vous pourrez ensuite les réutiliser directement comme gérant, associé, vendeur… dans
-                                            les sections ci-dessous. Ne renseignez une qualité que si la personne n'a pas de rôle
-                                            précis dans l'acte (témoin, accompagnateur…).
-                                        </p>
-                                        {dossierClients.map((p, i) => (
-                                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3">
-                                                <div className="flex-1 space-y-2">
-                                                    <ClientPicker
-                                                        placeholder="Rechercher un client existant…"
-                                                        linked={p.client}
-                                                        onSelect={(client) => setDossierClientClient(i, client)}
-                                                        onUnlink={() => setDossierClientClient(i, null)}
-                                                        onCreateNew={() => setCreatingClientForDossierIndex(i)}
-                                                    />
-                                                    <Input
-                                                        placeholder="Qualité si sans rôle précis (ex : témoin, accompagnateur…) — optionnel"
-                                                        value={p.role}
-                                                        onChange={e => setDossierClientRole(i, e.target.value)}
-                                                    />
-                                                </div>
-                                                <Button variant="ghost" size="icon-sm" className="text-slate-300 hover:text-danger mt-0.5"
-                                                    onClick={() => removeDossierClient(i)} title="Retirer">
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                </Button>
-                                            </div>
-                                        ))}
-                                        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={addDossierClient}>
-                                            <PlusCircle className="h-3.5 w-3.5" /> Ajouter un client
-                                        </Button>
-                                    </CardContent>
-                                </Card>
-                                )}
-
                                 {/* Champs obligatoires du dossier, organisés par sections */}
                                 <Card className="border-seal/30">
                                     <CardContent className="p-5 space-y-4">
@@ -2083,9 +2057,6 @@ export default function DossierCreate() {
                             const notaireSelected = (notaires ?? []).find(n => String(n.id) === String(notaireId));
                             const reviseurSelected = (reviseurs ?? []).find(r => String(r.id) === String(reviseurId));
                             const formalisteSelected = (formalistes ?? []).find(f => String(f.id) === String(formalisteId));
-                            const dossierClientsAjoutes = dossierClients.filter(p => p.client);
-                            const autresValides = dossierClientsAjoutes.filter(p => p.role.trim());
-                            const dossierClientsDisponibles = dossierClientsAjoutes.filter(p => !p.role.trim());
                             const sections = groupesSections
                                 .map(group => ({
                                     ...group,
@@ -2254,23 +2225,17 @@ export default function DossierCreate() {
                                     );
                                 })}
 
-                                {/* Clients du dossier */}
-                                {carteClientsDossier && dossierClientsAjoutes.length > 0 && (
-                                    <RecapCard icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50" title="Clients du dossier" onEdit={() => setStep(1)}>
-                                        <div className="flex flex-wrap gap-2">
-                                            {autresValides.map((p, i) => (
-                                                <span key={`role-${i}`} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
-                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client) || 'Client sans nom'}</span>
-                                                    <span className="text-slate-400">· {p.role}</span>
-                                                </span>
+                                {/* Qui intervient, et à quel titre — lu dans les rôles, jamais saisi à part. */}
+                                {personnesDuDossier.some(p => p.roles.length > 0) && (
+                                    <RecapCard icon={Users} iconColor="text-indigo-600" iconBg="bg-indigo-50" title="Personnes du dossier" onEdit={() => setStep(1)}>
+                                        <ul className="space-y-1">
+                                            {personnesDuDossier.filter(p => p.roles.length > 0).map(({ client, roles }) => (
+                                                <li key={client.id} className="text-xs">
+                                                    <span className="font-medium text-slate-700">{clientDisplayName(client) || 'Client sans nom'}</span>
+                                                    <span className="text-slate-400"> — {roles.join(' · ')}</span>
+                                                </li>
                                             ))}
-                                            {dossierClientsDisponibles.map((p, i) => (
-                                                <span key={`dispo-${i}`} className="inline-flex items-center gap-1.5 text-xs bg-seal-light border border-seal/30 rounded-full px-3 py-1">
-                                                    <span className="font-medium text-slate-700">{clientDisplayName(p.client) || 'Client sans nom'}</span>
-                                                    <span className="text-slate-400">· réutilisé ci-dessus</span>
-                                                </span>
-                                            ))}
-                                        </div>
+                                        </ul>
                                     </RecapCard>
                                 )}
 
@@ -2409,6 +2374,8 @@ export default function DossierCreate() {
             <ModalNouveauClient
                 open={creatingClientForGroup !== null}
                 onClose={() => setCreatingClientForGroup(null)}
+                champsAttendus={attendusPour(creatingClientForGroup, creatingClientForGroup?.cible)}
+                contexte={creatingClientForGroup?.name}
                 onCreated={(client) => {
                     // Une seule modale pour les deux personnes d'une section : le groupe porte
                     // `cible` quand la création vient de la carte du représentant. Deux modales
@@ -2418,17 +2385,7 @@ export default function DossierCreate() {
                     } else {
                         applyClientToSection(creatingClientForGroup, client);
                     }
-                    addClientToPool(client);
                     setCreatingClientForGroup(null);
-                }}
-            />
-
-            <ModalNouveauClient
-                open={creatingClientForDossierIndex !== null}
-                onClose={() => setCreatingClientForDossierIndex(null)}
-                onCreated={(client) => {
-                    setDossierClientClient(creatingClientForDossierIndex, client);
-                    setCreatingClientForDossierIndex(null);
                 }}
             />
 
@@ -2452,15 +2409,12 @@ export default function DossierCreate() {
                 open={editingClient !== null}
                 client={editingClient?.client ?? null}
                 onClose={() => setEditingClient(null)}
+                champsAttendus={attendusPour(editingClient?.group, editingClient?.cible)}
+                contexte={editingClient?.group?.name}
                 onCreated={(client) => {
                     // Réapplique la fiche corrigée partout où elle est référencée :
-                    // le pool du dossier et tous les rôles qui la désignent.
-                    setClientLinks(prev => Object.fromEntries(
-                        Object.entries(prev).map(([role, c]) => [role, c?.id === client.id ? client : c])
-                    ));
-                    setDossierClients(prev => prev.map(p =>
-                        p.client?.id === client.id ? { ...p, client } : p
-                    ));
+                    // rattachements **et** champs projetés, de toutes les sections.
+                    ficheCorrigee(client);
                     setEditingClient(null);
                 }}
             />

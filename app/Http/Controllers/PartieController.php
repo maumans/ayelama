@@ -10,34 +10,10 @@ use Illuminate\Http\Request;
 
 class PartieController extends Controller
 {
-    /**
-     * Ajoute une personne au dossier en dehors des rôles déclarés par le
-     * questionnaire (ex. accompagnateur, témoin) — indépendant du flux de
-     * sauvegarde du questionnaire pour ne pas interférer avec la
-     * synchronisation par « managedRoles » de DossierController::updateQuestionnaire().
-     */
-    public function store(Request $request, Dossier $dossier)
-    {
-        // Même règle que DossierController::updateQuestionnaire(), qui gère aussi la
-        // liste des parties : la composition de l'acte est arrêtée à l'Édition. Ajouter
-        // une partie après la certification changerait les personnes à l'acte sans
-        // qu'aucun contrôle ne l'ait vue.
-        $this->authorize('modifierQuestionnaire', $dossier);
-
-        $data = $request->validate([
-            'nom'         => ['required', 'string', 'max:200'],
-            'role'        => ['required', 'string', 'max:100'],
-            'client_id'   => ['nullable', 'integer', 'exists:clients,id'],
-            'cni'         => ['nullable', 'string', 'max:50'],
-            'telephone'   => ['nullable', 'string', 'max:20'],
-            'adresse'     => ['nullable', 'string', 'max:500'],
-            'email'       => ['nullable', 'email', 'max:200'],
-        ]);
-
-        $dossier->parties()->create($data);
-
-        return back()->with('success', 'Personne ajoutée au dossier.');
-    }
+    // `store()` — ajout d'une personne hors des rôles du questionnaire (témoin, accompagnateur…) —
+    // retiré le 2026-11-26 avec le modal qui l'appelait. Une telle partie n'avait pas
+    // d'emplacement dans `donnees` : aucun acte, aucune checklist ne la voyait, et aucune n'existait
+    // en base. `destroy()` reste, pour les parties héritées de cette époque ou des jeux d'essai.
 
     public function destroy(Partie $partie)
     {

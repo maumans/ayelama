@@ -64,7 +64,8 @@ class StoreDossierRequest extends FormRequest
         return [
             'parties'              => ['nullable', 'array'],
             'parties.*.nom'        => ['required_with:parties', 'string', 'max:200'],
-            'parties.*.role'       => ['required_with:parties', 'string', 'max:100'],
+            // Liste blanche depuis le 2026-11-26 — voir Partie::rolesConnus().
+            'parties.*.role'       => ['required_with:parties', 'string', Rule::in(\App\Models\Partie::rolesConnus())],
             'parties.*.partie_id'  => ['nullable', 'integer'],
             'parties.*.type_personne' => ['nullable', 'in:physique,morale'],
             'parties.*.client_id'  => ['nullable', 'integer', 'exists:clients,id'],

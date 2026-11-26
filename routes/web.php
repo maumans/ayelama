@@ -74,7 +74,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/dossiers/{dossier:reference}/cloture/verifications/rubrique', [ClotureController::class, 'verifierRubrique'])->name('dossiers.cloture.verifier_rubrique');
 
     // Parties additionnelles (personnes non liées à un rôle du questionnaire)
-    Route::post('/dossiers/{dossier:reference}/parties', [PartieController::class, 'store'])->name('dossiers.parties.store');
     Route::delete('/parties/{partie}', [PartieController::class, 'destroy'])->name('parties.destroy');
     Route::post('/parties/{partie}/photo', [PartieController::class, 'uploaderPhoto'])->name('parties.photo');
     Route::post('/parties/{partie}/pieces', [PartieController::class, 'uploaderPiece'])->name('parties.pieces.store');

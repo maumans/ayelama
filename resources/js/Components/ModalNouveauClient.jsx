@@ -78,8 +78,14 @@ function champsFiche(client) {
  * nouvelle valeur sur les dossiers non clôturés qui la référencent — le serveur
  * renvoie la liste de ces dossiers, annoncée à l'utilisateur plutôt que passée
  * sous silence (voir ClientProjectionService).
+ *
+ * `champsAttendus` (optionnel, `(ficheSimulee) => string[]`) et `contexte` (nom de la section) :
+ * quand la fiche est ouverte depuis une section de l'acte, liste ce que cette section reprendra
+ * encore et que la fiche ne renseigne pas (voir `manquantsPourFiche()`). **Signalé, jamais
+ * bloquant** — décision de l'étude du 2026-11-26 : une fiche se crée sans rôle, et se complète au
+ * fil de ses usages. Le modal ne demande donc aucun rôle ; il dit seulement ce qui manquera.
  */
-export function ModalNouveauClient({ open, onClose, onCreated, initialValues, client = null }) {
+export function ModalNouveauClient({ open, onClose, onCreated, initialValues, client = null, champsAttendus = null, contexte = null }) {
     const estEdition = !!client?.id;
     const [form, setForm] = useState({ ...EMPTY_CLIENT, ...datesEnISO(initialValues) });
     const [errors, setErrors] = useState({});
@@ -138,6 +144,18 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
 
         return messages;
     };
+
+    // Ce que la section d'origine reprendra encore. La fiche simulée porte `prenom_nom`, que le
+    // serveur calcule (accessor) et que les fonctions de projection lisent.
+    const manquants = champsAttendus
+        ? champsAttendus({
+            ...form,
+            id: client?.id ?? 0,
+            prenom_nom: form.type === 'physique'
+                ? [form.prenoms, form.nom_famille].filter(Boolean).join(' ')
+                : form.denomination,
+        })
+        : [];
 
     /** Pièce périmée : **avertissement seul** — l'étude consigne la situation réelle du client. */
     const pieceExpiree = form.piece_expire_le && form.piece_expire_le < new Date().toISOString().slice(0, 10);
@@ -454,6 +472,17 @@ export function ModalNouveauClient({ open, onClose, onCreated, initialValues, cl
                             <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
                             Cette pièce d'identité est expirée. La fiche s'enregistre — pensez à demander
                             un renouvellement avant la signature de l'acte.
+                        </p>
+                    )}
+
+                    {manquants.length > 0 && (
+                        <p className="mx-6 mb-3 flex items-start gap-1.5 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-slate-400" />
+                            <span>
+                                {contexte ? <>Pour <span className="font-medium">{contexte.toLowerCase()}</span>, l'acte</> : "L'acte"}
+                                {' '}reprendra aussi&nbsp;: <span className="font-medium">{manquants.join(', ')}</span>.
+                                {' '}Vous pouvez enregistrer la fiche sans, et la compléter plus tard.
+                            </span>
                         </p>
                     )}
 

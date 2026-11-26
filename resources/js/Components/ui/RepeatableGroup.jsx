@@ -10,6 +10,7 @@ import { PhoneField } from '@/Components/ui/phone-field';
 import { ClientRoleSection } from '@/Components/ui/client-role-section';
 import { ModalNouveauClient } from '@/Components/ModalNouveauClient';
 import { mapClientToRepeatableItem, estChampIdentite, personneDuChamp } from '@/lib/clientFields';
+import { manquantsPourFiche } from '@/lib/partiesPayload';
 import { getVisibleFields, libelleRepresentant, MOTIF_REPRESENTATION_PAR_LIBELLE } from '@/data/questionnaires';
 import { PieceGedRow } from '@/Components/Formalites/PieceGedRow';
 import { PieceStagedRow } from '@/Components/ui/PieceStagedRow';
@@ -65,7 +66,7 @@ function MentionRegistre({ item }) {
     );
 }
 
-export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false, poolClients = [], onClientCreated, partiesById = {}, piecesRequises = {}, stagedPieces = {}, onStagedPieceChange, piecesBrouillon = {}, onRetirerPieceBrouillon, stagedPiecesRepr = {}, onStagedPieceReprChange, piecesBrouillonRepr = {}, onRetirerPieceBrouillonRepr, onLigneRetiree, onPersonneChangee, reprisePour, optionsDynamiques = {} }) {
+export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = false, personnesDuDossier = [], onClientCreated, partiesById = {}, piecesRequises = {}, stagedPieces = {}, onStagedPieceChange, piecesBrouillon = {}, onRetirerPieceBrouillon, stagedPiecesRepr = {}, onStagedPieceReprChange, piecesBrouillonRepr = {}, onRetirerPieceBrouillonRepr, onLigneRetiree, onPersonneChangee, reprisePour, optionsDynamiques = {} }) {
     const { fields = [], min = 1, max = 10, label, clientRole } = fieldDef;
 
     /**
@@ -212,6 +213,23 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
         if (editingIndex === null) return null;
         const { idx, cible } = cibleCreation(editingIndex);
         return (cible === 'representant' ? value[idx]?.representant_client : value[idx]?.client) ?? null;
+    };
+
+    /**
+     * Ce que la ligne reprendra encore de la fiche ouverte dans le modal — signalé, sans bloquer.
+     * Même calcul que les sections scalaires (`manquantsPourFiche`), en mode « ligne de bloc ».
+     */
+    const attendusPour = (etat) => {
+        if (etat === null || !clientRole) return null;
+        const { idx, cible } = cibleCreation(etat);
+
+        return (fiche) => manquantsPourFiche({
+            champs: fields,
+            client: fiche,
+            valeurs: value[idx] ?? {},
+            prefixe: null,
+            personne: cible === 'representant' ? 'representant' : 'partie',
+        });
     };
 
     /** Rattache une fiche au représentant de CETTE ligne — miroir exact de `applyClient`. */
@@ -425,7 +443,7 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                 onUnlink={() => unlinkClient(idx)}
                                 onCreateNew={() => setCreatingForIndex(idx)}
                                 onEditClient={() => setEditingIndex(idx)}
-                                poolClients={poolClients}
+                                personnesDuDossier={personnesDuDossier}
                                 champsManquants={champsManquants(item)}
                                 saisieLibre={!!item.__saisieLibre}
                                 onToggleSaisieLibre={(v) => toggleSaisieLibre(idx, v)}
@@ -446,7 +464,7 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                                             onUnlink={() => unlinkClientRepresentant(idx)}
                                             onCreateNew={() => setCreatingForIndex({ idx, cible: 'representant' })}
                                             onEditClient={() => setEditingIndex({ idx, cible: 'representant' })}
-                                            poolClients={poolClients}
+                                            personnesDuDossier={personnesDuDossier}
                                             champsManquants={champsManquants(item, 'representant')}
                                             readOnly={readOnly}
                                         />
@@ -593,6 +611,8 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                     <ModalNouveauClient
                         open={creatingForIndex !== null}
                         onClose={() => setCreatingForIndex(null)}
+                        champsAttendus={attendusPour(creatingForIndex)}
+                        contexte={creatingForIndex !== null ? `${label} ${cibleCreation(creatingForIndex).idx + 1}` : null}
                         onCreated={(client) => {
                             // L'état porte soit un index (la personne de la ligne), soit
                             // `{ idx, cible }` (son représentant). Une seule modale pour les
@@ -609,6 +629,8 @@ export function RepeatableGroup({ fieldDef, value = [], onChange, readOnly = fal
                         open={editingIndex !== null}
                         client={ficheEnEdition()}
                         onClose={() => setEditingIndex(null)}
+                        champsAttendus={attendusPour(editingIndex)}
+                        contexte={editingIndex !== null ? `${label} ${cibleCreation(editingIndex).idx + 1}` : null}
                         onCreated={(client) => {
                             // Réapplique la fiche corrigée sur toutes les lignes qui la
                             // désignent, pas seulement celle éditée — et dans les deux rôles
