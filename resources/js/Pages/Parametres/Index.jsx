@@ -55,6 +55,10 @@ const TABS = [
     { id: 'securite',     label: 'Sécurité',           icon: ShieldCheck   },
 ];
 
+// Commune aux onglets et aux deux liens (Barèmes, Lieux) : `shrink-0` et `whitespace-nowrap`
+// empêchent un libellé de se replier quand la rangée manque de place — c'est elle qui défile.
+const ONGLET_CLASSE = 'flex shrink-0 items-center gap-2 whitespace-nowrap px-5 py-3.5 text-sm font-medium transition-colors';
+
 const CAT_BADGE_ALL = {
     societe:         'bg-emerald-50 text-emerald-700 border-emerald-200',
     vente:           'bg-blue-50 text-blue-700 border-blue-200',
@@ -1103,8 +1107,11 @@ export default function ParametresIndex({
 
                 {/* Onglets */}
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    {/* Tab bar */}
-                    <div className="border-b border-slate-200 flex">
+                    {/* Tab bar — défile horizontalement plutôt que de comprimer : à huit onglets
+                        (depuis l'ajout de « Comptes bancaires »), la rangée dépassait la carte,
+                        les libellés passaient sur deux lignes et « Lieux » était coupé par
+                        l'`overflow-hidden` de la carte, sans rien qui le signale. */}
+                    <div className="border-b border-slate-200 flex overflow-x-auto">
                         {TABS.map(({ id, label, icon: Icon }) => {
                             const active = activeTab === id;
                             return (
@@ -1112,7 +1119,7 @@ export default function ParametresIndex({
                                     key={id}
                                     onClick={() => setActiveTab(id)}
                                     className={cn(
-                                        'flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-colors relative',
+                                        ONGLET_CLASSE, 'relative',
                                         active
                                             ? 'text-seal'
                                             : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
@@ -1131,7 +1138,7 @@ export default function ParametresIndex({
                         })}
                         <button
                             onClick={() => router.visit('/parametres/baremes')}
-                            className="flex items-center gap-2 px-5 py-3.5 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+                            className={cn(ONGLET_CLASSE, 'text-slate-500 hover:text-slate-700 hover:bg-slate-50')}
                         >
                             <Scale className="h-4 w-4" />
                             Barèmes & Taux
@@ -1142,7 +1149,7 @@ export default function ParametresIndex({
                             l'étude — cet écran est leur liste de travail. */}
                         <button
                             onClick={() => router.visit('/parametres/lieux')}
-                            className="flex items-center gap-2 px-5 py-3.5 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+                            className={cn(ONGLET_CLASSE, 'text-slate-500 hover:text-slate-700 hover:bg-slate-50')}
                         >
                             <MapPin className="h-4 w-4" />
                             Lieux
