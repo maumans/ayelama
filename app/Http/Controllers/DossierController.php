@@ -1086,6 +1086,17 @@ class DossierController extends Controller
             // d'apparier, et elle est idempotente.
             $this->supprimerRepresentantsOrphelins($dossier);
 
+            // Une personne **ajoutée** par cette modale n'avait jamais la reprise d'office des
+            // pièces que sa fiche a déjà fournies ailleurs : `reprendrePiecesConnues()` n'était
+            // appelée qu'à la création du dossier. Désigner quelqu'un comme gérant après coup
+            // rouvrait donc une liste vide, alors que sa CNI était déjà au dossier pour un autre
+            // rôle — « pourquoi il me redemande les pièces de la même personne » (2026-11-27).
+            //
+            // Sûr à rejouer : seules les catégories **encore absentes** après
+            // `enregistrerPiecesPartie()` sont reprises, un fichier choisi à l'écran l'emporte,
+            // et la procuration n'est jamais reprise (`Partie::PIECES_NON_REPRENABLES`).
+            $this->reprendrePiecesConnues($dossier->fresh());
+
             // Les parties viennent d'être resynchronisées : un rôle peut désormais
             // pointer vers une autre fiche client (ou vers une fiche fraîchement
             // corrigée). On réaligne le questionnaire sur ces fiches avant de

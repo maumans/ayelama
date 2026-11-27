@@ -723,6 +723,11 @@ function ModalEditQuestionnaire({ open, onClose, dossier, societe }) {
                     donneesSoumises,
                     clientLinks,
                     stagedPieces,
+                    {},
+                    // Les Partie déjà enregistrées : sans elles, les sections scalaires
+                    // repartaient sans `partie_id` et le serveur les détruisait puis les
+                    // recréait à chaque enregistrement, pièces comprises.
+                    dossier.parties ?? [],
                 ),
                 managedRoles: getManagedClientRoles(fields),
             },

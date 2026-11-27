@@ -66,7 +66,18 @@ export function champsDepliantLaSection(fields) {
 // Construit le payload `parties` (dossiers.store / dossiers.questionnaire) à partir
 // des sections client-liables (liées à un client existant ou saisies en texte libre)
 // et des blocs répétables (associés, gérants, actionnaires…).
-export function buildPartiesPayload(questionnaire, formValues, clientLinks, stagedPieces = {}, piecesBrouillon = {}) {
+//
+// `partiesExistantes` — les `Partie` déjà enregistrées du dossier (vide à la création).
+// ⚠️ **Sans elles, enregistrer le questionnaire détruisait les personnes des sections
+// scalaires.** `DossierController::updateQuestionnaire()` resynchronise rôle par rôle et
+// apparie sur `partie_id` : un item qui n'en porte pas est *créé*, puis toute Partie du rôle
+// non référencée est supprimée par `supprimerAvecPieces()` — qui emporte ses pièces, leurs
+// versions et les fichiers sur le disque. Or `partie_id` n'était émis que par la branche des
+// **blocs répétables**. Chaque enregistrement recréait donc l'associé unique, le gérant, le
+// commissaire… et leurs justificatifs disparaissaient en silence : le dossier restait
+// cohérent, les personnes réapparaissaient, seules les pièces manquaient — et le blocage ne
+// reparle qu'en Initialisation et en Édition (retour de l'étude, 2026-11-27).
+export function buildPartiesPayload(questionnaire, formValues, clientLinks, stagedPieces = {}, piecesBrouillon = {}, partiesExistantes = []) {
     const parties = [];
     // Compteur de clés locales. Le représentant n'a pas d'identifiant au moment où le
     // représenté est envoyé : la corrélation passe par une clé propre à cette soumission, que
@@ -75,9 +86,15 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks, stag
     let n = 0;
     const cle = () => `p${++n}`;
 
+    // Une section scalaire n'a qu'une Partie par rôle — c'est l'unité que le serveur
+    // synchronise. Les blocs répétables, eux, apparient ligne par ligne sur `donnees_index`
+    // (voir attachPartieIds() dans Dossiers/Show.jsx) et portent déjà leur `partie_id`.
+    const existanteDuRole = (role) => partiesExistantes.find(p => p.role === role) ?? null;
+
     for (const group of groupFieldsBySection(questionnaire)) {
         if (!group.clientRole) continue;
         const prefix = group.fields[0].id.split('.')[0];
+        const existante = existanteDuRole(group.clientRole);
         const client = clientLinks[group.clientRole] ?? null;
         const fields = buildPartieFields(client, formValues, prefix);
         if (!fields.nom) continue;
@@ -101,6 +118,8 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks, stag
         parties.push({
             ...fields,
             cle_locale: cleRepresente,
+            // Conserver l'identité de la Partie, donc ses pièces (voir l'en-tête).
+            partie_id: existante?.id ?? undefined,
             role: group.clientRole,
             client_id: client?.id ?? undefined,
             // ⚠️ **La nature de la personne, comme la branche répétable le fait déjà** (voir
@@ -124,6 +143,10 @@ export function buildPartiesPayload(questionnaire, formValues, clientLinks, stag
             pieces_brouillon: Object.keys(itemPiecesBrouillon).length > 0 ? itemPiecesBrouillon : undefined,
             ...representationDuRepresente(formValues, prefix, cle, parties, {
                 client: clientLinks[roleRepresentant(group.clientRole)] ?? null,
+                // Même raison, pour le mandataire : `synchroniserRepresentants()` crée une
+                // nouvelle Partie quand `partie_id` manque, et le ramasse-miettes du graphe
+                // supprime ensuite l'ancienne, orpheline — avec sa procuration.
+                partieId: existante?.representation?.representant_id ?? undefined,
                 stagedPieces: stagedPieces[roleRepresentant(group.clientRole)] ?? {},
                 piecesBrouillon: piecesBrouillon[roleRepresentant(group.clientRole)] ?? {},
             }),

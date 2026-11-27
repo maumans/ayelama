@@ -1,1 +1,0 @@
-import{c as e}from"./dist-D8JTTe4t.js";var t=e(`chevron-down`,[[`path`,{d:`m6 9 6 6 6-6`,key:`qrunsl`}]]);export{t};

@@ -11,6 +11,7 @@
  *   I. Une fiche corrigée est reprojetée **partout** où le formulaire la cite (reappliquerFiche).
  *   J. Une fiche complète ne se voit rien réclamer par le modal (manquantsPourFiche).
  *   K. Les cases qui déplient une section sont toutes reconnues (champsDepliantLaSection).
+ *   L. Le payload porte le `partie_id` des sections scalaires (sinon le serveur les recrée).
  *
  * **Le défaut que ce contrôle attrape.** `groupFieldsBySection()` ouvre une carte au **premier**
  * champ portant `section`. Un champ déclaré avant ce marqueur tombe donc dans la carte
@@ -72,6 +73,7 @@ const urlParties = copier('resources/js/lib/partiesPayload.js');
 
 const { QUESTIONNAIRES, getVisibleFields } = await import(urlQuestionnaires);
 const { groupFieldsBySection, champsDepliantLaSection, buildPartiesPayload, rolesARattacherDoffice,
+        ROLE_REPRESENTANT,
         lignesDeRepartitionDepuisRegistre, repartitionEstVierge,
         optionsDynamiques, SOURCES_OPTIONS_DYNAMIQUES,
         reappliquerFiche, remplacerFicheDansLiens, manquantsPourFiche,
@@ -749,3 +751,95 @@ if (malReconnues.length > 0) {
 }
 
 console.log(`K. ${casesK} case(s) dépliant une section — toutes reconnues, aucune en trop.`);
+
+// ── L. Une section scalaire doit emporter son `partie_id` ─────────────────────────────
+//
+// `DossierController::updateQuestionnaire()` resynchronise les Partie rôle par rôle et apparie
+// sur `partie_id`. Un item qui n'en porte pas est **créé** ; toute Partie du rôle non référencée
+// est ensuite supprimée par `supprimerAvecPieces()`, qui emporte ses justificatifs, leurs
+// versions et les fichiers sur le disque.
+//
+// `buildPartiesPayload()` ne l'émettait que pour les blocs répétables. Chaque enregistrement du
+// questionnaire détruisait donc l'associé unique, le gérant, le commissaire… et leurs pièces —
+// sans une erreur, sans une ligne de journal : les personnes réapparaissaient identiques, seules
+// les pièces manquaient, et le contrôle ne reparle qu'en Initialisation et en Édition. Signalé
+// par l'étude le 2026-11-27, après un aller-retour en certification.
+//
+// Le contrôle **construit le payload** plutôt que de relire le code : c'est le seul moyen de voir
+// ce qui partira réellement au serveur.
+
+const sansId = [];
+let sectionsL = 0;
+
+for (const [nom, champs] of Object.entries(QUESTIONNAIRES)) {
+    const scalaires = groupFieldsBySection(champs)
+        .filter(g => g.clientRole && g.fields[0].type !== 'repeatable');
+    if (scalaires.length === 0) continue;
+
+    const fiche   = { ...ficheTest('physique'), id: 7 };
+    const liens   = {};
+    let valeurs   = {};
+    const attendu = new Map();
+    const attenduRepr = new Map();
+    const existantes = [];
+
+    scalaires.forEach((groupe, i) => {
+        const prefixe = groupe.fields[0].id.split('.')[0];
+        const ids     = groupe.fields.map(f => f.id);
+
+        liens[groupe.clientRole] = fiche;
+        liens[roleRepresentant(groupe.clientRole)] = fiche;
+        valeurs = {
+            ...valeurs,
+            ...mapClientToPrefixedFields(fiche, prefixe, ids),
+            ...mapClientToPrefixedFields(fiche, prefixe, ids, 'repr_'),
+            // La personne se fait représenter : sans cela le mandataire n'est pas émis, et la
+            // moitié du contrôle ne vérifierait rien.
+            [`${prefixe}.est_represente`]: true,
+        };
+
+        const idPartie = 1000 + i;
+        const idRepr   = 2000 + i;
+        existantes.push({
+            id: idPartie,
+            role: groupe.clientRole,
+            representation: { representant_id: idRepr },
+        });
+        attendu.set(groupe.clientRole, idPartie);
+        attenduRepr.set(groupe.clientRole, idRepr);
+        sectionsL += 2;
+    });
+
+    const payload = buildPartiesPayload(champs, valeurs, liens, {}, {}, existantes);
+
+    for (const [role, idPartie] of attendu) {
+        const emise = payload.find(p => p.role === role);
+        if (!emise) {
+            sansId.push(`  ${nom} → rôle ${role} : aucune partie émise (le nom manque ?)`);
+            continue;
+        }
+        if (emise.partie_id !== idPartie) {
+            sansId.push(`  ${nom} → rôle ${role} : partie_id = ${JSON.stringify(emise.partie_id)} au lieu de ${idPartie}`);
+        }
+    }
+
+    // Les mandataires partagent un seul rôle : on vérifie l'ensemble des ids émis.
+    const idsReprEmis = payload.filter(p => p.role === ROLE_REPRESENTANT).map(p => p.partie_id);
+    for (const [role, idRepr] of attenduRepr) {
+        if (!idsReprEmis.includes(idRepr)) {
+            sansId.push(`  ${nom} → représentant de ${role} : partie_id ${idRepr} absent (émis : ${JSON.stringify(idsReprEmis)})`);
+        }
+    }
+}
+
+if (sansId.length > 0) {
+    console.error(
+        `\n${sansId.length} personne(s) partiraient sans leur partie_id :\n\n` +
+        `${sansId.slice(0, 30).join('\n')}\n\n` +
+        `Le serveur les recréerait, et supprimerait les anciennes **avec leurs pièces**.\n` +
+        `Voir buildPartiesPayload() (lib/partiesPayload.js) et son appel dans Dossiers/Show.jsx.`,
+    );
+    process.exit(1);
+}
+
+console.log(`L. ${sectionsL} personne(s) de section scalaire — toutes emportent leur partie_id.`);
